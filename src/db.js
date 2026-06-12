@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority      TEXT    NOT NULL DEFAULT 'MEDIUM', -- LOW | MEDIUM | HIGH
   status        TEXT    NOT NULL DEFAULT 'TODO',   -- TODO | IN_PROGRESS | DONE
   due_date      TEXT    DEFAULT '',
+  client_id     INTEGER,                -- optional: which client this is for
+  recurring_id  INTEGER,                -- set if auto-generated from a schedule
   created_ts    INTEGER NOT NULL,
   updated_ts    INTEGER NOT NULL,
   FOREIGN KEY (assignee_id) REFERENCES users(id),
@@ -86,6 +88,47 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
+
+-- The firm's client list — a permanent client database.
+CREATE TABLE IF NOT EXISTS clients (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT    NOT NULL,
+  code       TEXT    DEFAULT '',        -- short code / acronym
+  notes      TEXT    DEFAULT '',
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_ts INTEGER NOT NULL
+);
+
+-- Recurring task templates (e.g. "Monthly bookkeeping for Client X").
+-- A generator turns these into real tasks each period.
+CREATE TABLE IF NOT EXISTS recurring_tasks (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  title        TEXT    NOT NULL,
+  description  TEXT    DEFAULT '',
+  client_id    INTEGER,
+  assignee_id  INTEGER NOT NULL,
+  priority     TEXT    NOT NULL DEFAULT 'MEDIUM',
+  frequency    TEXT    NOT NULL DEFAULT 'MONTHLY', -- WEEKLY | MONTHLY | QUARTERLY | YEARLY
+  step         INTEGER NOT NULL DEFAULT 1,         -- every N periods
+  lead_days    INTEGER NOT NULL DEFAULT 7,         -- create the task this many days before due
+  next_due     TEXT    NOT NULL,                   -- yyyy-LL-dd of the next instance to create
+  active       INTEGER NOT NULL DEFAULT 1,
+  created_by   INTEGER NOT NULL,
+  created_ts   INTEGER NOT NULL,
+  last_run_ts  INTEGER,
+  FOREIGN KEY (assignee_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_active ON recurring_tasks(active);
 `);
+
+// --- Lightweight migrations for databases created before these columns existed.
+for (const stmt of [
+  `ALTER TABLE tasks ADD COLUMN client_id INTEGER`,
+  `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
+]) {
+  try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
+}
+// Index on the (possibly just-added) client_id column.
+db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`);
 
 module.exports = { db, DB_PATH };

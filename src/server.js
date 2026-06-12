@@ -6,6 +6,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
+const { startRecurringScheduler } = require('./recurring');
 
 bootstrapAdmin(); // create first admin on a fresh database
 
@@ -21,6 +22,8 @@ app.use('/api/leaves', require('./routes/leaves'));
 app.use('/api/holidays', require('./routes/holidays'));
 app.use('/api/users', require('./routes/directory'));
 app.use('/api/tasks', require('./routes/tasks'));
+app.use('/api/clients', require('./routes/clients'));
+app.use('/api/recurring', require('./routes/recurring'));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
@@ -36,4 +39,5 @@ app.get('*', (req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`WeLitNexus portal running on http://localhost:${PORT}`);
+  startRecurringScheduler(); // generate recurring tasks on boot + every 6h
 });
