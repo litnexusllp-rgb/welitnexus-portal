@@ -1,0 +1,100 @@
+'use strict';
+
+const express = require('express');
+const { db } = require('../db');
+const { requireAuth, requireAdmin } = require('../auth');
+const { now } = require('../time');
+
+const router = express.Router();
+
+const insertTask = db.prepare(
+  `INSERT INTO tasks (title, description, assignee_id, assigned_by, priority, status, due_date, created_ts, updated_ts)
+   VALUES (@title, @description, @assignee_id, @assigned_by, @priority, 'TODO', @due_date, @ts, @ts)`
+);
+const getTask = db.prepare(
+  `SELECT t.*, a.name AS assignee_name, b.name AS assigner_name
+   FROM tasks t JOIN users a ON a.id = t.assignee_id JOIN users b ON b.id = t.assigned_by
+   WHERE t.id = ?`
+);
+const tasksForUser = db.prepare(
+  `SELECT t.*, a.name AS assignee_name, b.name AS assigner_name
+   FROM tasks t JOIN users a ON a.id = t.assignee_id JOIN users b ON b.id = t.assigned_by
+   WHERE t.assignee_id = ? ORDER BY
+     CASE t.status WHEN 'TODO' THEN 0 WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END,
+     (t.due_date = '') ASC, t.due_date ASC, t.created_ts DESC`
+);
+const allTasks = db.prepare(
+  `SELECT t.*, a.name AS assignee_name, b.name AS assigner_name
+   FROM tasks t JOIN users a ON a.id = t.assignee_id JOIN users b ON b.id = t.assigned_by
+   ORDER BY t.updated_ts DESC LIMIT 300`
+);
+const setStatus = db.prepare(`UPDATE tasks SET status = ?, updated_ts = ? WHERE id = ?`);
+const updateTask = db.prepare(
+  `UPDATE tasks SET title=@title, description=@description, assignee_id=@assignee_id,
+   priority=@priority, due_date=@due_date, updated_ts=@ts WHERE id=@id`
+);
+const deleteTask = db.prepare(`DELETE FROM tasks WHERE id = ?`);
+
+const PRI = ['LOW', 'MEDIUM', 'HIGH'];
+const STATUS = ['TODO', 'IN_PROGRESS', 'DONE'];
+
+// ADMIN: assign a task.
+router.post('/', requireAdmin, (req, res) => {
+  const title = String(req.body.title || '').trim();
+  const assignee_id = Number(req.body.assignee_id);
+  if (!title || !assignee_id) return res.status(400).json({ error: 'Title and assignee are required' });
+  const priority = PRI.includes(String(req.body.priority || '').toUpperCase()) ? String(req.body.priority).toUpperCase() : 'MEDIUM';
+  const info = insertTask.run({
+    title,
+    description: String(req.body.description || '').slice(0, 2000),
+    assignee_id,
+    assigned_by: req.user.id,
+    priority,
+    due_date: String(req.body.due_date || ''),
+    ts: now().toMillis(),
+  });
+  res.json({ task: getTask.get(info.lastInsertRowid) });
+});
+
+// My tasks.
+router.get('/mine', requireAuth, (req, res) => res.json({ tasks: tasksForUser.all(req.user.id) }));
+
+// ADMIN: every task.
+router.get('/all', requireAdmin, (_req, res) => res.json({ tasks: allTasks.all() }));
+
+// Assignee (or admin) updates status.
+router.post('/:id/status', requireAuth, (req, res) => {
+  const status = String(req.body.status || '').toUpperCase();
+  if (!STATUS.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  const task = getTask.get(Number(req.params.id));
+  if (!task) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your task' });
+  }
+  setStatus.run(status, now().toMillis(), task.id);
+  res.json({ task: getTask.get(task.id) });
+});
+
+// ADMIN: edit task.
+router.put('/:id', requireAdmin, (req, res) => {
+  const task = getTask.get(Number(req.params.id));
+  if (!task) return res.status(404).json({ error: 'Not found' });
+  updateTask.run({
+    id: task.id,
+    title: String(req.body.title ?? task.title),
+    description: String(req.body.description ?? task.description),
+    assignee_id: Number(req.body.assignee_id ?? task.assignee_id),
+    priority: PRI.includes(String(req.body.priority || '').toUpperCase()) ? String(req.body.priority).toUpperCase() : task.priority,
+    due_date: String(req.body.due_date ?? task.due_date),
+    ts: now().toMillis(),
+  });
+  res.json({ task: getTask.get(task.id) });
+});
+
+// ADMIN: delete task.
+router.delete('/:id', requireAdmin, (req, res) => {
+  deleteTask.run(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+module.exports = router;

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WeLitNexus Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/portal.css" />
+</head>
+<body>
+  <!-- ================= LOGIN ================= -->
+  <div class="login-wrap" id="loginWrap">
+    <form class="login-card" id="loginForm">
+      <div class="brand">WeLit<span>Nexus</span></div>
+      <div class="sub">Employee Portal — sign in to continue</div>
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="username" required />
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" required />
+      <div class="err" id="loginErr"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Sign in</button>
+    </form>
+  </div>
+
+  <!-- ================= APP SHELL ================= -->
+  <div class="app" id="app">
+    <aside class="sidebar">
+      <div class="brand">WeLit<span>Nexus</span></div>
+      <nav id="nav">
+        <button class="nav-item active" data-view="dashboard"><span class="ico">🏠</span> Dashboard</button>
+        <button class="nav-item" data-view="clock"><span class="ico">⏱️</span> Clock</button>
+        <button class="nav-item" data-view="leaves"><span class="ico">🌴</span> Leaves</button>
+        <button class="nav-item" data-view="tasks"><span class="ico">✅</span> Tasks</button>
+        <button class="nav-item" data-view="calendar"><span class="ico">📅</span> Holidays</button>
+        <button class="nav-item" data-view="directory"><span class="ico">👥</span> Directory</button>
+        <button class="nav-item admin-only" data-view="admin"><span class="ico">⚙️</span> Admin</button>
+      </nav>
+      <div class="spacer"></div>
+      <div class="me">
+        <div class="nm" id="meName">—</div>
+        <div class="rl" id="meRole">—</div>
+      </div>
+      <button class="logout" id="logoutBtn">Sign out</button>
+    </aside>
+
+    <main class="main" id="main"><!-- views injected by app.js --></main>
+  </div>
+
+  <!-- Modal + toast containers -->
+  <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
