@@ -34,7 +34,9 @@ function clean(body, existing) {
   return {
     title: String(body.title ?? existing?.title ?? '').trim(),
     description: String(body.description ?? existing?.description ?? '').slice(0, 2000),
-    client_id: body.client_id ? Number(body.client_id) : (existing?.client_id ?? null),
+    client_id: body.client_id === undefined
+      ? (existing?.client_id ?? null)
+      : (body.client_id ? Number(body.client_id) : null),
     assignee_id: Number(body.assignee_id ?? existing?.assignee_id),
     priority: PRI.includes(String(body.priority || '').toUpperCase()) ? String(body.priority).toUpperCase() : (existing?.priority || 'MEDIUM'),
     frequency: FREQ.includes(String(body.frequency || '').toUpperCase()) ? String(body.frequency).toUpperCase() : (existing?.frequency || 'MONTHLY'),

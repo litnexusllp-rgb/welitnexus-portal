@@ -477,6 +477,136 @@
     });
   }
 
+  // ---------- Achievements ----------
+  const thisMonthISO = () => todayISO().slice(0, 7);
+
+  VIEWS.achievements = async () => {
+    setMain('Achievements', 'Log your wins — daily, weekly, or monthly. Acknowledged achievements earn points that count toward bonuses.',
+      `<div class="toolbar"><h2 style="margin:0;color:var(--navy);">My achievements</h2>
+         <button class="btn btn-primary" id="logAchBtn">+ Log achievement</button></div>
+       <div id="myAch"></div>
+       <div class="admin-only section" style="margin-top:30px;">
+         <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Review (admin)</h2>
+           <input type="month" id="achMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></div>
+         <div id="reviewAch"></div>
+       </div>`);
+    $('#logAchBtn').addEventListener('click', openAchievementModal);
+    loadMyAchievements();
+    if (isAdmin()) {
+      $('#achMonth').addEventListener('change', loadReviewAchievements);
+      loadReviewAchievements();
+    }
+  };
+
+  async function loadMyAchievements() {
+    try {
+      const { achievements } = await api.get('/achievements/mine');
+      const el = $('#myAch'); if (!el) return;
+      el.innerHTML = achievements.length ? `<table><thead><tr><th>Date</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
+        ${achievements.map((a) => `<tr><td>${esc(a.date)}</td>
+          <td><strong>${esc(a.title)}</strong>${a.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(a.description)}</div>` : ''}</td>
+          <td>${badge(a.status)}</td><td>${a.status === 'ACKNOWLEDGED' ? `<strong>${a.points}</strong>` : '—'}</td>
+          <td>${a.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-del-ach="${a.id}">Delete</button>` : ''}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">Nothing logged yet. Hit a milestone? Log it!</div>`;
+      el.querySelectorAll('[data-del-ach]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api.del(`/achievements/${b.dataset.delAch}`); toast('Deleted'); loadMyAchievements(); } catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function openAchievementModal() {
+    modal(`<h3>Log achievement</h3>
+      <div class="form-row"><div class="field"><label>Date</label><input type="date" id="aDate" value="${todayISO()}"></div><div class="field"></div></div>
+      <div class="form-row one"><div class="field"><label>What did you achieve?</label><input id="aTitle" placeholder="e.g. Closed Teshera June books 3 days early"></div></div>
+      <div class="form-row one"><div class="field"><label>Details (optional)</label><textarea id="aDesc" placeholder="Context, numbers, links…"></textarea></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Log it</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      try {
+        await api.post('/achievements', { date: $('#aDate').value, title: $('#aTitle').value, description: $('#aDesc').value });
+        closeModal(); toast('Logged ✓'); loadMyAchievements();
+        if (isAdmin() && $('#achMonth')) loadReviewAchievements();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
+  async function loadReviewAchievements() {
+    try {
+      const m = $('#achMonth').value || thisMonthISO();
+      const { achievements } = await api.get(`/achievements/month/${m}`);
+      const el = $('#reviewAch'); if (!el) return;
+      el.innerHTML = achievements.length ? `<table><thead><tr><th>Date</th><th>Employee</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
+        ${achievements.map((a) => `<tr><td>${esc(a.date)}</td><td>${esc(a.name)}</td>
+          <td><strong>${esc(a.title)}</strong>${a.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(a.description)}</div>` : ''}</td>
+          <td>${badge(a.status)}</td>
+          <td>${a.status === 'PENDING'
+            ? `<input type="number" min="0" max="100" value="5" data-pts="${a.id}" style="width:64px;padding:6px;border:1px solid var(--line);border-radius:6px;">`
+            : (a.status === 'ACKNOWLEDGED' ? `<strong>${a.points}</strong>` : '—')}</td>
+          <td class="row-actions">${a.status === 'PENDING'
+            ? `<button class="btn btn-primary btn-sm" data-ack="${a.id}">Award</button><button class="btn btn-danger btn-sm" data-decline="${a.id}">Decline</button>`
+            : ''}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">No achievements logged in this month.</div>`;
+      el.querySelectorAll('[data-ack]').forEach((b) => b.addEventListener('click', async () => {
+        const pts = Number(el.querySelector(`[data-pts="${b.dataset.ack}"]`)?.value || 0);
+        try { await api.post(`/achievements/${b.dataset.ack}/review`, { status: 'ACKNOWLEDGED', points: pts }); toast(`Awarded ${pts} pts ✓`); loadReviewAchievements(); }
+        catch (e) { toast(e.message, true); }
+      }));
+      el.querySelectorAll('[data-decline]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api.post(`/achievements/${b.dataset.decline}/review`, { status: 'DECLINED' }); toast('Declined'); loadReviewAchievements(); }
+        catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- KPIs (admin) ----------
+  VIEWS.kpi = async () => {
+    if (!isAdmin()) return navigate('dashboard');
+    setMain('Monthly KPIs', 'Attendance, output, and achievement points per employee — your bonus worksheet.',
+      `<div class="toolbar">
+         <input type="month" id="kpiMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;">
+         <button class="btn btn-ghost" id="kpiCsvBtn">Export CSV</button></div>
+       <div id="kpiTable"></div>
+       <p class="page-sub" style="margin-top:14px;">On-time % = tasks finished by their due date. Points come from acknowledged achievements (review them on the Achievements page). Hours exclude breaks; days a person forgot to clock out count only the recorded time.</p>`);
+    $('#kpiMonth').addEventListener('change', loadKpi);
+    $('#kpiCsvBtn').addEventListener('click', exportKpiCsv);
+    loadKpi();
+  };
+
+  let KPI_ROWS = [];
+  async function loadKpi() {
+    try {
+      const m = $('#kpiMonth').value || thisMonthISO();
+      const { rows } = await api.get(`/kpi?month=${m}`);
+      KPI_ROWS = rows;
+      const el = $('#kpiTable'); if (!el) return;
+      el.innerHTML = rows.length ? `<table><thead><tr>
+          <th>Employee</th><th>Days</th><th>Hours</th><th>Tasks done</th><th>On-time</th><th>Open now</th><th>Leave days</th><th>Achievements</th><th>Points</th>
+        </tr></thead><tbody>
+        ${rows.map((r) => `<tr><td><strong>${esc(r.name)}</strong><div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
+          <td>${r.daysPresent}</td><td>${r.hoursWorked}</td><td>${r.tasksDone}</td>
+          <td>${r.onTimePct === null ? '—' : r.onTimePct + '%'}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
+          <td>${r.achievementsAcknowledged}${r.achievementsPending ? ` <span class="badge b-pending" title="awaiting review">+${r.achievementsPending}</span>` : ''}</td>
+          <td><strong>${r.points}</strong></td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">No active employees.</div>`;
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function exportKpiCsv() {
+    if (!KPI_ROWS.length) return toast('Nothing to export', true);
+    const m = $('#kpiMonth').value || thisMonthISO();
+    const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Tasks Done', 'On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points'];
+    const lines = [head.join(',')].concat(KPI_ROWS.map((r) => [
+      `"${r.name.replace(/"/g, '""')}"`, `"${(r.department || '').replace(/"/g, '""')}"`,
+      r.daysPresent, r.hoursWorked, r.tasksDone, r.onTimePct === null ? '' : r.onTimePct,
+      r.openTasks, r.leaveDays, r.achievementsAcknowledged, r.achievementsPending, r.points,
+    ].join(',')));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.download = `kpi-${m}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   // ---------- Calendar / Holidays ----------
   let calMonth = new Date().getMonth(), calYear = new Date().getFullYear();
   VIEWS.calendar = async () => {

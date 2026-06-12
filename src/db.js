@@ -119,6 +119,24 @@ CREATE TABLE IF NOT EXISTS recurring_tasks (
   FOREIGN KEY (assignee_id) REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_active ON recurring_tasks(active);
+
+-- Self-reported wins. Employees log achievements (daily/weekly/monthly);
+-- admins review and award points, which feed the monthly KPI/bonus report.
+CREATE TABLE IF NOT EXISTS achievements (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL,
+  date        TEXT    NOT NULL,            -- yyyy-LL-dd the achievement is for
+  title       TEXT    NOT NULL,
+  description TEXT    DEFAULT '',
+  status      TEXT    NOT NULL DEFAULT 'PENDING', -- PENDING | ACKNOWLEDGED | DECLINED
+  points      INTEGER NOT NULL DEFAULT 0,         -- awarded by admin on review
+  reviewed_by INTEGER,
+  reviewed_ts INTEGER,
+  created_ts  INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_achievements_user ON achievements(user_id);
+CREATE INDEX IF NOT EXISTS idx_achievements_date ON achievements(date);
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.

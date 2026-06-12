@@ -55,6 +55,11 @@ router.post('/', requireAdmin, (req, res) => {
 router.put('/:id', requireAdmin, (req, res) => {
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  const newEmail = String(req.body.email ?? existing.email).toLowerCase();
+  const emailOwner = findByEmail.get(newEmail);
+  if (emailOwner && emailOwner.id !== existing.id) {
+    return res.status(409).json({ error: 'Email already in use by another employee' });
+  }
   updateUser.run({
     id: existing.id,
     name: String(req.body.name ?? existing.name),

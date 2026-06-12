@@ -29,8 +29,9 @@ const getUser = db.prepare(`SELECT * FROM users WHERE id = ?`);
 // Apply for leave.
 router.post('/', requireAuth, (req, res) => {
   const start = String(req.body.start_date || '');
-  const end = String(req.body.end_date || start);
   const kind = String(req.body.kind || 'FULL').toUpperCase() === 'HALF' ? 'HALF' : 'FULL';
+  // A half day is by definition a single date — ignore any range for HALF.
+  const end = kind === 'HALF' ? start : String(req.body.end_date || start);
   const reason = String(req.body.reason || '').slice(0, 500);
   const span = inclusiveDays(start, end);
   if (!span) return res.status(400).json({ error: 'Invalid date range' });
