@@ -655,14 +655,66 @@
         ${statCard('Present', t.present, 'value small')}${statCard('Leave', t.leave, 'value small')}
         ${statCard('Absent', t.absent, 'value small')}${statCard('Holidays', t.holiday, 'value small')}
         ${statCard('Hours worked', fmtMins(t.workedMinutes), 'value small')}</div>`;
-      $('#repTable').innerHTML = `<table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th></tr></thead><tbody>
+      $('#repTable').innerHTML = `<table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
         ${data.rows.map((r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
           <td>${badge(r.status)}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
           <td>${r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
           <td>${r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-          <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td></tr>`).join('')}
+          <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td>
+          <td>${r.status === 'FUTURE' ? '' : `<button class="btn btn-ghost btn-sm" data-fix-day="${r.day}">Fix</button>`}</td></tr>`).join('')}
       </tbody></table>`;
+      $('#repTable').querySelectorAll('[data-fix-day]').forEach((b) =>
+        b.addEventListener('click', () => openAttendanceEditor(data.user.id, b.dataset.fixDay)));
     } catch (e) { toast(e.message, true); }
+  }
+
+  // Admin modal to add/edit/delete an employee's punches for one day.
+  async function openAttendanceEditor(userId, day) {
+    modal(`<h3>Fix attendance</h3><div id="fixBody">Loading…</div>`);
+    renderAttendanceEditor(userId, day);
+  }
+
+  async function renderAttendanceEditor(userId, day) {
+    let data;
+    try { data = await api.get(`/attendance/admin/day?user_id=${userId}&day=${day}`); }
+    catch (e) { return toast(e.message, true); }
+    const typeOpts = (sel) => ['IN', 'OUT', 'BREAK_START', 'BREAK_END']
+      .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`).join('');
+    const body = $('#fixBody'); if (!body) return;
+    body.innerHTML = `
+      <p style="color:var(--slate);margin:0 0 14px;"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · Worked ${fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
+      ${data.events.length ? `<table style="margin-bottom:14px;"><thead><tr><th>Punch</th><th>Time</th><th></th></tr></thead><tbody>
+        ${data.events.map((e) => `<tr>
+          <td><select data-etype="${e.id}">${typeOpts(e.type)}</select></td>
+          <td><input type="time" data-etime="${e.id}" value="${esc(e.time)}" style="padding:6px;border:1px solid var(--line);border-radius:6px;"></td>
+          <td class="row-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}">✕</button></td>
+        </tr>`).join('')}
+      </tbody></table>` : `<div class="empty" style="margin-bottom:14px;">No punches recorded for this day.</div>`}
+      <div class="field" style="margin-bottom:6px;"><label>Add a punch</label></div>
+      <div class="form-row" style="margin-bottom:0;">
+        <div class="field"><select id="newType">${typeOpts('IN')}</select></div>
+        <div class="field" style="display:flex;gap:8px;"><input type="time" id="newTime" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;"><button class="btn btn-navy btn-sm" id="addPunch">Add</button></div>
+      </div>
+      <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
+
+    body.querySelectorAll('[data-esave]').forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.esave;
+      try {
+        await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
+        toast('Saved ✓'); renderAttendanceEditor(userId, day);
+      } catch (e) { toast(e.message, true); }
+    }));
+    body.querySelectorAll('[data-edel]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day); }
+      catch (e) { toast(e.message, true); }
+    }));
+    $('#addPunch').addEventListener('click', async () => {
+      const time = $('#newTime').value;
+      if (!time) return toast('Pick a time', true);
+      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time }); toast('Added ✓'); renderAttendanceEditor(userId, day); }
+      catch (e) { toast(e.message, true); }
+    });
+    $('#fixDone').addEventListener('click', () => { closeModal(); loadEmpReport(); loadRegister(); });
   }
 
   function exportEmpCsv() {

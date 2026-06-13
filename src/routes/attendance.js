@@ -3,7 +3,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
-const { now, todayStr } = require('../time');
+const { now, todayStr, DateTime, ZONE } = require('../time');
 const { summarize, VALID } = require('../compute');
 
 const router = express.Router();
@@ -78,6 +78,76 @@ router.get('/today', requireAdmin, (req, res) => {
     return { id: u.id, name: u.name, department: u.department, title: u.title, state: events.length ? s.state : 'OFF', workedMinutes: s.workedMinutes, firstIn: s.firstIn };
   });
   res.json({ day, people });
+});
+
+// ===================================================================
+//  ADMIN attendance correction — fix mistakes in an employee's punches
+// ===================================================================
+const EVENT_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
+const getEvent = db.prepare(`SELECT * FROM events WHERE id = ?`);
+const updateEvent = db.prepare(`UPDATE events SET type = ?, ts = ?, note = ? WHERE id = ?`);
+const deleteEvent = db.prepare(`DELETE FROM events WHERE id = ?`);
+const getUserName = db.prepare(`SELECT id, name FROM users WHERE id = ?`);
+
+// Combine a yyyy-LL-dd day and HH:mm time into an epoch ms in the office zone.
+function toTs(day, time) {
+  const dt = DateTime.fromFormat(`${day} ${time}`, 'yyyy-LL-dd HH:mm', { zone: ZONE });
+  return dt.isValid ? dt.toMillis() : null;
+}
+
+// Attach a HH:mm office-zone time string to each event (so the admin UI shows
+// and edits times in office time, not the admin's browser timezone).
+function withTimes(events) {
+  return events.map((e) => ({ ...e, time: DateTime.fromMillis(e.ts).setZone(ZONE).toFormat('HH:mm') }));
+}
+
+// GET one employee's punches for a day (admin view for editing).
+router.get('/admin/day', requireAdmin, (req, res) => {
+  const user = getUserName.get(Number(req.query.user_id));
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  const day = String(req.query.day || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day (yyyy-mm-dd) required' });
+  const events = eventsForUserDay.all(user.id, day);
+  const summary = summarize(events, day === todayStr() ? now().toMillis() : null);
+  res.json({ user, day, events: withTimes(events), ...summary });
+});
+
+// ADMIN: add a punch for an employee.
+router.post('/admin/event', requireAdmin, (req, res) => {
+  const user = getUserName.get(Number(req.body.user_id));
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  const day = String(req.body.day || '');
+  const type = String(req.body.type || '').toUpperCase();
+  const time = String(req.body.time || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day required' });
+  if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
+  const ts = toTs(day, time);
+  if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
+  insertEvent.run(user.id, type, ts, day, `edited by ${req.user.name}`);
+  const events = eventsForUserDay.all(user.id, day);
+  res.json({ user, day, events: withTimes(events), ...summarize(events, day === todayStr() ? now().toMillis() : null) });
+});
+
+// ADMIN: edit a punch's type/time.
+router.put('/admin/event/:id', requireAdmin, (req, res) => {
+  const ev = getEvent.get(Number(req.params.id));
+  if (!ev) return res.status(404).json({ error: 'Punch not found' });
+  const type = req.body.type ? String(req.body.type).toUpperCase() : ev.type;
+  if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
+  const ts = req.body.time ? toTs(ev.day, String(req.body.time)) : ev.ts;
+  if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
+  updateEvent.run(type, ts, `edited by ${req.user.name}`, ev.id);
+  const events = eventsForUserDay.all(ev.user_id, ev.day);
+  res.json({ day: ev.day, events: withTimes(events), ...summarize(events, ev.day === todayStr() ? now().toMillis() : null) });
+});
+
+// ADMIN: delete a punch.
+router.delete('/admin/event/:id', requireAdmin, (req, res) => {
+  const ev = getEvent.get(Number(req.params.id));
+  if (!ev) return res.status(404).json({ error: 'Punch not found' });
+  deleteEvent.run(ev.id);
+  const events = eventsForUserDay.all(ev.user_id, ev.day);
+  res.json({ day: ev.day, events: withTimes(events), ...summarize(events, ev.day === todayStr() ? now().toMillis() : null) });
 });
 
 module.exports = router;
