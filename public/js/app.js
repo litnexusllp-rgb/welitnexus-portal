@@ -607,6 +607,122 @@
     URL.revokeObjectURL(a.href);
   }
 
+  // ---------- Reports (admin) ----------
+  const STATUS_CODE = { PRESENT: 'P', ABSENT: 'A', LEAVE: 'L', HALF: '½', HOLIDAY: 'H', WEEKEND: 'W', FUTURE: '·' };
+  const startOfMonthISO = () => todayISO().slice(0, 8) + '01';
+
+  VIEWS.reports = async () => {
+    if (!isAdmin()) return navigate('dashboard');
+    await loadLookups();
+    setMain('Reports', 'Attendance reports for the team. Pick a person and dates, or view the whole-month register.',
+      `<div class="section">
+         <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Attendance — by employee</h2>
+           <button class="btn btn-ghost btn-sm" id="empCsvBtn">Export CSV</button></div>
+         <div class="form-row" style="max-width:680px;">
+           <div class="field"><label>Employee</label><select id="repUser">${userOptions(USERS[0] && USERS[0].id)}</select></div>
+           <div class="field"><label>From</label><input type="date" id="repStart" value="${startOfMonthISO()}"></div>
+         </div>
+         <div class="form-row" style="max-width:680px;">
+           <div class="field"><label>To</label><input type="date" id="repEnd" value="${todayISO()}"></div>
+           <div class="field" style="display:flex;align-items:flex-end;"><button class="btn btn-primary" id="repRun" style="width:100%;">Run report</button></div>
+         </div>
+         <div id="repTotals" style="margin:14px 0;"></div>
+         <div id="repTable"></div>
+       </div>
+       <div class="section" style="margin-top:34px;">
+         <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Monthly attendance register</h2>
+           <div class="row-actions"><input type="month" id="regMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;">
+             <button class="btn btn-ghost btn-sm" id="regCsvBtn">Export CSV</button></div></div>
+         <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half day · H = holiday · W = weekend · A = absent · · = upcoming</p>
+         <div id="regGrid" style="overflow-x:auto;"></div>
+       </div>`);
+    $('#repRun').addEventListener('click', loadEmpReport);
+    $('#empCsvBtn').addEventListener('click', exportEmpCsv);
+    $('#regMonth').addEventListener('change', loadRegister);
+    $('#regCsvBtn').addEventListener('click', exportRegisterCsv);
+    loadEmpReport();
+    loadRegister();
+  };
+
+  let EMP_REPORT = null;
+  async function loadEmpReport() {
+    try {
+      const uid = $('#repUser').value, start = $('#repStart').value, end = $('#repEnd').value;
+      const data = await api.get(`/reports/attendance?user_id=${uid}&start=${start}&end=${end}`);
+      EMP_REPORT = data;
+      const t = data.totals;
+      $('#repTotals').innerHTML = `<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));">
+        ${statCard('Present', t.present, 'value small')}${statCard('Leave', t.leave, 'value small')}
+        ${statCard('Absent', t.absent, 'value small')}${statCard('Holidays', t.holiday, 'value small')}
+        ${statCard('Hours worked', fmtMins(t.workedMinutes), 'value small')}</div>`;
+      $('#repTable').innerHTML = `<table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th></tr></thead><tbody>
+        ${data.rows.map((r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
+          <td>${badge(r.status)}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
+          <td>${r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+          <td>${r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+          <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td></tr>`).join('')}
+      </tbody></table>`;
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function exportEmpCsv() {
+    if (!EMP_REPORT) return toast('Run a report first', true);
+    const head = ['Date', 'Day', 'Status', 'First In', 'Last Out', 'Worked (min)', 'Break (min)'];
+    const lines = [head.join(',')].concat(EMP_REPORT.rows.map((r) => [
+      r.day, r.weekday, r.status,
+      r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      r.workedMinutes, r.breakMinutes,
+    ].join(',')));
+    downloadCsv(lines.join('\n'), `attendance-${EMP_REPORT.user.name.replace(/\s+/g, '_')}-${EMP_REPORT.start}_to_${EMP_REPORT.end}.csv`);
+  }
+
+  let REGISTER = null;
+  async function loadRegister() {
+    try {
+      const month = $('#regMonth').value || thisMonthISO();
+      const data = await api.get(`/reports/register?month=${month}`);
+      REGISTER = data;
+      const dayNums = data.days.map((d) => d.slice(8));
+      $('#regGrid').innerHTML = `<table style="min-width:max-content;"><thead><tr>
+          <th style="position:sticky;left:0;background:var(--mist);">Employee</th>
+          ${data.days.map((d) => { const wd = new Date(d + 'T00:00').getDay(); return `<th style="text-align:center;padding:8px 6px;${wd === 0 || wd === 6 ? 'color:#b6c2cf;' : ''}">${d.slice(8)}</th>`; }).join('')}
+          <th style="text-align:center;">P</th><th style="text-align:center;">L</th><th style="text-align:center;">A</th></tr></thead><tbody>
+        ${data.users.map((u) => `<tr>
+          <td style="position:sticky;left:0;background:var(--white);font-weight:600;white-space:nowrap;">${esc(u.name)}</td>
+          ${data.days.map((d) => { const s = u.cells[d]; return `<td style="text-align:center;padding:6px;${regCellStyle(s)}" title="${d}: ${cap(s)}">${STATUS_CODE[s] || ''}</td>`; }).join('')}
+          <td style="text-align:center;font-weight:700;">${u.totals.present}</td><td style="text-align:center;">${u.totals.leave}</td><td style="text-align:center;color:var(--danger);">${u.totals.absent}</td></tr>`).join('')}
+      </tbody></table>`;
+      void dayNums;
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function regCellStyle(status) {
+    const map = {
+      PRESENT: 'background:#dff5ee;color:var(--teal-dark);font-weight:700;',
+      ABSENT: 'background:#fdecea;color:var(--danger);font-weight:700;',
+      LEAVE: 'background:#fdf1d8;color:#9a6b00;', HALF: 'background:#fdf1d8;color:#9a6b00;',
+      HOLIDAY: 'background:#e3eefb;color:var(--info);', WEEKEND: 'background:var(--mist);color:#b6c2cf;',
+      FUTURE: 'color:#cdd7e1;',
+    };
+    return map[status] || '';
+  }
+
+  function exportRegisterCsv() {
+    if (!REGISTER) return toast('Nothing to export', true);
+    const head = ['Employee', 'Department'].concat(REGISTER.days.map((d) => d.slice(8))).concat(['Present', 'Leave', 'Absent']);
+    const lines = [head.join(',')].concat(REGISTER.users.map((u) => [
+      `"${u.name.replace(/"/g, '""')}"`, `"${(u.department || '').replace(/"/g, '""')}"`,
+    ].concat(REGISTER.days.map((d) => STATUS_CODE[u.cells[d]] || '')).concat([u.totals.present, u.totals.leave, u.totals.absent]).join(',')));
+    downloadCsv(lines.join('\n'), `attendance-register-${REGISTER.month}.csv`);
+  }
+
+  function downloadCsv(text, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+  }
+
   // ---------- Calendar / Holidays ----------
   let calMonth = new Date().getMonth(), calYear = new Date().getFullYear();
   VIEWS.calendar = async () => {

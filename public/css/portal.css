@@ -103,6 +103,13 @@ tbody tr:hover { background: #fafcfe; }
 .b-declined { background: #f3e6e4; color: var(--danger); }
 .b-admin { background: #e3eefb; color: var(--info); }
 .b-employee { background: #eef2f6; color: var(--slate); }
+.b-present { background: #dff5ee; color: var(--teal-dark); }
+.b-absent { background: #fdecea; color: var(--danger); }
+.b-leave { background: #fdf1d8; color: #9a6b00; }
+.b-half { background: #fdf1d8; color: #9a6b00; }
+.b-holiday { background: #e3eefb; color: var(--info); }
+.b-weekend { background: #eef2f6; color: var(--slate); }
+.b-future { background: #f4f7fa; color: #b6c2cf; }
 .b-high { background: #fdecea; color: var(--danger); }
 .b-medium { background: #fdf1d8; color: #9a6b00; }
 .b-low { background: #eef2f6; color: var(--slate); }

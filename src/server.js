@@ -26,6 +26,7 @@ app.use('/api/clients', require('./routes/clients'));
 app.use('/api/recurring', require('./routes/recurring'));
 app.use('/api/achievements', require('./routes/achievements'));
 app.use('/api/kpi', require('./routes/kpi'));
+app.use('/api/reports', require('./routes/reports'));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
