@@ -1,0 +1,28 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LIT Nexus">
+  <defs>
+    <linearGradient id="litWarm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F5822A"/>
+      <stop offset="1" stop-color="#E22D1E"/>
+    </linearGradient>
+    <linearGradient id="litCool" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#46C566"/>
+      <stop offset="1" stop-color="#129B8C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Green "N" + upward growth arrow (drawn behind the L) -->
+  <g fill="url(#litCool)">
+    <!-- diagonal middle stroke of the N (emerges from the top of the L) -->
+    <path d="M48 28 L64 28 L90 104 L74 104 Z"/>
+    <!-- right leg / arrow shaft -->
+    <rect x="70" y="46" width="20" height="58" rx="4"/>
+    <!-- arrow head, centred over the shaft -->
+    <path d="M80 12 L101 48 L59 48 Z"/>
+  </g>
+
+  <!-- Orange-to-red "L" (front-left) -->
+  <g fill="url(#litWarm)">
+    <rect x="28" y="28" width="20" height="76" rx="6"/>
+    <rect x="28" y="84" width="44" height="20" rx="6"/>
+  </g>
+</svg>

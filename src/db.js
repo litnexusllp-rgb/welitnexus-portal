@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
   name          TEXT    NOT NULL,
   email         TEXT    NOT NULL UNIQUE,
   password_hash TEXT    NOT NULL,
+  emp_code      TEXT    DEFAULT '',       -- employee code / ID (optional, unique if set)
   role          TEXT    NOT NULL DEFAULT 'EMPLOYEE',   -- ADMIN | EMPLOYEE
   department    TEXT    DEFAULT '',
   title         TEXT    DEFAULT '',
@@ -144,6 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_achievements_date ON achievements(date);
 for (const stmt of [
   `ALTER TABLE tasks ADD COLUMN client_id INTEGER`,
   `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
+  `ALTER TABLE users ADD COLUMN emp_code TEXT DEFAULT ''`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

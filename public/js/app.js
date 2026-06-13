@@ -836,13 +836,14 @@
 
   // ---------- Directory ----------
   VIEWS.directory = async () => {
-    setMain('Employee Directory', 'Everyone at WeLitNexus.', `<div class="people-grid" id="people"></div>`);
+    setMain('Employee Directory', 'Everyone at LIT Nexus.', `<div class="people-grid" id="people"></div>`);
     try {
       const { users } = await api.get('/users');
       $('#people').innerHTML = users.map((u) => `<div class="person">
         <div class="avatar">${esc(initials(u.name))}</div>
         <div><div class="nm">${esc(u.name)}${u.role === 'ADMIN' ? ' <span class="badge b-company" style="font-size:.66rem">Admin</span>' : ''}</div>
           <div class="tt">${esc(u.title || '—')}${u.department ? ' · ' + esc(u.department) : ''}</div>
+          ${u.emp_code ? `<div class="tt" style="font-size:.78rem;">Code: <strong>${esc(u.emp_code)}</strong></div>` : ''}
           <div class="ct">${esc(u.email)}</div>${u.phone ? `<div class="ct">${esc(u.phone)}</div>` : ''}</div></div>`).join('');
     } catch (e) { toast(e.message, true); }
   };
@@ -860,8 +861,9 @@
   async function loadEmployees() {
     try {
       const { users } = await api.get('/users/manage');
-      $('#empTable').innerHTML = `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Dept / Title</th><th>Leaves</th><th>Status</th><th></th></tr></thead><tbody>
+      $('#empTable').innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Dept / Title</th><th>Leaves</th><th>Status</th><th></th></tr></thead><tbody>
         ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}">
+          <td>${u.emp_code ? `<strong>${esc(u.emp_code)}</strong>` : '—'}</td>
           <td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${badge(u.role)}</td>
           <td>${esc(u.department || '—')}${u.title ? ' · ' + esc(u.title) : ''}</td><td>${u.leave_balance}</td>
           <td>${u.active ? badge('approved') : badge('rejected')}</td>
@@ -885,6 +887,8 @@
     modal(`<h3>${editing ? 'Edit employee' : 'Add employee'}</h3>
       <div class="form-row"><div class="field"><label>Name</label><input id="eName" value="${esc(u?.name || '')}"></div>
         <div class="field"><label>Email</label><input id="eEmail" value="${esc(u?.email || '')}"></div></div>
+      <div class="form-row"><div class="field"><label>Employee code</label><input id="eCode" value="${esc(u?.emp_code || '')}" placeholder="e.g. LN-001"></div>
+        <div class="field"></div></div>
       <div class="form-row"><div class="field"><label>Department</label><input id="eDept" value="${esc(u?.department || '')}"></div>
         <div class="field"><label>Title</label><input id="eTitle" value="${esc(u?.title || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Phone</label><input id="ePhone" value="${esc(u?.phone || '')}"></div>
@@ -894,7 +898,7 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }

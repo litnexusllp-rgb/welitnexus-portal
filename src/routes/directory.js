@@ -7,17 +7,18 @@ const { now } = require('../time');
 
 const router = express.Router();
 
-const PUBLIC_COLS = `id, name, email, role, department, title, phone, active`;
+const PUBLIC_COLS = `id, name, email, emp_code, role, department, title, phone, active`;
 const listAll = db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE active = 1 ORDER BY name`);
 const listAllIncInactive = db.prepare(`SELECT ${PUBLIC_COLS}, leave_balance FROM users ORDER BY active DESC, name`);
 const getOne = db.prepare(`SELECT ${PUBLIC_COLS}, leave_balance FROM users WHERE id = ?`);
 const findByEmail = db.prepare(`SELECT id FROM users WHERE email = ?`);
+const findByCode = db.prepare(`SELECT id FROM users WHERE emp_code = ? AND emp_code != ''`);
 const insertUser = db.prepare(
-  `INSERT INTO users (name, email, password_hash, role, department, title, phone, leave_balance, active, created_ts)
-   VALUES (@name, @email, @password_hash, @role, @department, @title, @phone, @leave_balance, 1, @created_ts)`
+  `INSERT INTO users (name, email, password_hash, emp_code, role, department, title, phone, leave_balance, active, created_ts)
+   VALUES (@name, @email, @password_hash, @emp_code, @role, @department, @title, @phone, @leave_balance, 1, @created_ts)`
 );
 const updateUser = db.prepare(
-  `UPDATE users SET name=@name, email=@email, role=@role, department=@department,
+  `UPDATE users SET name=@name, email=@email, emp_code=@emp_code, role=@role, department=@department,
    title=@title, phone=@phone, leave_balance=@leave_balance WHERE id=@id`
 );
 const setActive = db.prepare(`UPDATE users SET active = ? WHERE id = ?`);
@@ -38,9 +39,12 @@ router.post('/', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Name, email, and a 6+ char password are required' });
   }
   if (findByEmail.get(email)) return res.status(409).json({ error: 'Email already in use' });
+  const empCode = String(req.body.emp_code || '').trim();
+  if (empCode && findByCode.get(empCode)) return res.status(409).json({ error: 'Employee code already in use' });
   const info = insertUser.run({
     name, email,
     password_hash: hashPassword(password),
+    emp_code: empCode,
     role: String(req.body.role || 'EMPLOYEE').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE',
     department: String(req.body.department || ''),
     title: String(req.body.title || ''),
@@ -60,10 +64,18 @@ router.put('/:id', requireAdmin, (req, res) => {
   if (emailOwner && emailOwner.id !== existing.id) {
     return res.status(409).json({ error: 'Email already in use by another employee' });
   }
+  const empCode = String(req.body.emp_code ?? existing.emp_code).trim();
+  if (empCode) {
+    const codeOwner = findByCode.get(empCode);
+    if (codeOwner && codeOwner.id !== existing.id) {
+      return res.status(409).json({ error: 'Employee code already in use by another employee' });
+    }
+  }
   updateUser.run({
     id: existing.id,
     name: String(req.body.name ?? existing.name),
     email: String(req.body.email ?? existing.email).toLowerCase(),
+    emp_code: empCode,
     role: String(req.body.role ?? existing.role).toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE',
     department: String(req.body.department ?? existing.department),
     title: String(req.body.title ?? existing.title),

@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WeLitNexus Portal</title>
+  <title>LIT Nexus Portal</title>
+  <link rel="icon" type="image/svg+xml" href="/img/lit-mark.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/portal.css" />
@@ -12,7 +13,13 @@
   <!-- ================= LOGIN ================= -->
   <div class="login-wrap" id="loginWrap">
     <form class="login-card" id="loginForm">
-      <div class="brand">WeLit<span>Nexus</span></div>
+      <div class="brand-lockup login-lockup">
+        <img src="/img/lit-mark.svg" alt="LIT Nexus" class="logo-mark" />
+        <div class="wordmark">
+          <div class="name">LIT <span>Nexus</span></div>
+          <div class="tagline">Loyalty · Integrity · Talent</div>
+        </div>
+      </div>
       <div class="sub">Employee Portal — sign in to continue</div>
       <label for="email">Email</label>
       <input type="email" id="email" autocomplete="username" required />
@@ -26,7 +33,13 @@
   <!-- ================= APP SHELL ================= -->
   <div class="app" id="app">
     <aside class="sidebar">
-      <div class="brand">WeLit<span>Nexus</span></div>
+      <div class="brand-lockup sidebar-lockup">
+        <img src="/img/lit-mark.svg" alt="LIT Nexus" class="logo-mark" />
+        <div class="wordmark">
+          <div class="name">LIT <span>Nexus</span></div>
+          <div class="tagline">Loyalty · Integrity · Talent</div>
+        </div>
+      </div>
       <nav id="nav">
         <button class="nav-item active" data-view="dashboard"><span class="ico">🏠</span> Dashboard</button>
         <button class="nav-item" data-view="clock"><span class="ico">⏱️</span> Clock</button>
