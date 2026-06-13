@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const { db } = require('../db');
 const {
   verifyPassword, issueToken, setAuthCookie, clearAuthCookie, requireAuth,
@@ -9,7 +10,16 @@ const {
 const router = express.Router();
 const findByEmail = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1');
 
-router.post('/login', (req, res) => {
+// Throttle login attempts to blunt brute-force / credential-stuffing.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,        // 15 minutes
+  max: 10,                         // 10 attempts per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please wait a few minutes and try again.' },
+});
+
+router.post('/login', loginLimiter, (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });

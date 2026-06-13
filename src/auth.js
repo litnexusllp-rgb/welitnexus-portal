@@ -7,7 +7,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { db } = require('./db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production-welitnexus';
+// In production a real secret is mandatory — never fall back to a known
+// default, or anyone could forge an admin session. In dev we allow a
+// placeholder so the app runs without setup.
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in production. Refusing to start with a default secret.');
+}
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-insecure-secret-change-me';
 const COOKIE = 'wln_session';
 const TOKEN_TTL = '7d';
 

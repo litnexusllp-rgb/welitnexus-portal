@@ -4,6 +4,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
 const { startRecurringScheduler } = require('./recurring');
@@ -11,7 +12,27 @@ const { startRecurringScheduler } = require('./recurring');
 bootstrapAdmin(); // create first admin on a fresh database
 
 const app = express();
-app.use(express.json());
+app.set('trust proxy', 1); // Railway terminates TLS in front of us; needed for rate-limit + secure cookies
+
+// Security headers. CSP is tuned for this app: inline styles + Google Fonts
+// are used by the frontend, scripts are loaded from same-origin files only.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
+app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use(loadUser);
 
@@ -37,6 +58,13 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
+// Global error handler — keep API responses JSON and never leak stack traces.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  console.error('Unhandled error:', err);
+  res.status(err.status || 500).json({ error: 'Something went wrong. Please try again.' });
 });
 
 const PORT = process.env.PORT || 3000;

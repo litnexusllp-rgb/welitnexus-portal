@@ -13,6 +13,7 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON'); // enforce the FK constraints declared below
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (

@@ -12,6 +12,12 @@ function bootstrapAdmin() {
   const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (count > 0) return; // already set up — do nothing
 
+  // Don't auto-create an admin with a publicly-known default password in
+  // production — require the deployer to choose one.
+  if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
+    console.warn('Bootstrap: ADMIN_PASSWORD not set in production — skipping admin creation. Set it and redeploy.');
+    return;
+  }
   const name = process.env.ADMIN_NAME || 'Admin';
   const email = (process.env.ADMIN_EMAIL || 'admin@welitnexus.com').toLowerCase();
   const password = process.env.ADMIN_PASSWORD || 'ChangeMe@2026';
