@@ -65,6 +65,26 @@
     ME = null; clearInterval(clockTimer); showLogin();
   });
 
+  $('#changePwBtn').addEventListener('click', openChangePassword);
+
+  function openChangePassword() {
+    modal(`<h3>Change your password</h3>
+      <div class="form-row one"><div class="field"><label>Current password</label><input type="password" id="cpCur" autocomplete="current-password"></div></div>
+      <div class="form-row one"><div class="field"><label>New password</label><input type="password" id="cpNew" autocomplete="new-password" placeholder="min 6 chars"></div></div>
+      <div class="form-row one"><div class="field"><label>Confirm new password</label><input type="password" id="cpConf" autocomplete="new-password"></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Update password</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const cur = $('#cpCur').value, next = $('#cpNew').value, conf = $('#cpConf').value;
+      if (next.length < 6) return toast('New password must be at least 6 characters', true);
+      if (next !== conf) return toast('New passwords do not match', true);
+      try {
+        await api.post('/auth/change-password', { current_password: cur, new_password: next });
+        closeModal(); toast('Password updated ✓');
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
   // ---------- navigation ----------
   $('#nav').addEventListener('click', (e) => {
     const btn = e.target.closest('.nav-item');
