@@ -130,13 +130,19 @@
     if (isAdmin()) {
       try {
         const [today, pend] = await Promise.all([api.get('/attendance/today'), api.get('/leaves/pending')]);
-        const present = today.people.filter((p) => p.state === 'IN' || p.state === 'BREAK');
+        const working = today.people.filter((p) => p.state === 'IN');
+        const onBreak = today.people.filter((p) => p.state === 'BREAK');
+        const presenceCol = (title, list, emptyMsg) => `
+          <div class="section" style="margin-bottom:0;">
+            <h2>${title} (${list.length})</h2>
+            ${list.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
+              ${list.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
+            </tbody></table>` : `<div class="empty">${emptyMsg}</div>`}
+          </div>`;
         $('#dashAdmin').innerHTML = `
-          <div class="section">
-            <h2>Who's in today (${present.length}/${today.people.length})</h2>
-            ${today.people.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Status</th><th>Worked</th></tr></thead><tbody>
-              ${today.people.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td>${badge(p.state)}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
-            </tbody></table>` : `<div class="empty">No one has clocked in yet.</div>`}
+          <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
+            ${presenceCol('🟢 Currently in', working, 'No one is clocked in right now.')}
+            ${presenceCol('☕ On break', onBreak, 'No one is on break.')}
           </div>
           <div class="section">
             <h2>Pending leave approvals (${pend.leaves.length})</h2>
