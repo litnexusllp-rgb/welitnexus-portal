@@ -211,16 +211,41 @@
 
   // ---------- Leaves ----------
   VIEWS.leaves = async () => {
+    // Admins get a team view (approvals + who's off) — no personal apply/balance.
+    if (isAdmin()) {
+      setMain('Leaves', "Requests waiting for approval, and who's on leave.",
+        `<div class="section" id="adminLeaves"></div>
+         <div class="section"><h2>On leave — current & upcoming</h2><div id="onLeave"></div></div>`);
+      loadAdminLeaves();
+      loadOnLeave();
+      return;
+    }
+    // Employees: personal balance + their own requests.
     setMain('Leaves', 'Apply for time off and track your requests.',
       `<div class="cards"><div class="card stat"><div class="label">Leave balance</div><div class="value small" id="balVal">—</div></div></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">My requests</h2>
          <button class="btn btn-primary" id="applyBtn">+ Apply for leave</button></div>
-       <div id="myLeaves"></div>
-       <div class="admin-only section" id="adminLeaves" style="margin-top:28px;"></div>`);
+       <div id="myLeaves"></div>`);
     $('#applyBtn').addEventListener('click', openApplyLeave);
     await loadMyLeaves();
-    if (isAdmin()) loadAdminLeaves();
   };
+
+  async function loadOnLeave() {
+    try {
+      const { leaves } = await api.get('/leaves/upcoming');
+      const today = todayISO();
+      const el = $('#onLeave'); if (!el) return;
+      el.innerHTML = leaves.length ? `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Status</th></tr></thead><tbody>
+        ${leaves.map((l) => {
+          const onNow = l.start_date <= today && l.end_date >= today;
+          return `<tr><td>${esc(l.name)}</td>
+            <td>${esc(l.start_date)}${l.end_date !== l.start_date ? ' → ' + esc(l.end_date) : ''}</td>
+            <td>${esc(cap(l.kind))}</td><td>${l.days}</td>
+            <td>${onNow ? '<span class="badge b-pending">On leave now</span>' : '<span class="badge b-todo">Upcoming</span>'}</td></tr>`;
+        }).join('')}
+      </tbody></table>` : `<div class="empty">No one is on leave now or in the near future.</div>`;
+    } catch (e) { toast(e.message, true); }
+  }
 
   async function loadMyLeaves() {
     try {

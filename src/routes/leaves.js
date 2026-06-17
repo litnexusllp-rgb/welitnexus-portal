@@ -3,7 +3,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
-const { now, inclusiveDays } = require('../time');
+const { now, todayStr, inclusiveDays } = require('../time');
 
 const router = express.Router();
 
@@ -58,6 +58,13 @@ router.post('/:id/cancel', requireAuth, (req, res) => {
 // ADMIN: list pending + recent.
 router.get('/pending', requireAdmin, (_req, res) => res.json({ leaves: allPending.all() }));
 router.get('/all', requireAdmin, (_req, res) => res.json({ leaves: allLeaves.all() }));
+
+// ADMIN: who is on leave now or upcoming (approved leaves ending today or later).
+const upcomingApproved = db.prepare(
+  `SELECT l.*, u.name FROM leaves l JOIN users u ON u.id = l.user_id
+   WHERE l.status = 'APPROVED' AND l.end_date >= ? ORDER BY l.start_date ASC`
+);
+router.get('/upcoming', requireAdmin, (_req, res) => res.json({ leaves: upcomingApproved.all(todayStr()) }));
 
 // ADMIN: approve / reject. Deducts balance on approval.
 router.post('/:id/decide', requireAdmin, (req, res) => {
