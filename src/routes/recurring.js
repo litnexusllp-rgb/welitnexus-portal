@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin } = require('../auth');
 const { now } = require('../time');
 const { generateDueTasks } = require('../recurring');
 
@@ -11,14 +11,17 @@ const router = express.Router();
 const FREQ = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
 
-const listAll = db.prepare(
-  `SELECT r.*, u.name AS assignee_name, c.name AS client_name
+const SELECT = `SELECT r.*, u.name AS assignee_name, c.name AS client_name
    FROM recurring_tasks r
    JOIN users u ON u.id = r.assignee_id
-   LEFT JOIN clients c ON c.id = r.client_id
-   ORDER BY r.active DESC, c.name COLLATE NOCASE, r.next_due`
-);
+   LEFT JOIN clients c ON c.id = r.client_id`;
+const listAll = db.prepare(`${SELECT} ORDER BY r.active DESC, c.name COLLATE NOCASE, r.next_due`);
+const listMine = db.prepare(`${SELECT} WHERE r.created_by = ? ORDER BY r.active DESC, r.next_due`);
 const getOne = db.prepare(`SELECT * FROM recurring_tasks WHERE id = ?`);
+
+// Admins see/return all schedules; employees only their own.
+const listFor = (req) => (req.user.role === 'ADMIN' ? listAll.all() : listMine.all(req.user.id));
+const canManage = (req, rec) => req.user.role === 'ADMIN' || rec.created_by === req.user.id;
 const insertRec = db.prepare(
   `INSERT INTO recurring_tasks (title, description, client_id, assignee_id, priority, frequency, step, lead_days, next_due, active, created_by, created_ts)
    VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, @step, @lead_days, @next_due, 1, @created_by, @created_ts)`
@@ -46,33 +49,51 @@ function clean(body, existing) {
   };
 }
 
+// ADMIN: all schedules. Employees use /mine.
 router.get('/', requireAdmin, (_req, res) => res.json({ recurring: listAll.all() }));
+router.get('/mine', requireAuth, (req, res) => res.json({ recurring: listMine.all(req.user.id) }));
 
-router.post('/', requireAdmin, (req, res) => {
+// Create a schedule. Admins assign to anyone; employees create for
+// themselves and must pick a client.
+router.post('/', requireAuth, (req, res) => {
+  const admin = req.user.role === 'ADMIN';
   const r = clean(req.body);
+  if (!admin) {
+    r.assignee_id = req.user.id;
+    if (!r.client_id) return res.status(400).json({ error: 'Please choose a client' });
+  }
   if (!r.title || !r.assignee_id || !/^\d{4}-\d{2}-\d{2}$/.test(r.next_due)) {
-    return res.status(400).json({ error: 'Title, assignee, and a valid first due date are required' });
+    return res.status(400).json({ error: 'Title, client, and a valid first due date are required' });
   }
   insertRec.run({ ...r, created_by: req.user.id, created_ts: now().toMillis() });
   generateDueTasks(); // create the first instance immediately if it's already due
-  res.json({ recurring: listAll.all() });
+  res.json({ recurring: listFor(req) });
 });
 
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', requireAuth, (req, res) => {
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  updateRec.run({ id: existing.id, ...clean(req.body, existing) });
-  res.json({ recurring: listAll.all() });
+  if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });
+  const patch = clean(req.body, existing);
+  if (req.user.role !== 'ADMIN') patch.assignee_id = existing.assignee_id; // employees can't reassign
+  updateRec.run({ id: existing.id, ...patch });
+  res.json({ recurring: listFor(req) });
 });
 
-router.post('/:id/active', requireAdmin, (req, res) => {
-  setActive.run(req.body.active ? 1 : 0, Number(req.params.id));
-  res.json({ recurring: listAll.all() });
+router.post('/:id/active', requireAuth, (req, res) => {
+  const existing = getOne.get(Number(req.params.id));
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });
+  setActive.run(req.body.active ? 1 : 0, existing.id);
+  res.json({ recurring: listFor(req) });
 });
 
-router.delete('/:id', requireAdmin, (req, res) => {
-  delRec.run(Number(req.params.id)); // generated tasks are kept
-  res.json({ recurring: listAll.all() });
+router.delete('/:id', requireAuth, (req, res) => {
+  const existing = getOne.get(Number(req.params.id));
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });
+  delRec.run(existing.id); // generated tasks are kept
+  res.json({ recurring: listFor(req) });
 });
 
 // Manually trigger generation now (useful after adding several schedules).

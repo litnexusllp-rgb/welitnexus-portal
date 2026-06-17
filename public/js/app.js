@@ -333,7 +333,8 @@
   // ---------- Tasks ----------
   let taskClientFilter = '';
   VIEWS.tasks = async () => {
-    setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your assigned work.',
+    const emp = !isAdmin();
+    setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your work, organised by client.',
       `<div class="admin-only toolbar">
          <div style="display:flex;gap:10px;align-items:center;">
            <h2 style="margin:0;color:var(--navy);">All tasks</h2>
@@ -341,7 +342,10 @@
          </div>
          <button class="btn btn-primary" id="newTaskBtn">+ Assign task</button></div>
        <div class="admin-only" id="allTasks" style="margin-bottom:28px;"></div>
-       <h2 style="color:var(--navy);">My tasks</h2><div id="myTasks"></div>`);
+       <div class="toolbar"><h2 style="margin:0;color:var(--navy);">My tasks</h2>
+         ${emp ? '<button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button>' : ''}</div>
+       <div id="myTasks"></div>
+       ${emp ? '<div class="section" style="margin-top:26px;"><h2 style="color:var(--navy);">My recurring schedules</h2><div id="myRecurring"></div></div>' : ''}`);
     if (isAdmin()) {
       await loadLookups();
       $('#clientFilter').innerHTML = `<option value="">All clients</option><option value="none">— No client —</option>`
@@ -351,8 +355,66 @@
       $('#newTaskBtn').addEventListener('click', () => openTaskModal());
       loadAllTasks();
     }
+    if (emp) {
+      await loadLookups();
+      $('#addMyTaskBtn').addEventListener('click', openMyTaskModal);
+      loadMyRecurring();
+    }
     loadMyTasks();
   };
+
+  // Employee: add a one-time or recurring task for themselves, tied to a client.
+  async function openMyTaskModal() {
+    if (!CLIENTS.length) await loadLookups();
+    if (!CLIENTS.length) return toast('No clients yet — ask an admin to add one first.', true);
+    modal(`<h3>Add a task</h3>
+      <div class="form-row"><div class="field"><label>Client</label><select id="mtClient"><option value="">Select a client…</option>${CLIENTS.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Priority</label><select id="mtPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${p === 'MEDIUM' ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div></div>
+      <div class="form-row one"><div class="field"><label>Title</label><input id="mtTitle" placeholder="e.g. Monthly bookkeeping"></div></div>
+      <div class="form-row one"><div class="field"><label>Description</label><textarea id="mtDesc" placeholder="Optional"></textarea></div></div>
+      <div class="form-row"><div class="field"><label>Repeat</label><select id="mtRepeat"><option value="">One-time</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="YEARLY">Yearly</option></select></div>
+        <div class="field"><label id="mtDueLabel">Due date</label><input type="date" id="mtDue" value="${todayISO()}"></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Add</button></div>`);
+    $('#mtRepeat').addEventListener('change', (e) => { $('#mtDueLabel').textContent = e.target.value ? 'First occurrence' : 'Due date'; });
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const client_id = $('#mtClient').value;
+      const title = $('#mtTitle').value.trim();
+      if (!client_id) return toast('Please choose a client', true);
+      if (!title) return toast('Please enter a title', true);
+      const repeat = $('#mtRepeat').value;
+      try {
+        if (repeat) {
+          await api.post('/recurring', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, frequency: repeat, next_due: $('#mtDue').value, lead_days: 7, step: 1 });
+          toast('Recurring task added ✓');
+        } else {
+          await api.post('/tasks', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, due_date: $('#mtDue').value });
+          toast('Task added ✓');
+        }
+        closeModal(); loadMyTasks(); loadMyRecurring();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
+  async function loadMyRecurring() {
+    const el = $('#myRecurring'); if (!el) return;
+    try {
+      const { recurring } = await api.get('/recurring/mine');
+      el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
+        ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
+          <td>${FREQ_LABEL[r.frequency]}</td><td>${esc(r.next_due)}</td><td>${r.active ? badge('approved') : badge('cancelled')}</td>
+          <td class="row-actions"><button class="btn btn-ghost btn-sm" data-mtoggle="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
+            <button class="btn btn-danger btn-sm" data-mdel="${r.id}">✕</button></td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">No recurring tasks yet. Use “+ Add task” and pick a Repeat option.</div>`;
+      el.querySelectorAll('[data-mtoggle]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api.post(`/recurring/${b.dataset.mtoggle}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadMyRecurring(); } catch (e) { toast(e.message, true); }
+      }));
+      el.querySelectorAll('[data-mdel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Delete this recurring task? Tasks already created are kept.')) return;
+        try { await api.del(`/recurring/${b.dataset.mdel}`); toast('Deleted'); loadMyRecurring(); } catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { toast(e.message, true); }
+  }
 
   const statusSelect = (id, status) => `<select data-status="${id}">
     ${['TODO', 'IN_PROGRESS', 'DONE'].map((s) => `<option value="${s}" ${s === status ? 'selected' : ''}>${cap(s.replace('_', ' '))}</option>`).join('')}</select>`;

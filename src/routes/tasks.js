@@ -32,11 +32,16 @@ const deleteTask = db.prepare(`DELETE FROM tasks WHERE id = ?`);
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
 const STATUS = ['TODO', 'IN_PROGRESS', 'DONE'];
 
-// ADMIN: assign a task.
-router.post('/', requireAdmin, (req, res) => {
+// Create a task. Admins can assign to anyone; employees create for
+// themselves and must tie it to a client (no "random" tasks).
+router.post('/', requireAuth, (req, res) => {
   const title = String(req.body.title || '').trim();
-  const assignee_id = Number(req.body.assignee_id);
-  if (!title || !assignee_id) return res.status(400).json({ error: 'Title and assignee are required' });
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  const admin = req.user.role === 'ADMIN';
+  const assignee_id = admin ? Number(req.body.assignee_id) : req.user.id;
+  if (!assignee_id) return res.status(400).json({ error: 'Assignee is required' });
+  const client_id = req.body.client_id ? Number(req.body.client_id) : null;
+  if (!admin && !client_id) return res.status(400).json({ error: 'Please choose a client for your task' });
   const priority = PRI.includes(String(req.body.priority || '').toUpperCase()) ? String(req.body.priority).toUpperCase() : 'MEDIUM';
   const info = insertTask.run({
     title,
@@ -45,7 +50,7 @@ router.post('/', requireAdmin, (req, res) => {
     assigned_by: req.user.id,
     priority,
     due_date: String(req.body.due_date || ''),
-    client_id: req.body.client_id ? Number(req.body.client_id) : null,
+    client_id,
     ts: now().toMillis(),
   });
   res.json({ task: getTask.get(info.lastInsertRowid) });
