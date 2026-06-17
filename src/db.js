@@ -139,6 +139,17 @@ CREATE TABLE IF NOT EXISTS achievements (
 );
 CREATE INDEX IF NOT EXISTS idx_achievements_user ON achievements(user_id);
 CREATE INDEX IF NOT EXISTS idx_achievements_date ON achievements(date);
+
+-- Per-task checklist. A task can't be marked DONE until every item is ticked.
+CREATE TABLE IF NOT EXISTS task_checklist (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id  INTEGER NOT NULL,
+  text     TEXT    NOT NULL,
+  done     INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_checklist_task ON task_checklist(task_id);
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.
@@ -146,6 +157,7 @@ for (const stmt of [
   `ALTER TABLE tasks ADD COLUMN client_id INTEGER`,
   `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
   `ALTER TABLE users ADD COLUMN emp_code TEXT DEFAULT ''`,
+  `ALTER TABLE recurring_tasks ADD COLUMN checklist_json TEXT DEFAULT ''`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

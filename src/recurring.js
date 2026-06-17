@@ -34,6 +34,17 @@ const insertTask = db.prepare(
 const advanceTemplate = db.prepare(
   `UPDATE recurring_tasks SET next_due = ?, last_run_ts = ? WHERE id = ?`
 );
+const insertChecklistItem = db.prepare(
+  `INSERT INTO task_checklist (task_id, text, position) VALUES (?, ?, ?)`
+);
+
+// Copy a template's checklist (stored as JSON) onto a freshly created task.
+function copyChecklist(checklistJson, taskId) {
+  if (!checklistJson) return;
+  let items = [];
+  try { items = JSON.parse(checklistJson); } catch (_e) { return; }
+  if (Array.isArray(items)) items.forEach((text, i) => insertChecklistItem.run(taskId, String(text), i));
+}
 
 // Generate any due instances. Returns the number of tasks created.
 function generateDueTasks() {
@@ -49,7 +60,7 @@ function generateDueTasks() {
         const triggerOn = DateTime.fromISO(nextDue, { zone: ZONE }).minus({ days: t.lead_days || 0 }).toFormat('yyyy-LL-dd');
         if (triggerOn > today) break; // not time to create this one yet
         if (!existsInstance.get(t.id, nextDue)) {
-          insertTask.run({
+          const info = insertTask.run({
             title: t.title,
             description: t.description,
             assignee_id: t.assignee_id,
@@ -60,6 +71,7 @@ function generateDueTasks() {
             recurring_id: t.id,
             ts: now().toMillis(),
           });
+          copyChecklist(t.checklist_json, info.lastInsertRowid);
           created++;
         }
         nextDue = advance(nextDue, t.frequency, t.step);

@@ -374,6 +374,7 @@
       <div class="form-row one"><div class="field"><label>Description</label><textarea id="mtDesc" placeholder="Optional"></textarea></div></div>
       <div class="form-row"><div class="field"><label>Repeat</label><select id="mtRepeat"><option value="">One-time</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="YEARLY">Yearly</option></select></div>
         <div class="field"><label id="mtDueLabel">Due date</label><input type="date" id="mtDue" value="${todayISO()}"></div></div>
+      <div class="form-row one"><div class="field"><label>Checklist — one item per line (optional)</label><textarea id="mtChecklist" placeholder="Points to tick off before this can be marked done"></textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Add</button></div>`);
     $('#mtRepeat').addEventListener('change', (e) => { $('#mtDueLabel').textContent = e.target.value ? 'First occurrence' : 'Due date'; });
     $('#mCancel').addEventListener('click', closeModal);
@@ -383,12 +384,13 @@
       if (!client_id) return toast('Please choose a client', true);
       if (!title) return toast('Please enter a title', true);
       const repeat = $('#mtRepeat').value;
+      const checklist = $('#mtChecklist').value;
       try {
         if (repeat) {
-          await api.post('/recurring', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, frequency: repeat, next_due: $('#mtDue').value, lead_days: 7, step: 1 });
+          await api.post('/recurring', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, frequency: repeat, next_due: $('#mtDue').value, lead_days: 7, step: 1, checklist });
           toast('Recurring task added ✓');
         } else {
-          await api.post('/tasks', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, due_date: $('#mtDue').value });
+          await api.post('/tasks', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, due_date: $('#mtDue').value, checklist });
           toast('Task added ✓');
         }
         closeModal(); loadMyTasks(); loadMyRecurring();
@@ -416,18 +418,46 @@
     } catch (e) { toast(e.message, true); }
   }
 
-  const statusSelect = (id, status) => `<select data-status="${id}">
-    ${['TODO', 'IN_PROGRESS', 'DONE'].map((s) => `<option value="${s}" ${s === status ? 'selected' : ''}>${cap(s.replace('_', ' '))}</option>`).join('')}</select>`;
+  const statusSelect = (id, status, lockDone) => `<select data-status="${id}">
+    ${['TODO', 'IN_PROGRESS', 'DONE'].map((s) => `<option value="${s}" ${s === status ? 'selected' : ''} ${s === 'DONE' && lockDone ? 'disabled' : ''}>${cap(s.replace('_', ' '))}</option>`).join('')}</select>`;
+
+  const openItems = (t) => (t.checklist || []).filter((i) => !i.done).length;
+
+  // Renders a task's checklist as tick-boxes with a done/total count.
+  function checklistHtml(t) {
+    if (!t.checklist || !t.checklist.length) return '';
+    const done = t.checklist.length - openItems(t);
+    const allDone = openItems(t) === 0;
+    return `<div style="margin-top:7px;">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.4px;text-transform:uppercase;margin-bottom:3px;color:${allDone ? 'var(--teal-dark)' : 'var(--slate)'};">✓ Checklist ${done}/${t.checklist.length}${allDone ? ' — ready to complete' : ''}</div>
+      ${t.checklist.map((i) => `<label style="display:flex;gap:7px;align-items:flex-start;font-size:.84rem;margin:2px 0;cursor:pointer;">
+        <input type="checkbox" data-check="${t.id}:${i.id}" ${i.done ? 'checked' : ''} style="margin-top:2px;">
+        <span style="${i.done ? 'text-decoration:line-through;color:var(--slate);' : ''}">${esc(i.text)}</span></label>`).join('')}
+    </div>`;
+  }
+  function wireChecklist(root, reload) {
+    root.querySelectorAll('[data-check]').forEach((c) => c.addEventListener('change', async () => {
+      const [taskId, itemId] = c.dataset.check.split(':');
+      try { await api.post(`/tasks/${taskId}/checklist/${itemId}`, { done: c.checked }); if (reload) reload(); }
+      catch (e) { toast(e.message, true); }
+    }));
+  }
+  // A recurring template stores its checklist as a JSON array of strings.
+  function parseChecklistJson(json) {
+    if (!json) return '';
+    try { const a = JSON.parse(json); return Array.isArray(a) ? a.join('\n') : ''; } catch (_e) { return ''; }
+  }
 
   async function loadMyTasks() {
     try {
       const { tasks } = await api.get('/tasks/mine');
       const el = $('#myTasks');
       el.innerHTML = tasks.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>
-        ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div></td>
-          <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status)}</td></tr>`).join('')}
+        ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}</td>
+          <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No tasks assigned to you. 🎉</div>`;
       wireStatusSelects(el, loadMyTasks);
+      wireChecklist(el, loadMyTasks);
     } catch (e) { toast(e.message, true); }
   }
 
@@ -447,11 +477,12 @@
         <div class="section" style="margin-bottom:18px;">
           <h2 style="font-size:1rem;">${esc(g)} <span style="color:var(--slate);font-weight:500;">(${groups[g].length})</span></h2>
           <table><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
-          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}</td>
-            <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status)}</td>
+          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistHtml(t)}</td>
+            <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
             <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-task="${t.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-task="${t.id}">✕</button></td></tr>`).join('')}
           </tbody></table></div>`).join('');
       wireStatusSelects(el, () => { loadAllTasks(); loadMyTasks(); });
+      wireChecklist(el, () => { loadAllTasks(); loadMyTasks(); });
       el.querySelectorAll('[data-edit-task]').forEach((b) => b.addEventListener('click', () => openTaskModal(tasks.find((t) => t.id == b.dataset.editTask))));
       el.querySelectorAll('[data-del-task]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm('Delete this task?')) return;
@@ -484,10 +515,14 @@
         <div class="field"><label>Assignee</label><select id="tAssignee">${userOptions(task?.assignee_id)}</select></div></div>
       <div class="form-row"><div class="field"><label>Priority</label><select id="tPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${(task?.priority || 'MEDIUM') === p ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div>
         <div class="field"><label>Due date</label><input type="date" id="tDue" value="${esc(task?.due_date || '')}"></div></div>
+      <div class="form-row one"><div class="field"><label>Checklist — one item per line (optional)</label><textarea id="tChecklist" placeholder="e.g.\nReconcile bank\nMatch invoices\nReview VAT">${esc((task?.checklist || []).map((i) => i.text).join('\n'))}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Assign'}</button></div>`);
+    const initialChecklist = (task?.checklist || []).map((i) => i.text).join('\n');
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       const payload = { title: $('#tTitle').value, description: $('#tDesc').value, client_id: $('#tClient').value || null, assignee_id: Number($('#tAssignee').value), priority: $('#tPriority').value, due_date: $('#tDue').value };
+      // Only send checklist on create, or on edit if it actually changed (avoids resetting tick state).
+      if (!editing || $('#tChecklist').value !== initialChecklist) payload.checklist = $('#tChecklist').value;
       try {
         if (editing) await api.put(`/tasks/${task.id}`, payload); else await api.post('/tasks', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Assigned ✓'); loadAllTasks(); loadMyTasks();
@@ -585,11 +620,12 @@
         <div class="field"><label>Priority</label><select id="rPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${(r?.priority || 'MEDIUM') === p ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div></div>
       <div class="form-row"><div class="field"><label>First due date</label><input type="date" id="rNext" value="${esc(r?.next_due || todayISO())}"></div>
         <div class="field"><label>Create how many days early?</label><input type="number" id="rLead" min="0" value="${r?.lead_days ?? 7}"></div></div>
+      <div class="form-row one"><div class="field"><label>Checklist — one item per line (copied onto each task)</label><textarea id="rChecklist" placeholder="e.g.\nReconcile bank\nMatch invoices\nReview VAT">${esc(parseChecklistJson(r?.checklist_json))}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create schedule'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       const payload = { title: $('#rTitle').value, description: $('#rDesc').value, client_id: $('#rClient').value || null, assignee_id: Number($('#rAssignee').value),
-        frequency: $('#rFreq').value, priority: $('#rPriority').value, next_due: $('#rNext').value, lead_days: Number($('#rLead').value), step: 1 };
+        frequency: $('#rFreq').value, priority: $('#rPriority').value, next_due: $('#rNext').value, lead_days: Number($('#rLead').value), step: 1, checklist: $('#rChecklist').value };
       try {
         if (editing) await api.put(`/recurring/${r.id}`, payload); else await api.post('/recurring', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Schedule created ✓'); loadRecurring();

@@ -23,12 +23,12 @@ const getOne = db.prepare(`SELECT * FROM recurring_tasks WHERE id = ?`);
 const listFor = (req) => (req.user.role === 'ADMIN' ? listAll.all() : listMine.all(req.user.id));
 const canManage = (req, rec) => req.user.role === 'ADMIN' || rec.created_by === req.user.id;
 const insertRec = db.prepare(
-  `INSERT INTO recurring_tasks (title, description, client_id, assignee_id, priority, frequency, step, lead_days, next_due, active, created_by, created_ts)
-   VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, @step, @lead_days, @next_due, 1, @created_by, @created_ts)`
+  `INSERT INTO recurring_tasks (title, description, client_id, assignee_id, priority, frequency, step, lead_days, next_due, checklist_json, active, created_by, created_ts)
+   VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, @step, @lead_days, @next_due, @checklist_json, 1, @created_by, @created_ts)`
 );
 const updateRec = db.prepare(
   `UPDATE recurring_tasks SET title=@title, description=@description, client_id=@client_id, assignee_id=@assignee_id,
-   priority=@priority, frequency=@frequency, step=@step, lead_days=@lead_days, next_due=@next_due WHERE id=@id`
+   priority=@priority, frequency=@frequency, step=@step, lead_days=@lead_days, next_due=@next_due, checklist_json=@checklist_json WHERE id=@id`
 );
 const setActive = db.prepare(`UPDATE recurring_tasks SET active = ? WHERE id = ?`);
 const delRec = db.prepare(`DELETE FROM recurring_tasks WHERE id = ?`);
@@ -46,7 +46,16 @@ function clean(body, existing) {
     step: Math.max(1, Number(body.step ?? existing?.step ?? 1)),
     lead_days: Math.max(0, Number(body.lead_days ?? existing?.lead_days ?? 7)),
     next_due: String(body.next_due ?? existing?.next_due ?? ''),
+    checklist_json: body.checklist !== undefined ? JSON.stringify(parseChecklistLines(body.checklist)) : (existing?.checklist_json ?? ''),
   };
+}
+
+// Normalise a checklist payload (array or newline text) to clean lines.
+function parseChecklistLines(input) {
+  let lines = [];
+  if (Array.isArray(input)) lines = input;
+  else if (typeof input === 'string') lines = input.split('\n');
+  return lines.map((s) => String(s).trim()).filter(Boolean).slice(0, 30);
 }
 
 // ADMIN: all schedules. Employees use /mine.

@@ -29,8 +29,34 @@ const updateTask = db.prepare(
 );
 const deleteTask = db.prepare(`DELETE FROM tasks WHERE id = ?`);
 
+const insertChecklistItem = db.prepare(
+  `INSERT INTO task_checklist (task_id, text, position) VALUES (?, ?, ?)`
+);
+const checklistForTask = db.prepare(`SELECT id, text, done FROM task_checklist WHERE task_id = ? ORDER BY position, id`);
+const getChecklistItem = db.prepare(`SELECT * FROM task_checklist WHERE id = ? AND task_id = ?`);
+const setChecklistDone = db.prepare(`UPDATE task_checklist SET done = ? WHERE id = ?`);
+const countOpenItems = db.prepare(`SELECT COUNT(*) AS c FROM task_checklist WHERE task_id = ? AND done = 0`);
+
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
 const STATUS = ['TODO', 'IN_PROGRESS', 'DONE'];
+
+// Normalise a checklist payload (array of strings, or newline text) to clean lines.
+function parseChecklist(input) {
+  let lines = [];
+  if (Array.isArray(input)) lines = input;
+  else if (typeof input === 'string') lines = input.split('\n');
+  return lines.map((s) => String(s).trim()).filter(Boolean).slice(0, 30);
+}
+
+// Add the checklist array (of item rows) onto each task object.
+function withChecklist(task) {
+  if (task) task.checklist = checklistForTask.all(task.id);
+  return task;
+}
+function withChecklists(tasks) {
+  for (const t of tasks) t.checklist = checklistForTask.all(t.id);
+  return tasks;
+}
 
 // Create a task. Admins can assign to anyone; employees create for
 // themselves and must tie it to a client (no "random" tasks).
@@ -43,26 +69,44 @@ router.post('/', requireAuth, (req, res) => {
   const client_id = req.body.client_id ? Number(req.body.client_id) : null;
   if (!admin && !client_id) return res.status(400).json({ error: 'Please choose a client for your task' });
   const priority = PRI.includes(String(req.body.priority || '').toUpperCase()) ? String(req.body.priority).toUpperCase() : 'MEDIUM';
-  const info = insertTask.run({
-    title,
-    description: String(req.body.description || '').slice(0, 2000),
-    assignee_id,
-    assigned_by: req.user.id,
-    priority,
-    due_date: String(req.body.due_date || ''),
-    client_id,
-    ts: now().toMillis(),
+  const checklist = parseChecklist(req.body.checklist);
+  const create = db.transaction(() => {
+    const info = insertTask.run({
+      title,
+      description: String(req.body.description || '').slice(0, 2000),
+      assignee_id,
+      assigned_by: req.user.id,
+      priority,
+      due_date: String(req.body.due_date || ''),
+      client_id,
+      ts: now().toMillis(),
+    });
+    checklist.forEach((text, i) => insertChecklistItem.run(info.lastInsertRowid, text, i));
+    return info.lastInsertRowid;
   });
-  res.json({ task: getTask.get(info.lastInsertRowid) });
+  res.json({ task: withChecklist(getTask.get(create())) });
 });
 
 // My tasks.
-router.get('/mine', requireAuth, (req, res) => res.json({ tasks: tasksForUser.all(req.user.id) }));
+router.get('/mine', requireAuth, (req, res) => res.json({ tasks: withChecklists(tasksForUser.all(req.user.id)) }));
 
 // ADMIN: every task.
-router.get('/all', requireAdmin, (_req, res) => res.json({ tasks: allTasks.all() }));
+router.get('/all', requireAdmin, (_req, res) => res.json({ tasks: withChecklists(allTasks.all()) }));
 
-// Assignee (or admin) updates status.
+// Assignee (or admin) ticks/unticks a checklist item.
+router.post('/:id/checklist/:itemId', requireAuth, (req, res) => {
+  const task = getTask.get(Number(req.params.id));
+  if (!task) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not your task' });
+  }
+  const item = getChecklistItem.get(Number(req.params.itemId), task.id);
+  if (!item) return res.status(404).json({ error: 'Checklist item not found' });
+  setChecklistDone.run(req.body.done ? 1 : 0, item.id);
+  res.json({ task: withChecklist(getTask.get(task.id)) });
+});
+
+// Assignee (or admin) updates status. Can't mark DONE with open checklist items.
 router.post('/:id/status', requireAuth, (req, res) => {
   const status = String(req.body.status || '').toUpperCase();
   if (!STATUS.includes(status)) return res.status(400).json({ error: 'Invalid status' });
@@ -71,8 +115,11 @@ router.post('/:id/status', requireAuth, (req, res) => {
   if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
     return res.status(403).json({ error: 'Not your task' });
   }
+  if (status === 'DONE' && countOpenItems.get(task.id).c > 0) {
+    return res.status(409).json({ error: 'Complete every checklist item before marking this task done.' });
+  }
   setStatus.run(status, now().toMillis(), task.id);
-  res.json({ task: getTask.get(task.id) });
+  res.json({ task: withChecklist(getTask.get(task.id)) });
 });
 
 // ADMIN: edit task.
@@ -89,7 +136,11 @@ router.put('/:id', requireAdmin, (req, res) => {
     client_id: req.body.client_id === undefined ? task.client_id : (req.body.client_id ? Number(req.body.client_id) : null),
     ts: now().toMillis(),
   });
-  res.json({ task: getTask.get(task.id) });
+  if (req.body.checklist !== undefined) {
+    db.prepare('DELETE FROM task_checklist WHERE task_id = ?').run(task.id);
+    parseChecklist(req.body.checklist).forEach((text, i) => insertChecklistItem.run(task.id, text, i));
+  }
+  res.json({ task: withChecklist(getTask.get(task.id)) });
 });
 
 // ADMIN: delete task.
