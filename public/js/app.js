@@ -215,7 +215,7 @@
     if (isAdmin()) {
       setMain('Leaves', "Requests waiting for approval, and who's on leave.",
         `<div class="section" id="adminLeaves"></div>
-         <div class="section"><h2>On leave — current & upcoming</h2><div id="onLeave"></div></div>`);
+         <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div id="onLeave"></div></div>`);
       loadAdminLeaves();
       loadOnLeave();
       return;
@@ -234,10 +234,17 @@
     try {
       const { leaves } = await api.get('/leaves/upcoming');
       const today = todayISO();
+      const onNowOf = (l) => l.start_date <= today && l.end_date >= today;
+      // Currently-on-leave first, then upcoming; within each group, earliest start first.
+      const sorted = leaves.slice().sort((a, b) =>
+        (onNowOf(b) - onNowOf(a)) || a.start_date.localeCompare(b.start_date));
+      const nowCount = leaves.filter(onNowOf).length;
+      const heading = $('#onLeaveHeading');
+      if (heading) heading.textContent = `On leave — ${nowCount} now · ${leaves.length - nowCount} upcoming`;
       const el = $('#onLeave'); if (!el) return;
-      el.innerHTML = leaves.length ? `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Status</th></tr></thead><tbody>
-        ${leaves.map((l) => {
-          const onNow = l.start_date <= today && l.end_date >= today;
+      el.innerHTML = sorted.length ? `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Status</th></tr></thead><tbody>
+        ${sorted.map((l) => {
+          const onNow = onNowOf(l);
           return `<tr><td>${esc(l.name)}</td>
             <td>${esc(l.start_date)}${l.end_date !== l.start_date ? ' → ' + esc(l.end_date) : ''}</td>
             <td>${esc(cap(l.kind))}</td><td>${l.days}</td>
