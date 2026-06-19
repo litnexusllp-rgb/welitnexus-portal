@@ -132,6 +132,8 @@
         const [today, pend] = await Promise.all([api.get('/attendance/today'), api.get('/leaves/pending')]);
         const working = today.people.filter((p) => p.state === 'IN');
         const onBreak = today.people.filter((p) => p.state === 'BREAK');
+        const clockedOut = today.people.filter((p) => p.state === 'OUT');
+        const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
         const presenceCol = (title, list, emptyMsg) => `
           <div class="section" style="margin-bottom:0;">
             <h2>${title} (${list.length})</h2>
@@ -143,6 +145,14 @@
           <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
             ${presenceCol('🟢 Currently in', working, 'No one is clocked in right now.')}
             ${presenceCol('☕ On break', onBreak, 'No one is on break.')}
+          </div>
+          <div class="section">
+            <h2>✅ Clocked out today (${clockedOut.length})</h2>
+            ${clockedOut.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
+              ${clockedOut.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td>
+                <td>${fmtTime(p.firstIn)}</td><td>${fmtTime(p.lastOut)}</td>
+                <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
+            </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
           </div>
           <div class="section">
             <h2>Pending leave approvals (${pend.leaves.length})</h2>
@@ -448,16 +458,61 @@
     try { const a = JSON.parse(json); return Array.isArray(a) ? a.join('\n') : ''; } catch (_e) { return ''; }
   }
 
+  // Compact "✓ 2/3" badge for the admin board.
+  function checklistBadge(t) {
+    if (!t.checklist || !t.checklist.length) return '';
+    const total = t.checklist.length, done = total - openItems(t);
+    const cls = done === total ? 'b-done' : 'b-pending';
+    return ` <span class="badge ${cls}" title="checklist">✓ ${done}/${total}</span>`;
+  }
+
+  // Modal to add / rename / remove a task's checklist items (admin or assignee).
+  function openChecklistEditor(task, onClose) {
+    renderChecklistEditor(task, onClose);
+  }
+  function renderChecklistEditor(task, onClose) {
+    const items = task.checklist || [];
+    modal(`<h3>Checklist — ${esc(task.title)}</h3>
+      <div>${items.length ? items.map((i) => `<div class="form-row" style="margin-bottom:8px;">
+          <div class="field" style="flex:1;"><input value="${esc(i.text)}" data-cltext="${i.id}"></div>
+          <div class="field" style="flex:0 0 auto;display:flex;gap:6px;align-items:center;padding-top:2px;">
+            <span title="${i.done ? 'done' : 'open'}" style="font-size:1.05rem;">${i.done ? '✅' : '⬜'}</span>
+            <button class="btn btn-primary btn-sm" data-clsave="${i.id}">Save</button>
+            <button class="btn btn-danger btn-sm" data-cldel="${i.id}">✕</button>
+          </div></div>`).join('') : '<div class="empty" style="margin-bottom:10px;">No checklist items yet.</div>'}</div>
+      <div class="form-row" style="margin-bottom:0;"><div class="field" style="flex:1;"><input id="clNew" placeholder="Add a checklist item…"></div>
+        <div class="field" style="flex:0 0 auto;padding-top:2px;"><button class="btn btn-navy btn-sm" id="clAdd">Add</button></div></div>
+      <div class="modal-actions"><button class="btn btn-primary" id="clDone">Done</button></div>`);
+    const rerender = (updated) => renderChecklistEditor(updated, onClose);
+    document.querySelectorAll('[data-clsave]').forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.clsave;
+      try { const r = await api.post(`/tasks/${task.id}/checklist/${id}`, { text: document.querySelector(`[data-cltext="${id}"]`).value }); toast('Saved ✓'); rerender(r.task); }
+      catch (e) { toast(e.message, true); }
+    }));
+    document.querySelectorAll('[data-cldel]').forEach((b) => b.addEventListener('click', async () => {
+      try { const r = await api.del(`/tasks/${task.id}/checklist/${b.dataset.cldel}`); toast('Removed'); rerender(r.task); }
+      catch (e) { toast(e.message, true); }
+    }));
+    $('#clAdd').addEventListener('click', async () => {
+      const text = $('#clNew').value.trim(); if (!text) return;
+      try { const r = await api.post(`/tasks/${task.id}/checklist`, { text }); toast('Added ✓'); rerender(r.task); }
+      catch (e) { toast(e.message, true); }
+    });
+    $('#clDone').addEventListener('click', () => { closeModal(); if (onClose) onClose(); });
+  }
+
   async function loadMyTasks() {
     try {
       const { tasks } = await api.get('/tasks/mine');
       const el = $('#myTasks');
       el.innerHTML = tasks.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>
-        ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}</td>
+        ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}
+          <div style="margin-top:6px;"><button class="btn btn-ghost btn-sm" data-mychecklist="${t.id}">${t.checklist && t.checklist.length ? 'Edit checklist' : '+ Add checklist'}</button></div></td>
           <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No tasks assigned to you. 🎉</div>`;
       wireStatusSelects(el, loadMyTasks);
       wireChecklist(el, loadMyTasks);
+      el.querySelectorAll('[data-mychecklist]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(tasks.find((t) => t.id == b.dataset.mychecklist), loadMyTasks)));
     } catch (e) { toast(e.message, true); }
   }
 
@@ -477,12 +532,12 @@
         <div class="section" style="margin-bottom:18px;">
           <h2 style="font-size:1rem;">${esc(g)} <span style="color:var(--slate);font-weight:500;">(${groups[g].length})</span></h2>
           <table><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
-          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistHtml(t)}</td>
+          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
             <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
-            <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-task="${t.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-task="${t.id}">✕</button></td></tr>`).join('')}
+            <td class="row-actions"><button class="btn btn-ghost btn-sm" data-checklist-task="${t.id}">✓ Checklist</button><button class="btn btn-ghost btn-sm" data-edit-task="${t.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-task="${t.id}">✕</button></td></tr>`).join('')}
           </tbody></table></div>`).join('');
       wireStatusSelects(el, () => { loadAllTasks(); loadMyTasks(); });
-      wireChecklist(el, () => { loadAllTasks(); loadMyTasks(); });
+      el.querySelectorAll('[data-checklist-task]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(tasks.find((t) => t.id == b.dataset.checklistTask), () => { loadAllTasks(); loadMyTasks(); })));
       el.querySelectorAll('[data-edit-task]').forEach((b) => b.addEventListener('click', () => openTaskModal(tasks.find((t) => t.id == b.dataset.editTask))));
       el.querySelectorAll('[data-del-task]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm('Delete this task?')) return;

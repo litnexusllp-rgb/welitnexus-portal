@@ -75,7 +75,12 @@ router.get('/today', requireAdmin, (req, res) => {
   const people = activeUsers.all().map((u) => {
     const events = byUser[u.id] || [];
     const s = summarize(events, now().toMillis());
-    return { id: u.id, name: u.name, department: u.department, title: u.title, state: events.length ? s.state : 'OFF', workedMinutes: s.workedMinutes, firstIn: s.firstIn };
+    return {
+      id: u.id, name: u.name, department: u.department, title: u.title,
+      state: events.length ? s.state : 'OFF',
+      workedMinutes: s.workedMinutes, breakMinutes: s.breakMinutes,
+      firstIn: s.firstIn, lastOut: s.lastOut,
+    };
   });
   res.json({ day, people });
 });

@@ -35,7 +35,20 @@ const insertChecklistItem = db.prepare(
 const checklistForTask = db.prepare(`SELECT id, text, done FROM task_checklist WHERE task_id = ? ORDER BY position, id`);
 const getChecklistItem = db.prepare(`SELECT * FROM task_checklist WHERE id = ? AND task_id = ?`);
 const setChecklistDone = db.prepare(`UPDATE task_checklist SET done = ? WHERE id = ?`);
+const setChecklistText = db.prepare(`UPDATE task_checklist SET text = ? WHERE id = ?`);
+const deleteChecklistItem = db.prepare(`DELETE FROM task_checklist WHERE id = ?`);
+const nextChecklistPos = db.prepare(`SELECT COALESCE(MAX(position), -1) + 1 AS p FROM task_checklist WHERE task_id = ?`);
 const countOpenItems = db.prepare(`SELECT COUNT(*) AS c FROM task_checklist WHERE task_id = ? AND done = 0`);
+
+// The assignee or an admin may manage a task's checklist.
+function loadManageableTask(req, res) {
+  const task = getTask.get(Number(req.params.id));
+  if (!task) { res.status(404).json({ error: 'Not found' }); return null; }
+  if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
+    res.status(403).json({ error: 'Not your task' }); return null;
+  }
+  return task;
+}
 
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
 const STATUS = ['TODO', 'IN_PROGRESS', 'DONE'];
@@ -93,16 +106,34 @@ router.get('/mine', requireAuth, (req, res) => res.json({ tasks: withChecklists(
 // ADMIN: every task.
 router.get('/all', requireAdmin, (_req, res) => res.json({ tasks: withChecklists(allTasks.all()) }));
 
-// Assignee (or admin) ticks/unticks a checklist item.
+// Assignee (or admin) adds a checklist item to an existing task.
+router.post('/:id/checklist', requireAuth, (req, res) => {
+  const task = loadManageableTask(req, res); if (!task) return;
+  const text = String(req.body.text || '').trim().slice(0, 200);
+  if (!text) return res.status(400).json({ error: 'Item text is required' });
+  insertChecklistItem.run(task.id, text, nextChecklistPos.get(task.id).p);
+  res.json({ task: withChecklist(getTask.get(task.id)) });
+});
+
+// Assignee (or admin) ticks/unticks or renames a checklist item.
 router.post('/:id/checklist/:itemId', requireAuth, (req, res) => {
-  const task = getTask.get(Number(req.params.id));
-  if (!task) return res.status(404).json({ error: 'Not found' });
-  if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
-    return res.status(403).json({ error: 'Not your task' });
-  }
+  const task = loadManageableTask(req, res); if (!task) return;
   const item = getChecklistItem.get(Number(req.params.itemId), task.id);
   if (!item) return res.status(404).json({ error: 'Checklist item not found' });
-  setChecklistDone.run(req.body.done ? 1 : 0, item.id);
+  if (req.body.text !== undefined) {
+    const text = String(req.body.text).trim().slice(0, 200);
+    if (text) setChecklistText.run(text, item.id);
+  }
+  if (req.body.done !== undefined) setChecklistDone.run(req.body.done ? 1 : 0, item.id);
+  res.json({ task: withChecklist(getTask.get(task.id)) });
+});
+
+// Assignee (or admin) removes a checklist item.
+router.delete('/:id/checklist/:itemId', requireAuth, (req, res) => {
+  const task = loadManageableTask(req, res); if (!task) return;
+  const item = getChecklistItem.get(Number(req.params.itemId), task.id);
+  if (!item) return res.status(404).json({ error: 'Checklist item not found' });
+  deleteChecklistItem.run(item.id);
   res.json({ task: withChecklist(getTask.get(task.id)) });
 });
 
