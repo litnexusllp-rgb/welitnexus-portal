@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
+const { db } = require('./db');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
 const { startRecurringScheduler } = require('./recurring');
@@ -49,7 +50,16 @@ app.use('/api/achievements', require('./routes/achievements'));
 app.use('/api/kpi', require('./routes/kpi'));
 app.use('/api/reports', require('./routes/reports'));
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+// Health check for uptime monitors: confirms the server AND the database
+// respond. Returns 503 if the DB is unreachable so monitors flag it as down.
+app.get('/api/health', (_req, res) => {
+  try {
+    db.prepare('SELECT 1').get();
+    res.json({ ok: true, ts: Date.now() });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'database unavailable', ts: Date.now() });
+  }
+});
 
 // Static frontend
 app.use(express.static(path.join(__dirname, '..', 'public')));
