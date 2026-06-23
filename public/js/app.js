@@ -604,12 +604,17 @@
     loadRecurring();
   };
 
+  const STAGE_LABEL = { PROSPECT: 'Prospect', INTERVIEWED: 'Interviewed – not signed', SIGNED: 'Signed' };
+  const STAGE_CLASS = { PROSPECT: 'b-todo', INTERVIEWED: 'b-pending', SIGNED: 'b-done' };
+  const stageBadge = (s) => `<span class="badge ${STAGE_CLASS[s] || 'b-todo'}">${esc(STAGE_LABEL[s] || cap(s || 'Prospect'))}</span>`;
+
   async function loadClients() {
     try {
       const { clients } = await api.get('/clients/all');
       const el = $('#clientTable');
-      el.innerHTML = clients.length ? `<table><thead><tr><th>Client</th><th>Code</th><th>Notes</th><th>Status</th><th></th></tr></thead><tbody>
-        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td><strong>${esc(c.name)}</strong></td><td>${esc(c.code || '—')}</td><td>${esc(c.notes || '—')}</td>
+      el.innerHTML = clients.length ? `<table><thead><tr><th>Client</th><th>Code</th><th>Business type</th><th>Stage</th><th>Notes</th><th>Active</th><th></th></tr></thead><tbody>
+        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td><strong>${esc(c.name)}</strong></td><td>${esc(c.code || '—')}</td>
+          <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td><td>${esc(c.notes || '—')}</td>
           <td>${c.active ? badge('approved') : badge('rejected')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
             <button class="btn ${c.active ? 'btn-danger' : 'btn-primary'} btn-sm" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? 'Archive' : 'Restore'}</button></td></tr>`).join('')}
@@ -627,11 +632,13 @@
     modal(`<h3>${editing ? 'Edit client' : 'Add client'}</h3>
       <div class="form-row"><div class="field"><label>Name</label><input id="cName" value="${esc(c?.name || '')}"></div>
         <div class="field"><label>Code</label><input id="cCode" value="${esc(c?.code || '')}" placeholder="e.g. TESH"></div></div>
+      <div class="form-row"><div class="field"><label>Business type</label><input id="cBizType" value="${esc(c?.business_type || '')}" placeholder="e.g. Restaurant, E-commerce, Law firm"></div>
+        <div class="field"><label>Stage</label><select id="cStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}" ${(c?.stage || 'PROSPECT') === s ? 'selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Notes</label><textarea id="cNotes">${esc(c?.notes || '')}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#cName').value, code: $('#cCode').value, notes: $('#cNotes').value };
+      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, notes: $('#cNotes').value };
       try {
         if (editing) await api.put(`/clients/${c.id}`, payload); else await api.post('/clients', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadClients(); loadLookups();

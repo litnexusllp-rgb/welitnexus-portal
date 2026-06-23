@@ -93,12 +93,14 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
 
 -- The firm's client list — a permanent client database.
 CREATE TABLE IF NOT EXISTS clients (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  name       TEXT    NOT NULL,
-  code       TEXT    DEFAULT '',        -- short code / acronym
-  notes      TEXT    DEFAULT '',
-  active     INTEGER NOT NULL DEFAULT 1,
-  created_ts INTEGER NOT NULL
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    NOT NULL,
+  code          TEXT    DEFAULT '',      -- short code / acronym
+  business_type TEXT    DEFAULT '',      -- free text: what kind of business
+  stage         TEXT    NOT NULL DEFAULT 'PROSPECT', -- PROSPECT | INTERVIEWED | SIGNED
+  notes         TEXT    DEFAULT '',
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_ts    INTEGER NOT NULL
 );
 
 -- Recurring task templates (e.g. "Monthly bookkeeping for Client X").
@@ -158,6 +160,8 @@ for (const stmt of [
   `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
   `ALTER TABLE users ADD COLUMN emp_code TEXT DEFAULT ''`,
   `ALTER TABLE recurring_tasks ADD COLUMN checklist_json TEXT DEFAULT ''`,
+  `ALTER TABLE clients ADD COLUMN business_type TEXT DEFAULT ''`,
+  `ALTER TABLE clients ADD COLUMN stage TEXT NOT NULL DEFAULT 'PROSPECT'`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }
