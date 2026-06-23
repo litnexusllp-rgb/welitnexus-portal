@@ -851,6 +851,12 @@
          <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Monthly attendance register</h2>
            <div class="row-actions"><input type="month" id="regMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;">
              <button class="btn btn-ghost btn-sm" id="regCsvBtn">Export CSV</button></div></div>
+         <div class="row-actions" style="margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+           <span style="font-size:.84rem;color:var(--slate);">Working weekend (e.g. 1st Saturday):</span>
+           <input type="date" id="wdDate" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;">
+           <button class="btn btn-ghost btn-sm" id="wdAdd">Mark as working day</button>
+           <span id="wdList" style="display:flex;gap:6px;flex-wrap:wrap;"></span>
+         </div>
          <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half day · H = holiday · W = weekend · A = absent · · = upcoming</p>
          <div id="regGrid" style="overflow-x:auto;"></div>
        </div>`);
@@ -858,6 +864,7 @@
     $('#empCsvBtn').addEventListener('click', exportEmpCsv);
     $('#regMonth').addEventListener('change', loadRegister);
     $('#regCsvBtn').addEventListener('click', exportRegisterCsv);
+    $('#wdAdd').addEventListener('click', addWorkingDay);
     loadEmpReport();
     loadRegister();
   };
@@ -953,18 +960,40 @@
       const month = $('#regMonth').value || thisMonthISO();
       const data = await api.get(`/reports/register?month=${month}`);
       REGISTER = data;
-      const dayNums = data.days.map((d) => d.slice(8));
+      const workingSet = {}; (data.workingDays || []).forEach((w) => { workingSet[w.date] = true; });
       $('#regGrid').innerHTML = `<table style="min-width:max-content;"><thead><tr>
           <th style="position:sticky;left:0;background:var(--mist);">Employee</th>
-          ${data.days.map((d) => { const wd = new Date(d + 'T00:00').getDay(); return `<th style="text-align:center;padding:8px 6px;${wd === 0 || wd === 6 ? 'color:#b6c2cf;' : ''}">${d.slice(8)}</th>`; }).join('')}
+          ${data.days.map((d) => { const wd = new Date(d + 'T00:00').getDay(); const wknd = (wd === 0 || wd === 6) && !workingSet[d]; return `<th style="text-align:center;padding:8px 6px;${wknd ? 'color:#b6c2cf;' : ''}${workingSet[d] ? 'color:var(--teal-dark);' : ''}">${d.slice(8)}</th>`; }).join('')}
           <th style="text-align:center;">P</th><th style="text-align:center;">L</th><th style="text-align:center;">A</th></tr></thead><tbody>
         ${data.users.map((u) => `<tr>
           <td style="position:sticky;left:0;background:var(--white);font-weight:600;white-space:nowrap;">${esc(u.name)}</td>
           ${data.days.map((d) => { const s = u.cells[d]; return `<td style="text-align:center;padding:6px;${regCellStyle(s)}" title="${d}: ${cap(s)}">${STATUS_CODE[s] || ''}</td>`; }).join('')}
           <td style="text-align:center;font-weight:700;">${u.totals.present}</td><td style="text-align:center;">${u.totals.leave}</td><td style="text-align:center;color:var(--danger);">${u.totals.absent}</td></tr>`).join('')}
       </tbody></table>`;
-      void dayNums;
+      renderWorkingDays(data.workingDays || [], month);
     } catch (e) { toast(e.message, true); }
+  }
+
+  // First Saturday of a yyyy-mm month, as yyyy-mm-dd.
+  function firstSaturday(month) {
+    const d = new Date(month + '-01T00:00');
+    d.setDate(1 + ((6 - d.getDay() + 7) % 7));
+    return d.toLocaleDateString('en-CA');
+  }
+  function renderWorkingDays(list, month) {
+    const date = $('#wdDate'); if (date) date.value = firstSaturday(month);
+    const el = $('#wdList'); if (!el) return;
+    el.innerHTML = list.map((w) => `<span class="badge b-present" style="display:inline-flex;gap:6px;align-items:center;">${esc(w.date)}
+      <span data-wddel="${w.id}" title="remove" style="cursor:pointer;font-weight:700;">✕</span></span>`).join('');
+    el.querySelectorAll('[data-wddel]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api.del(`/workingdays/${b.dataset.wddel}`); toast('Removed'); loadRegister(); loadEmpReport(); } catch (e) { toast(e.message, true); }
+    }));
+  }
+  async function addWorkingDay() {
+    const date = $('#wdDate').value;
+    if (!date) return toast('Pick a date', true);
+    try { await api.post('/workingdays', { date }); toast('Marked as working day ✓'); loadRegister(); loadEmpReport(); }
+    catch (e) { toast(e.message, true); }
   }
 
   function regCellStyle(status) {

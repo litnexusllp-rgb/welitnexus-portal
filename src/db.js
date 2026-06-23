@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS holidays (
 );
 CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date);
 
+-- Weekend dates the firm treats as working (e.g. the 1st Saturday). Overrides
+-- the default Sat/Sun = weekend rule in attendance reports.
+CREATE TABLE IF NOT EXISTS working_days (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  date        TEXT    NOT NULL UNIQUE, -- yyyy-LL-dd
+  note        TEXT    DEFAULT '',
+  created_by  INTEGER,
+  created_ts  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_working_days_date ON working_days(date);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   title         TEXT    NOT NULL,

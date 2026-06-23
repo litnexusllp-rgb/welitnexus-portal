@@ -27,6 +27,7 @@ const approvedLeavesOverlapping = db.prepare(
    WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
 );
 const holidaysBetween = db.prepare(`SELECT date, name FROM holidays WHERE date >= ? AND date <= ?`);
+const workingDaysBetween = db.prepare(`SELECT id, date FROM working_days WHERE date >= ? AND date <= ?`);
 
 function eachDay(start, end) {
   const out = [];
@@ -37,7 +38,7 @@ function eachDay(start, end) {
 }
 
 // Decide a single day's status given precomputed context.
-function classify(day, summary, leaveKind, isHoliday, isFuture) {
+function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverride) {
   const weekday = DateTime.fromISO(day, { zone: ZONE }).weekday; // 1=Mon..7=Sun
   const clockedIn = summary && summary.firstIn != null; // showed up = clocked in at all
   if (isFuture) return 'FUTURE';
@@ -45,7 +46,7 @@ function classify(day, summary, leaveKind, isHoliday, isFuture) {
   if (leaveKind === 'HALF') return 'HALF';
   if (leaveKind === 'FULL') return 'LEAVE';
   if (isHoliday) return 'HOLIDAY';
-  if (weekday >= 6) return 'WEEKEND';
+  if (weekday >= 6 && !isWorkingOverride) return 'WEEKEND'; // a marked working weekend (1st Sat) falls through to ABSENT
   return 'ABSENT';
 }
 
@@ -63,6 +64,8 @@ router.get('/attendance', requireAdmin, (req, res) => {
   for (const e of eventsForUserBetween.all(user.id, start, end)) (byDay[e.day] = byDay[e.day] || []).push(e);
   const holidaySet = {};
   for (const h of holidaysBetween.all(start, end)) holidaySet[h.date] = h.name;
+  const workingSet = {};
+  for (const w of workingDaysBetween.all(start, end)) workingSet[w.date] = true;
   const leaveByDay = {};
   for (const l of approvedLeavesOverlapping.all(end, start)) {
     if (l.user_id !== user.id) continue;
@@ -74,7 +77,7 @@ router.get('/attendance', requireAdmin, (req, res) => {
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
     const s = byDay[day] ? summarize(byDay[day], day === today ? now().toMillis() : null) : null;
-    const status = classify(day, s, leaveByDay[day], !!holidaySet[day], day > today);
+    const status = classify(day, s, leaveByDay[day], !!holidaySet[day], day > today, !!workingSet[day]);
     if (status === 'PRESENT') { totals.present += 1; totals.workedMinutes += s.workedMinutes; }
     else if (status === 'LEAVE') totals.leave += 1;
     else if (status === 'HALF') { totals.leave += 0.5; totals.present += 0.5; totals.workedMinutes += s ? s.workedMinutes : 0; }
@@ -105,6 +108,9 @@ router.get('/register', requireAdmin, (req, res) => {
 
   const holidaySet = {};
   for (const h of holidaysBetween.all(start, end)) holidaySet[h.date] = h.name;
+  const workingSet = {};
+  const workingDays = workingDaysBetween.all(start, end);
+  for (const w of workingDays) workingSet[w.date] = true;
 
   const eventsByUserDay = {};
   for (const e of allEventsBetween.all(start, end)) {
@@ -124,7 +130,7 @@ router.get('/register', requireAdmin, (req, res) => {
     for (const day of days) {
       const ev = eventsByUserDay[`${u.id}|${day}`];
       const s = ev ? summarize(ev, day === today ? now().toMillis() : null) : null;
-      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], !!holidaySet[day], day > today);
+      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], !!holidaySet[day], day > today, !!workingSet[day]);
       cells[day] = status;
       if (status === 'PRESENT') totals.present += 1;
       else if (status === 'HALF') { totals.present += 0.5; totals.leave += 0.5; }
@@ -134,7 +140,7 @@ router.get('/register', requireAdmin, (req, res) => {
     return { id: u.id, name: u.name, department: u.department, cells, totals };
   });
 
-  res.json({ month, days, holidays: holidaySet, users });
+  res.json({ month, days, holidays: holidaySet, workingDays, users });
 });
 
 module.exports = router;
