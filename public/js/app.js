@@ -132,13 +132,7 @@
         ${statCard('Pending leave requests', pending, 'value')}`;
     } catch (e) { toast(e.message, true); }
 
-    if (isAdmin()) {
-      await loadDashAdmin();
-      // Tick the live "currently in" timers every second; re-sync with the
-      // server every 15s so clock-ins/outs and breaks appear without a reload.
-      dashTimers.push(setInterval(tickDashTimers, 1000));
-      dashTimers.push(setInterval(loadDashAdmin, 15000));
-    }
+    if (isAdmin()) startLiveAttendance('dashAdmin', true);
   };
 
   // h m s from milliseconds, e.g. "2h 14m 06s".
@@ -158,10 +152,14 @@
     });
   }
 
-  async function loadDashAdmin() {
-    const host = $('#dashAdmin'); if (!host) return; // navigated away
+  // Live team-attendance panel, reused by the Dashboard and the Clock page.
+  // hostId: element to render into. withApprovals: also show pending leaves.
+  async function renderLiveAttendance(hostId, withApprovals) {
+    const host = $('#' + hostId); if (!host) return; // navigated away
     try {
-      const [today, pend] = await Promise.all([api.get('/attendance/today'), api.get('/leaves/pending')]);
+      const reqs = [api.get('/attendance/today')];
+      if (withApprovals) reqs.push(api.get('/leaves/pending'));
+      const [today, pend] = await Promise.all(reqs);
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
@@ -190,13 +188,20 @@
               <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
           </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
         </div>
-        <div class="section">
+        ${withApprovals ? `<div class="section">
           <h2>Pending leave approvals (${pend.leaves.length})</h2>
           ${pend.leaves.length ? leaveApprovalTable(pend.leaves) : `<div class="empty">Nothing waiting for approval. 🎉</div>`}
-        </div>`;
-      wireLeaveApprovals();
+        </div>` : ''}`;
+      if (withApprovals) wireLeaveApprovals();
       tickDashTimers(); // paint the first tick immediately
     } catch (e) { toast(e.message, true); }
+  }
+
+  // Start the live panel in a host element with a 1s tick and a fast poll.
+  function startLiveAttendance(hostId, withApprovals) {
+    renderLiveAttendance(hostId, withApprovals);
+    dashTimers.push(setInterval(tickDashTimers, 1000));
+    dashTimers.push(setInterval(() => renderLiveAttendance(hostId, withApprovals), 10000));
   }
 
   const statCard = (label, value, cls) => `<div class="card stat"><div class="label">${esc(label)}</div><div class="${cls}">${value}</div></div>`;
@@ -207,9 +212,11 @@
       `<div class="cards" style="grid-template-columns:1fr;max-width:520px;">
          <div class="card clock" id="clockCard"></div>
        </div>
-       <div class="section"><h2>Last 14 days</h2><div id="timesheet"></div></div>`);
+       <div class="admin-only section" style="margin-top:8px;"><h2 style="color:var(--navy);">Team — live now</h2><div id="clockTeam"></div></div>
+       <div class="section"><h2>My last 14 days</h2><div id="timesheet"></div></div>`);
     await renderClock();
     loadTimesheet();
+    if (isAdmin()) startLiveAttendance('clockTeam', false); // live team timers + 10s refresh
   };
 
   async function renderClock() {
