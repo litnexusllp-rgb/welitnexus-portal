@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS clients (
   business_type TEXT    DEFAULT '',      -- free text: what kind of business
   stage         TEXT    NOT NULL DEFAULT 'PROSPECT', -- PROSPECT | INTERVIEWED | SIGNED
   notes         TEXT    DEFAULT '',
+  approval      TEXT    NOT NULL DEFAULT 'APPROVED', -- APPROVED | PENDING | REJECTED
+  created_by    INTEGER,                 -- who proposed/created it
   active        INTEGER NOT NULL DEFAULT 1,
   created_ts    INTEGER NOT NULL
 );
@@ -173,6 +175,8 @@ for (const stmt of [
   `ALTER TABLE recurring_tasks ADD COLUMN checklist_json TEXT DEFAULT ''`,
   `ALTER TABLE clients ADD COLUMN business_type TEXT DEFAULT ''`,
   `ALTER TABLE clients ADD COLUMN stage TEXT NOT NULL DEFAULT 'PROSPECT'`,
+  `ALTER TABLE clients ADD COLUMN approval TEXT NOT NULL DEFAULT 'APPROVED'`,
+  `ALTER TABLE clients ADD COLUMN created_by INTEGER`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

@@ -353,7 +353,7 @@
          <button class="btn btn-primary" id="newTaskBtn">+ Assign task</button></div>
        <div class="admin-only" id="allTasks" style="margin-bottom:28px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">My tasks</h2>
-         ${emp ? '<button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button>' : ''}</div>
+         ${emp ? '<div class="row-actions"><button class="btn btn-ghost" id="suggestClientBtn">Suggest a client</button><button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button></div>' : ''}</div>
        <div id="myTasks"></div>
        ${emp ? '<div class="section" style="margin-top:26px;"><h2 style="color:var(--navy);">My recurring schedules</h2><div id="myRecurring"></div></div>' : ''}`);
     if (isAdmin()) {
@@ -368,10 +368,32 @@
     if (emp) {
       await loadLookups();
       $('#addMyTaskBtn').addEventListener('click', openMyTaskModal);
+      $('#suggestClientBtn').addEventListener('click', openProposeClientModal);
       loadMyRecurring();
     }
     loadMyTasks();
   };
+
+  // Employee proposes a new client for admin approval.
+  function openProposeClientModal() {
+    modal(`<h3>Suggest a client</h3>
+      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">This goes to an admin for approval before it can be used for tasks.</p>
+      <div class="form-row"><div class="field"><label>Client name</label><input id="pcName"></div>
+        <div class="field"><label>Business type</label><input id="pcBiz" placeholder="e.g. Restaurant"></div></div>
+      <div class="form-row"><div class="field"><label>Stage</label><select id="pcStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}">${STAGE_LABEL[s]}</option>`).join('')}</select></div>
+        <div class="field"></div></div>
+      <div class="form-row one"><div class="field"><label>Notes</label><textarea id="pcNotes" placeholder="Anything the partners should know"></textarea></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Send for approval</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const name = $('#pcName').value.trim();
+      if (!name) return toast('Please enter a client name', true);
+      try {
+        await api.post('/clients', { name, business_type: $('#pcBiz').value, stage: $('#pcStage').value, notes: $('#pcNotes').value });
+        closeModal(); toast('Sent for approval ✓');
+      } catch (e) { toast(e.message, true); }
+    });
+  }
 
   // Employee: add a one-time or recurring task for themselves, tied to a client.
   async function openMyTaskModal() {
@@ -589,7 +611,8 @@
   VIEWS.clients = async () => {
     if (!isAdmin()) return navigate('dashboard');
     setMain('Clients', 'Your client list and the recurring work scheduled for each.',
-      `<div class="toolbar"><h2 style="margin:0;color:var(--navy);">Clients</h2><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
+      `<div id="pendingClients"></div>
+       <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Clients</h2><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
        <div id="clientTable" style="margin-bottom:30px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Recurring schedules</h2>
          <div class="row-actions"><button class="btn btn-ghost" id="runRecBtn">Generate due now</button><button class="btn btn-primary" id="addRecBtn">+ New schedule</button></div></div>
@@ -600,9 +623,36 @@
     $('#runRecBtn').addEventListener('click', async () => {
       try { const r = await api.post('/recurring/run'); toast(`Generated ${r.created} task(s)`); loadRecurring(); } catch (e) { toast(e.message, true); }
     });
+    loadPendingClients();
     loadClients();
     loadRecurring();
   };
+
+  // Admin: clients proposed by employees, awaiting approval.
+  async function loadPendingClients() {
+    const el = $('#pendingClients'); if (!el) return;
+    try {
+      const { clients } = await api.get('/clients/pending');
+      if (!clients.length) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div class="section">
+        <h2 style="color:var(--navy);">🕓 Client approvals (${clients.length})</h2>
+        <table><thead><tr><th>Proposed client</th><th>Business type</th><th>Stage</th><th>Suggested by</th><th>Notes</th><th>Action</th></tr></thead><tbody>
+        ${clients.map((c) => `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
+          <td>${esc(c.created_by_name || '—')}</td><td>${esc(c.notes || '—')}</td>
+          <td class="row-actions"><button class="btn btn-primary btn-sm" data-appr="${c.id}">Approve</button>
+            <button class="btn btn-danger btn-sm" data-rej="${c.id}">Reject</button></td></tr>`).join('')}
+        </tbody></table></div>`;
+      el.querySelectorAll('[data-appr]').forEach((b) => b.addEventListener('click', () => decideClient(b.dataset.appr, 'APPROVED')));
+      el.querySelectorAll('[data-rej]').forEach((b) => b.addEventListener('click', () => decideClient(b.dataset.rej, 'REJECTED')));
+    } catch (e) { toast(e.message, true); }
+  }
+  async function decideClient(id, decision) {
+    try {
+      await api.post(`/clients/${id}/approval`, { decision });
+      toast(decision === 'APPROVED' ? 'Client approved ✓' : 'Rejected');
+      loadPendingClients(); loadClients(); loadLookups();
+    } catch (e) { toast(e.message, true); }
+  }
 
   const STAGE_LABEL = { PROSPECT: 'Prospect', INTERVIEWED: 'Interviewed – not signed', SIGNED: 'Signed' };
   const STAGE_CLASS = { PROSPECT: 'b-todo', INTERVIEWED: 'b-pending', SIGNED: 'b-done' };
@@ -613,7 +663,7 @@
       const { clients } = await api.get('/clients/all');
       const el = $('#clientTable');
       el.innerHTML = clients.length ? `<table><thead><tr><th>Client</th><th>Code</th><th>Business type</th><th>Stage</th><th>Notes</th><th>Active</th><th></th></tr></thead><tbody>
-        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td><strong>${esc(c.name)}</strong></td><td>${esc(c.code || '—')}</td>
+        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td><strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td><td>${esc(c.code || '—')}</td>
           <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td><td>${esc(c.notes || '—')}</td>
           <td>${c.active ? badge('approved') : badge('rejected')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
