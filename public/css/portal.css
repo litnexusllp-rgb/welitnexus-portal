@@ -44,7 +44,15 @@ button { font-family: var(--font); cursor: pointer; }
   color: #c3d2e0; font-size: 0.94rem; font-weight: 500; cursor: pointer; margin-bottom: 4px; border: none; background: none; width: 100%; text-align: left; }
 .nav-item:hover { background: rgba(255,255,255,.06); color: var(--white); }
 .nav-item.active { background: var(--teal); color: var(--white); }
-.nav-item .ico { width: 20px; text-align: center; }
+.nav-item .ico { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.nav-item .ico svg { width: 19px; height: 19px; }
+
+/* Visible keyboard focus on interactive elements (accessibility). */
+.btn:focus-visible, .nav-item:focus-visible, .logout:focus-visible,
+select:focus-visible, [data-status]:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 2px;
+}
+.sidebar .nav-item:focus-visible { outline-color: var(--gold); }
 .sidebar .spacer { flex: 1; }
 .sidebar .me { padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.1); margin-top: 12px; }
 .sidebar .me .nm { color: var(--white); font-weight: 600; font-size: 0.92rem; }
@@ -54,6 +62,7 @@ button { font-family: var(--font); cursor: pointer; }
 
 .main { padding: 28px 34px; overflow-y: auto; max-height: 100vh; }
 .page-title { font-size: 1.5rem; font-weight: 800; color: var(--navy); margin: 0 0 4px; }
+.page-title::after { content: ''; display: block; width: 36px; height: 3px; background: var(--gold); border-radius: 2px; margin-top: 9px; }
 .page-sub { color: var(--slate); margin: 0 0 22px; font-size: 0.92rem; }
 .view { display: none; }
 .view.active { display: block; }
@@ -90,7 +99,7 @@ table { width: 100%; border-collapse: collapse; background: var(--white); border
 th, td { text-align: left; padding: 12px 14px; font-size: 0.9rem; border-bottom: 1px solid var(--line); }
 th { background: var(--mist); color: var(--slate); font-size: 0.78rem; text-transform: uppercase; letter-spacing: .4px; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover { background: #fafcfe; }
+tbody tr:hover { background: #eef5fb; }
 .empty { padding: 28px; text-align: center; color: var(--slate); background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); }
 
 /* ---------- Badges ---------- */
@@ -166,9 +175,10 @@ body.is-admin .admin-only { display: block; }
 .row-actions { display: flex; gap: 6px; }
 @media (max-width: 760px) {
   .app.show { grid-template-columns: 1fr; }
-  .sidebar { flex-direction: row; overflow-x: auto; padding: 12px; align-items: center; }
-  .sidebar-logo, .sidebar .me, .logout, .sidebar .spacer { display: none; }
+  .sidebar { flex-direction: row; overflow-x: auto; padding: 12px; align-items: center; gap: 8px; }
+  .sidebar .me, .logout, .sidebar .spacer { display: none; }
+  .sidebar-logo { display: block; height: 26px; width: auto; margin: 0 6px 0 0; flex-shrink: 0; } /* keep brand on mobile */
   .nav-item { white-space: nowrap; }
-  .main { max-height: none; }
+  .main { max-height: none; padding: 20px 18px; }
   .form-row { grid-template-columns: 1fr; }
 }

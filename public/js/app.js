@@ -10,6 +10,8 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isAdmin = () => ME && ME.role === 'ADMIN';
   const fmtMins = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
+  // Friendly date: '2026-06-22' -> '22 Jun 2026'. Passes through anything else.
+  const fmtDate = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? new Date(s + 'T00:00').toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : (s || '—'));
   const todayISO = () => new Date().toLocaleDateString('en-CA'); // yyyy-mm-dd local
   const cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1).toLowerCase();
   const badge = (v) => `<span class="badge b-${String(v).toLowerCase()}">${esc(cap(String(v).replace('_', ' ')))}</span>`;
@@ -256,7 +258,7 @@
         ${sorted.map((l) => {
           const onNow = onNowOf(l);
           return `<tr><td>${esc(l.name)}</td>
-            <td>${esc(l.start_date)}${l.end_date !== l.start_date ? ' → ' + esc(l.end_date) : ''}</td>
+            <td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
             <td>${esc(cap(l.kind))}</td><td>${l.days}</td>
             <td>${onNow ? '<span class="badge b-pending">On leave now</span>' : '<span class="badge b-todo">Upcoming</span>'}</td></tr>`;
         }).join('')}
@@ -271,7 +273,7 @@
       const el = $('#myLeaves');
       el.innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
         ${leaves.map((l) => `<tr>
-          <td>${esc(l.start_date)}${l.end_date !== l.start_date ? ' → ' + esc(l.end_date) : ''}</td>
+          <td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
           <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
           <td>${l.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>` : ''}</td>
         </tr>`).join('')}</tbody></table>` : `<div class="empty">No leave requests yet.</div>`;
@@ -301,7 +303,7 @@
   function leaveApprovalTable(leaves) {
     return `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Action</th></tr></thead><tbody>
       ${leaves.map((l) => `<tr>
-        <td>${esc(l.name)}</td><td>${esc(l.start_date)}${l.end_date !== l.start_date ? ' → ' + esc(l.end_date) : ''}</td>
+        <td>${esc(l.name)}</td><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
         <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
         <td class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button>
           <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></td>
@@ -436,7 +438,7 @@
       const { recurring } = await api.get('/recurring/mine');
       el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
         ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
-          <td>${FREQ_LABEL[r.frequency]}</td><td>${esc(r.next_due)}</td><td>${r.active ? badge('approved') : badge('cancelled')}</td>
+          <td>${FREQ_LABEL[r.frequency]}</td><td>${fmtDate(r.next_due)}</td><td>${r.active ? badge('approved') : badge('cancelled')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-mtoggle="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
             <button class="btn btn-danger btn-sm" data-mdel="${r.id}">✕</button></td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No recurring tasks yet. Use “+ Add task” and pick a Repeat option.</div>`;
@@ -530,7 +532,7 @@
       el.innerHTML = tasks.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>
         ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}
           <div style="margin-top:6px;"><button class="btn btn-ghost btn-sm" data-mychecklist="${t.id}">${t.checklist && t.checklist.length ? 'Edit checklist' : '+ Add checklist'}</button></div></td>
-          <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td></tr>`).join('')}
+          <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No tasks assigned to you. 🎉</div>`;
       wireStatusSelects(el, loadMyTasks);
       wireChecklist(el, loadMyTasks);
@@ -555,7 +557,7 @@
           <h2 style="font-size:1rem;">${esc(g)} <span style="color:var(--slate);font-weight:500;">(${groups[g].length})</span></h2>
           <table><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
           ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
-            <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${esc(t.due_date || '—')}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
+            <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
             <td class="row-actions"><button class="btn btn-ghost btn-sm" data-checklist-task="${t.id}">✓ Checklist</button><button class="btn btn-ghost btn-sm" data-edit-task="${t.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-task="${t.id}">✕</button></td></tr>`).join('')}
           </tbody></table></div>`).join('');
       wireStatusSelects(el, () => { loadAllTasks(); loadMyTasks(); });
@@ -703,7 +705,7 @@
       const el = $('#recTable');
       el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Assignee</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
         ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
-          <td>${esc(r.assignee_name)}</td><td>${r.step > 1 ? r.step + ' × ' : ''}${FREQ_LABEL[r.frequency]}</td><td>${esc(r.next_due)}</td>
+          <td>${esc(r.assignee_name)}</td><td>${r.step > 1 ? r.step + ' × ' : ''}${FREQ_LABEL[r.frequency]}</td><td>${fmtDate(r.next_due)}</td>
           <td>${r.active ? badge('approved') : badge('cancelled')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-rec="${r.id}">Edit</button>
             <button class="btn btn-ghost btn-sm" data-toggle-rec="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
@@ -1089,7 +1091,7 @@
     renderCalendar();
     const el = $('#holidayList');
     el.innerHTML = HOLIDAYS.length ? `<table><thead><tr><th>Date</th><th>Holiday</th><th>Type</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
-      ${HOLIDAYS.map((h) => `<tr><td>${esc(h.date)} <span style="color:var(--slate)">(${new Date(h.date + 'T00:00').toLocaleDateString(undefined, { weekday: 'short' })})</span></td>
+      ${HOLIDAYS.map((h) => `<tr><td>${fmtDate(h.date)} <span style="color:var(--slate)">(${new Date(h.date + 'T00:00').toLocaleDateString(undefined, { weekday: 'short' })})</span></td>
         <td>${esc(h.name)}</td><td>${badge(h.type)}</td>${isAdmin() ? `<td><button class="btn btn-danger btn-sm" data-del-hol="${h.id}">✕</button></td>` : ''}</tr>`).join('')}
     </tbody></table>` : `<div class="empty">No holidays published yet.</div>`;
     el.querySelectorAll('[data-del-hol]').forEach((b) => b.addEventListener('click', async () => {
