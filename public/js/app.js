@@ -4,6 +4,8 @@
 
   let ME = null;
   let clockTimer = null;
+  let dashTimers = [];          // ticking + polling intervals for the admin dashboard
+  let DASH_LIVE = null;         // snapshot used to advance the live worked timers
 
   // ---------- tiny helpers ----------
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -64,7 +66,7 @@
 
   $('#logoutBtn').addEventListener('click', async () => {
     try { await api.post('/auth/logout'); } catch (_e) {}
-    ME = null; clearInterval(clockTimer); showLogin();
+    ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; showLogin();
   });
 
   $('#changePwBtn').addEventListener('click', openChangePassword);
@@ -96,6 +98,7 @@
   function navigate(view) {
     document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
     clearInterval(clockTimer);
+    dashTimers.forEach(clearInterval); dashTimers = []; DASH_LIVE = null;
     const r = VIEWS[view];
     if (r) r();
   }
@@ -130,40 +133,71 @@
     } catch (e) { toast(e.message, true); }
 
     if (isAdmin()) {
-      try {
-        const [today, pend] = await Promise.all([api.get('/attendance/today'), api.get('/leaves/pending')]);
-        const working = today.people.filter((p) => p.state === 'IN');
-        const onBreak = today.people.filter((p) => p.state === 'BREAK');
-        const clockedOut = today.people.filter((p) => p.state === 'OUT');
-        const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
-        const presenceCol = (title, list, emptyMsg) => `
-          <div class="section" style="margin-bottom:0;">
-            <h2>${title} (${list.length})</h2>
-            ${list.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
-              ${list.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
-            </tbody></table>` : `<div class="empty">${emptyMsg}</div>`}
-          </div>`;
-        $('#dashAdmin').innerHTML = `
-          <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
-            ${presenceCol('🟢 Currently in', working, 'No one is clocked in right now.')}
-            ${presenceCol('☕ On break', onBreak, 'No one is on break.')}
-          </div>
-          <div class="section">
-            <h2>✅ Clocked out today (${clockedOut.length})</h2>
-            ${clockedOut.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
-              ${clockedOut.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td>
-                <td>${fmtTime(p.firstIn)}</td><td>${fmtTime(p.lastOut)}</td>
-                <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
-            </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
-          </div>
-          <div class="section">
-            <h2>Pending leave approvals (${pend.leaves.length})</h2>
-            ${pend.leaves.length ? leaveApprovalTable(pend.leaves) : `<div class="empty">Nothing waiting for approval. 🎉</div>`}
-          </div>`;
-        wireLeaveApprovals();
-      } catch (e) { toast(e.message, true); }
+      await loadDashAdmin();
+      // Tick the live "currently in" timers every second; re-sync with the
+      // server every 15s so clock-ins/outs and breaks appear without a reload.
+      dashTimers.push(setInterval(tickDashTimers, 1000));
+      dashTimers.push(setInterval(loadDashAdmin, 15000));
     }
   };
+
+  // h m s from milliseconds, e.g. "2h 14m 06s".
+  const fmtHMS = (ms) => {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+  };
+
+  // Advance each currently-in person's timer client-side between server refreshes.
+  function tickDashTimers() {
+    if (!DASH_LIVE) return;
+    const elapsed = Date.now() - DASH_LIVE.receivedAt;
+    DASH_LIVE.working.forEach((p) => {
+      const el = document.querySelector(`[data-livetimer="${p.id}"]`);
+      if (el) el.textContent = fmtHMS(p.workedMinutes * 60000 + elapsed);
+    });
+  }
+
+  async function loadDashAdmin() {
+    const host = $('#dashAdmin'); if (!host) return; // navigated away
+    try {
+      const [today, pend] = await Promise.all([api.get('/attendance/today'), api.get('/leaves/pending')]);
+      const working = today.people.filter((p) => p.state === 'IN');
+      const onBreak = today.people.filter((p) => p.state === 'BREAK');
+      const clockedOut = today.people.filter((p) => p.state === 'OUT');
+      DASH_LIVE = { receivedAt: Date.now(), working }; // anchor for the live tick
+      const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+      host.innerHTML = `
+        <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
+          <div class="section" style="margin-bottom:0;">
+            <h2>🟢 Currently in (${working.length})</h2>
+            ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th></tr></thead><tbody>
+              ${working.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td></tr>`).join('')}
+            </tbody></table>` : `<div class="empty">No one is clocked in right now.</div>`}
+          </div>
+          <div class="section" style="margin-bottom:0;">
+            <h2>☕ On break (${onBreak.length})</h2>
+            ${onBreak.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
+              ${onBreak.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
+            </tbody></table>` : `<div class="empty">No one is on break.</div>`}
+          </div>
+        </div>
+        <div class="section">
+          <h2>✅ Clocked out today (${clockedOut.length})</h2>
+          ${clockedOut.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
+            ${clockedOut.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td>
+              <td>${fmtTime(p.firstIn)}</td><td>${fmtTime(p.lastOut)}</td>
+              <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
+          </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
+        </div>
+        <div class="section">
+          <h2>Pending leave approvals (${pend.leaves.length})</h2>
+          ${pend.leaves.length ? leaveApprovalTable(pend.leaves) : `<div class="empty">Nothing waiting for approval. 🎉</div>`}
+        </div>`;
+      wireLeaveApprovals();
+      tickDashTimers(); // paint the first tick immediately
+    } catch (e) { toast(e.message, true); }
+  }
 
   const statCard = (label, value, cls) => `<div class="card stat"><div class="label">${esc(label)}</div><div class="${cls}">${value}</div></div>`;
 
