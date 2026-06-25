@@ -66,6 +66,31 @@ const upcomingApproved = db.prepare(
 );
 router.get('/upcoming', requireAdmin, (_req, res) => res.json({ leaves: upcomingApproved.all(todayStr()) }));
 
+// ADMIN: per-employee leave balance + days taken in the last 30 days.
+const activeUsersForLeave = db.prepare(
+  `SELECT id, name, department, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
+);
+const approvedLeavesInWindow = db.prepare(
+  `SELECT user_id, start_date, end_date, kind FROM leaves
+   WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
+);
+router.get('/summary', requireAdmin, (_req, res) => {
+  const today = todayStr();
+  const win0 = now().minus({ days: 29 }).toFormat('yyyy-LL-dd'); // last 30 days, inclusive
+  const taken = {};
+  for (const l of approvedLeavesInWindow.all(today, win0)) {
+    const s = l.start_date < win0 ? win0 : l.start_date;     // clip to window
+    const e = l.end_date > today ? today : l.end_date;
+    const d = l.kind === 'HALF' ? 0.5 : inclusiveDays(s, e);
+    taken[l.user_id] = (taken[l.user_id] || 0) + d;
+  }
+  const rows = activeUsersForLeave.all().map((u) => ({
+    id: u.id, name: u.name, department: u.department,
+    balance: u.leave_balance, taken30: taken[u.id] || 0,
+  }));
+  res.json({ rows });
+});
+
 // ADMIN: approve / reject. Deducts balance on approval.
 router.post('/:id/decide', requireAdmin, (req, res) => {
   const decision = String(req.body.decision || '').toUpperCase();

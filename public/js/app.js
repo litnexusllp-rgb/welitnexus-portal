@@ -268,9 +268,11 @@
     if (isAdmin()) {
       setMain('Leaves', "Requests waiting for approval, and who's on leave.",
         `<div class="section" id="adminLeaves"></div>
-         <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div id="onLeave"></div></div>`);
+         <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div id="onLeave"></div></div>
+         <div class="section"><h2>Leave balances</h2><div id="leaveSummary"></div></div>`);
       loadAdminLeaves();
       loadOnLeave();
+      loadLeaveSummary();
       return;
     }
     // Employees: personal balance + their own requests.
@@ -282,6 +284,18 @@
     $('#applyBtn').addEventListener('click', openApplyLeave);
     await loadMyLeaves();
   };
+
+  async function loadLeaveSummary() {
+    try {
+      const { rows } = await api.get('/leaves/summary');
+      const el = $('#leaveSummary'); if (!el) return;
+      el.innerHTML = rows.length ? `<table><thead><tr><th>Employee</th><th>Department</th><th>Leaves left</th><th>Taken (last 30 days)</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.department || '—')}</td>
+          <td><strong>${r.balance}</strong> ${r.balance === 1 ? 'day' : 'days'}</td>
+          <td>${r.taken30 ? `${r.taken30} ${r.taken30 === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>'}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">No employees.</div>`;
+    } catch (e) { toast(e.message, true); }
+  }
 
   async function loadOnLeave() {
     try {
