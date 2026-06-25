@@ -285,16 +285,35 @@
     await loadMyLeaves();
   };
 
+  const daysLabel = (n) => (n ? `${n} ${n === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>');
   async function loadLeaveSummary() {
     try {
       const { rows } = await api.get('/leaves/summary');
       const el = $('#leaveSummary'); if (!el) return;
-      el.innerHTML = rows.length ? `<table><thead><tr><th>Employee</th><th>Department</th><th>Leaves left</th><th>Taken (last 30 days)</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.department || '—')}</td>
+      el.innerHTML = rows.length ? `<p class="page-sub" style="margin:0 0 10px;">Click a row to see that employee's leave history.</p>
+        <table><thead><tr><th>Employee</th><th>Department</th><th>Leaves left</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr style="cursor:pointer;" data-leave-emp="${r.id}" data-leave-name="${esc(r.name)}"><td><strong>${esc(r.name)}</strong></td><td>${esc(r.department || '—')}</td>
           <td><strong>${r.balance}</strong> ${r.balance === 1 ? 'day' : 'days'}</td>
-          <td>${r.taken30 ? `${r.taken30} ${r.taken30 === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>'}</td></tr>`).join('')}
+          <td>${daysLabel(r.taken30)}</td><td>${daysLabel(r.takenYear)}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No employees.</div>`;
+      el.querySelectorAll('[data-leave-emp]').forEach((tr) => tr.addEventListener('click', () => openLeaveBreakdown(tr.dataset.leaveEmp, tr.dataset.leaveName)));
     } catch (e) { toast(e.message, true); }
+  }
+
+  async function openLeaveBreakdown(userId, name) {
+    modal(`<h3>Leave history — ${esc(name)}</h3><div id="lbBody">Loading…</div>`);
+    try {
+      const { leaves } = await api.get(`/leaves/for/${userId}`);
+      $('#lbBody').innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th></tr></thead><tbody>
+        ${leaves.map((l) => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
+          <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">No leave records.</div>`;
+    } catch (e) { $('#lbBody').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    const done = document.createElement('div');
+    done.className = 'modal-actions';
+    done.innerHTML = '<button class="btn btn-primary" id="lbClose">Close</button>';
+    $('#modal').appendChild(done);
+    $('#lbClose').addEventListener('click', closeModal);
   }
 
   async function loadOnLeave() {

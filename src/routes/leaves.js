@@ -66,30 +66,45 @@ const upcomingApproved = db.prepare(
 );
 router.get('/upcoming', requireAdmin, (_req, res) => res.json({ leaves: upcomingApproved.all(todayStr()) }));
 
-// ADMIN: per-employee leave balance + days taken in the last 30 days.
+// ADMIN: per-employee leave balance + days taken (last 30 days and this year).
 const activeUsersForLeave = db.prepare(
   `SELECT id, name, department, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
 );
-const approvedLeavesInWindow = db.prepare(
+const approvedOverlap = db.prepare(
   `SELECT user_id, start_date, end_date, kind FROM leaves
    WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
 );
+// Sum approved leave days that fall within [winStart, winEnd], clipped to it.
+function takenInWindow(winStart, winEnd) {
+  const m = {};
+  for (const l of approvedOverlap.all(winEnd, winStart)) {
+    const s = l.start_date < winStart ? winStart : l.start_date;
+    const e = l.end_date > winEnd ? winEnd : l.end_date;
+    const d = l.kind === 'HALF' ? 0.5 : inclusiveDays(s, e);
+    m[l.user_id] = (m[l.user_id] || 0) + d;
+  }
+  return m;
+}
 router.get('/summary', requireAdmin, (_req, res) => {
   const today = todayStr();
-  const win0 = now().minus({ days: 29 }).toFormat('yyyy-LL-dd'); // last 30 days, inclusive
-  const taken = {};
-  for (const l of approvedLeavesInWindow.all(today, win0)) {
-    const s = l.start_date < win0 ? win0 : l.start_date;     // clip to window
-    const e = l.end_date > today ? today : l.end_date;
-    const d = l.kind === 'HALF' ? 0.5 : inclusiveDays(s, e);
-    taken[l.user_id] = (taken[l.user_id] || 0) + d;
-  }
+  const win0 = now().minus({ days: 29 }).toFormat('yyyy-LL-dd');
+  const yearStart = now().startOf('year').toFormat('yyyy-LL-dd');
+  const yearEnd = now().endOf('year').toFormat('yyyy-LL-dd');
+  const taken30 = takenInWindow(win0, today);
+  const takenYear = takenInWindow(yearStart, yearEnd);
   const rows = activeUsersForLeave.all().map((u) => ({
     id: u.id, name: u.name, department: u.department,
-    balance: u.leave_balance, taken30: taken[u.id] || 0,
+    balance: u.leave_balance, taken30: taken30[u.id] || 0, takenYear: takenYear[u.id] || 0,
   }));
   res.json({ rows });
 });
+
+// ADMIN: one employee's full leave history (for the balance breakdown).
+const leavesForEmployee = db.prepare(
+  `SELECT l.*, u.name FROM leaves l JOIN users u ON u.id = l.user_id
+   WHERE l.user_id = ? ORDER BY l.start_date DESC LIMIT 100`
+);
+router.get('/for/:userId', requireAdmin, (req, res) => res.json({ leaves: leavesForEmployee.all(Number(req.params.userId)) }));
 
 // ADMIN: approve / reject. Deducts balance on approval.
 router.post('/:id/decide', requireAdmin, (req, res) => {
