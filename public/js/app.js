@@ -414,7 +414,7 @@
       CLIENTS = c.clients; USERS = u.users;
     } catch (e) { toast(e.message, true); }
   }
-  const clientLabel = (t) => t.client_name ? `<span class="badge b-public" style="font-size:.68rem">${esc(t.client_name)}</span>` : '';
+  const clientLabel = (t) => t.client_name ? `<span class="badge b-public" style="font-size:.68rem">${esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name)}</span>` : '';
 
   // ---------- Tasks ----------
   let taskClientFilter = '';
@@ -435,7 +435,7 @@
     if (isAdmin()) {
       await loadLookups();
       $('#clientFilter').innerHTML = `<option value="">All clients</option><option value="none">— No client —</option>`
-        + CLIENTS.map((c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+        + CLIENTS.map((c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
       $('#clientFilter').value = taskClientFilter;
       $('#clientFilter').addEventListener('change', (e) => { taskClientFilter = e.target.value; loadAllTasks(); });
       $('#newTaskBtn').addEventListener('click', () => openTaskModal());
@@ -476,7 +476,7 @@
     if (!CLIENTS.length) await loadLookups();
     if (!CLIENTS.length) return toast('No clients yet — ask an admin to add one first.', true);
     modal(`<h3>Add a task</h3>
-      <div class="form-row"><div class="field"><label>Client</label><select id="mtClient"><option value="">Select a client…</option>${CLIENTS.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="form-row"><div class="field"><label>Client</label><select id="mtClient"><option value="">Select a client…</option>${CLIENTS.map((c) => `<option value="${c.id}">${esc(clientPath(c))}</option>`).join('')}</select></div>
         <div class="field"><label>Priority</label><select id="mtPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${p === 'MEDIUM' ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Title</label><input id="mtTitle" placeholder="e.g. Monthly bookkeeping"></div></div>
       <div class="form-row one"><div class="field"><label>Description</label><textarea id="mtDesc" placeholder="Optional"></textarea></div></div>
@@ -624,7 +624,7 @@
 
       // Group by client (clients first, then "General" for untagged).
       const groups = {};
-      tasks.forEach((t) => { const k = t.client_name || '— General —'; (groups[k] = groups[k] || []).push(t); });
+      tasks.forEach((t) => { const k = t.client_name ? (t.client_parent_name ? `${t.client_parent_name} › ${t.client_name}` : t.client_name) : '— General —'; (groups[k] = groups[k] || []).push(t); });
       const order = Object.keys(groups).sort((a, b) => (a === '— General —') - (b === '— General —') || a.localeCompare(b));
       el.innerHTML = order.map((g) => `
         <div class="section" style="margin-bottom:18px;">
@@ -651,8 +651,10 @@
     }));
   }
 
+  // "Parent › File" when a client is a sub-client, else just its name.
+  const clientPath = (c) => (c.parent_name ? `${c.parent_name} › ${c.name}` : c.name);
   function clientOptions(selectedId) {
-    return `<option value="">— No client —</option>` + CLIENTS.map((c) => `<option value="${c.id}" ${selectedId == c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+    return `<option value="">— No client —</option>` + CLIENTS.map((c) => `<option value="${c.id}" ${selectedId == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
   }
   function userOptions(selectedId) {
     return USERS.map((u) => `<option value="${u.id}" ${selectedId == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
@@ -734,13 +736,16 @@
   const STAGE_CLASS = { PROSPECT: 'b-todo', INTERVIEWED: 'b-pending', SIGNED: 'b-done' };
   const stageBadge = (s) => `<span class="badge ${STAGE_CLASS[s] || 'b-todo'}">${esc(STAGE_LABEL[s] || cap(s || 'Prospect'))}</span>`;
 
+  let ALL_CLIENTS = []; // cached for the parent-client picker
   async function loadClients() {
     try {
       const { clients } = await api.get('/clients/all');
+      ALL_CLIENTS = clients;
       const el = $('#clientTable');
-      el.innerHTML = clients.length ? `<table><thead><tr><th>Client</th><th>Code</th><th>Business type</th><th>Stage</th><th>Notes</th><th>Active</th><th></th></tr></thead><tbody>
-        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td><strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td><td>${esc(c.code || '—')}</td>
-          <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td><td>${esc(c.notes || '—')}</td>
+      el.innerHTML = clients.length ? `<table><thead><tr><th>Client</th><th>Parent</th><th>Code</th><th>Business type</th><th>Stage</th><th>Active</th><th></th></tr></thead><tbody>
+        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td>${c.parent_name ? '<span style="color:var(--slate)">↳ </span>' : ''}<strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td>
+          <td>${c.parent_name ? esc(c.parent_name) : '<span style="color:var(--slate)">—</span>'}</td><td>${esc(c.code || '—')}</td>
+          <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
           <td>${c.active ? badge('approved') : badge('rejected')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
             <button class="btn ${c.active ? 'btn-danger' : 'btn-primary'} btn-sm" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? 'Archive' : 'Restore'}</button></td></tr>`).join('')}
@@ -760,11 +765,13 @@
         <div class="field"><label>Code</label><input id="cCode" value="${esc(c?.code || '')}" placeholder="e.g. TESH"></div></div>
       <div class="form-row"><div class="field"><label>Business type</label><input id="cBizType" value="${esc(c?.business_type || '')}" placeholder="e.g. Restaurant, E-commerce, Law firm"></div>
         <div class="field"><label>Stage</label><select id="cStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}" ${(c?.stage || 'PROSPECT') === s ? 'selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}</select></div></div>
+      <div class="form-row one"><div class="field"><label>Parent client (optional — for a file under a CPA/parent)</label>
+        <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter((x) => !x.parent_id && x.id !== c?.id).map((x) => `<option value="${x.id}" ${c?.parent_id == x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Notes</label><textarea id="cNotes">${esc(c?.notes || '')}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, notes: $('#cNotes').value };
+      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, notes: $('#cNotes').value, parent_id: $('#cParent').value || null };
       try {
         if (editing) await api.put(`/clients/${c.id}`, payload); else await api.post('/clients', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadClients(); loadLookups();

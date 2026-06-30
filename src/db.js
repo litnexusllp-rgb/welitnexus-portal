@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS clients (
   notes         TEXT    DEFAULT '',
   approval      TEXT    NOT NULL DEFAULT 'APPROVED', -- APPROVED | PENDING | REJECTED
   created_by    INTEGER,                 -- who proposed/created it
+  parent_id     INTEGER,                 -- a sub-client/file under a parent client
   active        INTEGER NOT NULL DEFAULT 1,
   created_ts    INTEGER NOT NULL
 );
@@ -177,6 +178,7 @@ for (const stmt of [
   `ALTER TABLE clients ADD COLUMN stage TEXT NOT NULL DEFAULT 'PROSPECT'`,
   `ALTER TABLE clients ADD COLUMN approval TEXT NOT NULL DEFAULT 'APPROVED'`,
   `ALTER TABLE clients ADD COLUMN created_by INTEGER`,
+  `ALTER TABLE clients ADD COLUMN parent_id INTEGER`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

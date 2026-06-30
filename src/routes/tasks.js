@@ -7,9 +7,9 @@ const { now } = require('../time');
 
 const router = express.Router();
 
-const TASK_SELECT = `SELECT t.*, a.name AS assignee_name, b.name AS assigner_name, c.name AS client_name
+const TASK_SELECT = `SELECT t.*, a.name AS assignee_name, b.name AS assigner_name, c.name AS client_name, pc.name AS client_parent_name
    FROM tasks t JOIN users a ON a.id = t.assignee_id JOIN users b ON b.id = t.assigned_by
-   LEFT JOIN clients c ON c.id = t.client_id`;
+   LEFT JOIN clients c ON c.id = t.client_id LEFT JOIN clients pc ON pc.id = c.parent_id`;
 
 const insertTask = db.prepare(
   `INSERT INTO tasks (title, description, assignee_id, assigned_by, priority, status, due_date, client_id, created_ts, updated_ts)
