@@ -618,19 +618,20 @@
     try {
       let { tasks } = await api.get('/tasks/all');
       if (taskClientFilter === 'none') tasks = tasks.filter((t) => !t.client_id);
-      else if (taskClientFilter) tasks = tasks.filter((t) => t.client_id == taskClientFilter);
+      else if (taskClientFilter) tasks = tasks.filter((t) => t.client_id == taskClientFilter || t.client_parent_id == taskClientFilter); // roll up: a CPA shows its files too
       const el = $('#allTasks');
       if (!tasks.length) { el.innerHTML = `<div class="empty">No tasks here yet.</div>`; return; }
 
-      // Group by client (clients first, then "General" for untagged).
+      // Roll sub-client (file) tasks up under their parent CPA; standalone
+      // clients group on their own; untagged tasks go under "General".
       const groups = {};
-      tasks.forEach((t) => { const k = t.client_name ? (t.client_parent_name ? `${t.client_parent_name} › ${t.client_name}` : t.client_name) : '— General —'; (groups[k] = groups[k] || []).push(t); });
+      tasks.forEach((t) => { const k = t.client_parent_name || t.client_name || '— General —'; (groups[k] = groups[k] || []).push(t); });
       const order = Object.keys(groups).sort((a, b) => (a === '— General —') - (b === '— General —') || a.localeCompare(b));
       el.innerHTML = order.map((g) => `
         <div class="section" style="margin-bottom:18px;">
           <h2 style="font-size:1rem;">${esc(g)} <span style="color:var(--slate);font-weight:500;">(${groups[g].length})</span></h2>
           <table><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
-          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
+          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
             <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
             <td class="row-actions"><button class="btn btn-ghost btn-sm" data-checklist-task="${t.id}">✓ Checklist</button><button class="btn btn-ghost btn-sm" data-edit-task="${t.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-task="${t.id}">✕</button></td></tr>`).join('')}
           </tbody></table></div>`).join('');
