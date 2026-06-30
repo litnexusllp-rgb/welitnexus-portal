@@ -690,13 +690,17 @@
     if (!isAdmin()) return navigate('dashboard');
     setMain('Clients', 'Your client list and the recurring work scheduled for each.',
       `<div id="pendingClients"></div>
-       <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Clients</h2><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
+       <div class="toolbar"><div style="display:flex;gap:10px;align-items:center;">
+           <h2 style="margin:0;color:var(--navy);">Clients</h2>
+           <select id="clientFilter" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></select>
+         </div><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
        <div id="clientTable" style="margin-bottom:30px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Recurring schedules</h2>
          <div class="row-actions"><button class="btn btn-ghost" id="runRecBtn">Generate due now</button><button class="btn btn-primary" id="addRecBtn">+ New schedule</button></div></div>
        <div id="recTable"></div>`);
     await loadLookups();
     $('#addClientBtn').addEventListener('click', () => openClientModal());
+    $('#clientFilter').addEventListener('change', (e) => { clientGroupFilter = e.target.value; loadClients(); });
     $('#addRecBtn').addEventListener('click', () => openRecurringModal());
     $('#runRecBtn').addEventListener('click', async () => {
       try { const r = await api.post('/recurring/run'); toast(`Generated ${r.created} task(s)`); loadRecurring(); } catch (e) { toast(e.message, true); }
@@ -737,20 +741,34 @@
   const stageBadge = (s) => `<span class="badge ${STAGE_CLASS[s] || 'b-todo'}">${esc(STAGE_LABEL[s] || cap(s || 'Prospect'))}</span>`;
 
   let ALL_CLIENTS = []; // cached for the parent-client picker
+  let clientGroupFilter = ''; // '' = all; otherwise a parent id (show it + its files)
   async function loadClients() {
     try {
       const { clients } = await api.get('/clients/all');
       ALL_CLIENTS = clients;
+      // Filter dropdown: top-level clients (the ones that can hold files).
+      const filterEl = $('#clientFilter');
+      if (filterEl) {
+        const parents = clients.filter((c) => !c.parent_id);
+        filterEl.innerHTML = `<option value="">All clients</option>` + parents.map((p) => `<option value="${p.id}" ${clientGroupFilter == p.id ? 'selected' : ''}>${esc(p.name)} + files</option>`).join('');
+        filterEl.value = clientGroupFilter;
+      }
+      const shown = clientGroupFilter
+        ? clients.filter((c) => c.id == clientGroupFilter || c.parent_id == clientGroupFilter)
+        : clients;
       const el = $('#clientTable');
-      el.innerHTML = clients.length ? `<table><thead><tr><th>Client</th><th>Parent</th><th>Code</th><th>Business type</th><th>Stage</th><th>Active</th><th></th></tr></thead><tbody>
-        ${clients.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td>${c.parent_name ? '<span style="color:var(--slate)">↳ </span>' : ''}<strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td>
+      el.innerHTML = shown.length ? `<table><thead><tr><th>Client</th><th>Parent</th><th>Code</th><th>Business type</th><th>Stage</th><th>Active</th><th></th></tr></thead><tbody>
+        ${shown.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td>${c.parent_name ? '<span style="color:var(--slate)">↳ </span>' : ''}<strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td>
           <td>${c.parent_name ? esc(c.parent_name) : '<span style="color:var(--slate)">—</span>'}</td><td>${esc(c.code || '—')}</td>
           <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
           <td>${c.active ? badge('approved') : badge('rejected')}</td>
-          <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
+          <td class="row-actions">
+            ${!c.parent_id && c.approval === 'APPROVED' ? `<button class="btn btn-ghost btn-sm" data-add-file="${c.id}" title="Add a file under this client">+ File</button>` : ''}
+            <button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
             <button class="btn ${c.active ? 'btn-danger' : 'btn-primary'} btn-sm" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? 'Archive' : 'Restore'}</button></td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No clients yet. Add your first one.</div>`;
+      </tbody></table>` : `<div class="empty">No clients here.</div>`;
       const byId = {}; clients.forEach((c) => { byId[c.id] = c; });
+      el.querySelectorAll('[data-add-file]').forEach((b) => b.addEventListener('click', () => openClientModal(null, b.dataset.addFile)));
       el.querySelectorAll('[data-edit-client]').forEach((b) => b.addEventListener('click', () => openClientModal(byId[b.dataset.editClient])));
       el.querySelectorAll('[data-toggle-client]').forEach((b) => b.addEventListener('click', async () => {
         try { await api.post(`/clients/${b.dataset.toggleClient}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadClients(); loadLookups(); } catch (e) { toast(e.message, true); }
@@ -758,15 +776,17 @@
     } catch (e) { toast(e.message, true); }
   }
 
-  function openClientModal(c) {
+  function openClientModal(c, presetParent) {
     const editing = !!c;
-    modal(`<h3>${editing ? 'Edit client' : 'Add client'}</h3>
+    const selParent = c?.parent_id ?? presetParent ?? '';
+    const presetName = presetParent && ALL_CLIENTS.find((x) => x.id == presetParent)?.name;
+    modal(`<h3>${editing ? 'Edit client' : presetName ? `Add file under ${esc(presetName)}` : 'Add client'}</h3>
       <div class="form-row"><div class="field"><label>Name</label><input id="cName" value="${esc(c?.name || '')}"></div>
         <div class="field"><label>Code</label><input id="cCode" value="${esc(c?.code || '')}" placeholder="e.g. TESH"></div></div>
       <div class="form-row"><div class="field"><label>Business type</label><input id="cBizType" value="${esc(c?.business_type || '')}" placeholder="e.g. Restaurant, E-commerce, Law firm"></div>
         <div class="field"><label>Stage</label><select id="cStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}" ${(c?.stage || 'PROSPECT') === s ? 'selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Parent client (optional — for a file under a CPA/parent)</label>
-        <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter((x) => !x.parent_id && x.id !== c?.id).map((x) => `<option value="${x.id}" ${c?.parent_id == x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
+        <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter((x) => !x.parent_id && x.id !== c?.id).map((x) => `<option value="${x.id}" ${selParent == x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Notes</label><textarea id="cNotes">${esc(c?.notes || '')}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
