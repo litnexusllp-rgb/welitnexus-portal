@@ -166,6 +166,21 @@ CREATE TABLE IF NOT EXISTS task_checklist (
   FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_checklist_task ON task_checklist(task_id);
+
+-- Client invoices (admin-only). Amounts roll up to income per client.
+CREATE TABLE IF NOT EXISTS invoices (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id    INTEGER NOT NULL,
+  number       TEXT    DEFAULT '',       -- optional invoice number/reference
+  amount       REAL    NOT NULL DEFAULT 0,
+  invoice_date TEXT    DEFAULT '',        -- yyyy-LL-dd
+  status       TEXT    NOT NULL DEFAULT 'UNPAID', -- UNPAID | PAID
+  note         TEXT    DEFAULT '',
+  created_by   INTEGER,
+  created_ts   INTEGER NOT NULL,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.

@@ -696,16 +696,20 @@
            <select id="clientFilter" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></select>
          </div><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
        <div id="clientTable" style="margin-bottom:30px;"></div>
+       <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Invoices</h2><button class="btn btn-primary" id="addInvoiceBtn">+ New invoice</button></div>
+       <div id="invoiceTable" style="margin-bottom:30px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Recurring schedules</h2>
          <div class="row-actions"><button class="btn btn-ghost" id="runRecBtn">Generate due now</button><button class="btn btn-primary" id="addRecBtn">+ New schedule</button></div></div>
        <div id="recTable"></div>`);
     await loadLookups();
     $('#addClientBtn').addEventListener('click', () => openClientModal());
     $('#clientFilter').addEventListener('change', (e) => { clientGroupFilter = e.target.value; loadClients(); });
+    $('#addInvoiceBtn').addEventListener('click', () => openInvoiceModal());
     $('#addRecBtn').addEventListener('click', () => openRecurringModal());
     $('#runRecBtn').addEventListener('click', async () => {
       try { const r = await api.post('/recurring/run'); toast(`Generated ${r.created} task(s)`); loadRecurring(); } catch (e) { toast(e.message, true); }
     });
+    loadInvoices();
     loadPendingClients();
     loadClients();
     loadRecurring();
@@ -741,12 +745,19 @@
   const STAGE_CLASS = { PROSPECT: 'b-todo', INTERVIEWED: 'b-pending', SIGNED: 'b-done' };
   const stageBadge = (s) => `<span class="badge ${STAGE_CLASS[s] || 'b-todo'}">${esc(STAGE_LABEL[s] || cap(s || 'Prospect'))}</span>`;
 
+  const CURRENCY = '$';
+  const fmtMoney = (n) => CURRENCY + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   let ALL_CLIENTS = []; // cached for the parent-client picker
   let clientGroupFilter = ''; // '' = all; otherwise a parent id (show it + its files)
   async function loadClients() {
     try {
-      const { clients } = await api.get('/clients/all');
+      const [{ clients }, invSummary] = await Promise.all([api.get('/clients/all'), api.get('/invoices/summary')]);
       ALL_CLIENTS = clients;
+      // Rolled-up income per client: a parent includes its files' invoiced totals.
+      const raw = invSummary.totals || {};
+      const income = {};
+      clients.forEach((c) => { income[c.id] = (raw[c.id]?.invoiced || 0); });
+      clients.forEach((c) => { if (c.parent_id && raw[c.id]) income[c.parent_id] = (income[c.parent_id] || 0) + (raw[c.id].invoiced || 0); });
       // Filter dropdown: top-level clients (the ones that can hold files).
       const filterEl = $('#clientFilter');
       if (filterEl) {
@@ -758,17 +769,20 @@
         ? clients.filter((c) => c.id == clientGroupFilter || c.parent_id == clientGroupFilter)
         : clients;
       const el = $('#clientTable');
-      el.innerHTML = shown.length ? `<table><thead><tr><th>Client</th><th>Parent</th><th>Code</th><th>Business type</th><th>Stage</th><th>Active</th><th></th></tr></thead><tbody>
+      el.innerHTML = shown.length ? `<table><thead><tr><th>Client</th><th>Parent</th><th>Business type</th><th>Stage</th><th>Income</th><th>Active</th><th></th></tr></thead><tbody>
         ${shown.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td>${c.parent_name ? '<span style="color:var(--slate)">↳ </span>' : ''}<strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td>
-          <td>${c.parent_name ? esc(c.parent_name) : '<span style="color:var(--slate)">—</span>'}</td><td>${esc(c.code || '—')}</td>
+          <td>${c.parent_name ? esc(c.parent_name) : '<span style="color:var(--slate)">—</span>'}</td>
           <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
+          <td>${income[c.id] ? `<strong>${fmtMoney(income[c.id])}</strong>` : '<span style="color:var(--slate)">—</span>'}</td>
           <td>${c.active ? badge('approved') : badge('rejected')}</td>
           <td class="row-actions">
+            <button class="btn btn-ghost btn-sm" data-invoice-client="${c.id}" title="Create an invoice for this client">+ Invoice</button>
             ${!c.parent_id && c.approval === 'APPROVED' ? `<button class="btn btn-ghost btn-sm" data-add-file="${c.id}" title="Add a file under this client">+ File</button>` : ''}
             <button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
             <button class="btn ${c.active ? 'btn-danger' : 'btn-primary'} btn-sm" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? 'Archive' : 'Restore'}</button></td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No clients here.</div>`;
       const byId = {}; clients.forEach((c) => { byId[c.id] = c; });
+      el.querySelectorAll('[data-invoice-client]').forEach((b) => b.addEventListener('click', () => openInvoiceModal(null, b.dataset.invoiceClient)));
       el.querySelectorAll('[data-add-file]').forEach((b) => b.addEventListener('click', () => openClientModal(null, b.dataset.addFile)));
       el.querySelectorAll('[data-edit-client]').forEach((b) => b.addEventListener('click', () => openClientModal(byId[b.dataset.editClient])));
       el.querySelectorAll('[data-toggle-client]').forEach((b) => b.addEventListener('click', async () => {
@@ -796,6 +810,60 @@
       try {
         if (editing) await api.put(`/clients/${c.id}`, payload); else await api.post('/clients', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadClients(); loadLookups();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
+  // ---------- Invoices (admin) ----------
+  async function loadInvoices() {
+    const el = $('#invoiceTable'); if (!el) return;
+    try {
+      const { invoices } = await api.get('/invoices');
+      const total = invoices.reduce((s, i) => s + (i.amount || 0), 0);
+      const paid = invoices.filter((i) => i.status === 'PAID').reduce((s, i) => s + (i.amount || 0), 0);
+      el.innerHTML = invoices.length ? `<p class="page-sub" style="margin:0 0 10px;">Total invoiced <strong>${fmtMoney(total)}</strong> · Paid <strong style="color:var(--teal-dark)">${fmtMoney(paid)}</strong> · Outstanding <strong>${fmtMoney(total - paid)}</strong></p>
+        <table><thead><tr><th>Client</th><th>Invoice #</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
+        ${invoices.map((i) => `<tr><td><strong>${esc(i.client_parent_name ? i.client_parent_name + ' › ' + i.client_name : i.client_name)}</strong></td>
+          <td>${esc(i.number || '—')}</td><td>${i.invoice_date ? fmtDate(i.invoice_date) : '—'}</td>
+          <td><strong>${fmtMoney(i.amount)}</strong></td>
+          <td>${i.status === 'PAID' ? '<span class="badge b-done">Paid</span>' : '<span class="badge b-pending">Unpaid</span>'}</td>
+          <td class="row-actions">
+            <button class="btn btn-ghost btn-sm" data-inv-toggle="${i.id}" data-paid="${i.status === 'PAID' ? 0 : 1}">${i.status === 'PAID' ? 'Mark unpaid' : 'Mark paid'}</button>
+            <button class="btn btn-ghost btn-sm" data-inv-edit="${i.id}">Edit</button>
+            <button class="btn btn-danger btn-sm" data-inv-del="${i.id}">✕</button></td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">No invoices yet. Use “+ New invoice” or “+ Invoice” on a client row.</div>`;
+      const byId = {}; invoices.forEach((i) => { byId[i.id] = i; });
+      el.querySelectorAll('[data-inv-toggle]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api.post(`/invoices/${b.dataset.invToggle}/status`, { status: Number(b.dataset.paid) ? 'PAID' : 'UNPAID' }); toast('Updated'); loadInvoices(); loadClients(); } catch (e) { toast(e.message, true); }
+      }));
+      el.querySelectorAll('[data-inv-edit]').forEach((b) => b.addEventListener('click', () => openInvoiceModal(byId[b.dataset.invEdit])));
+      el.querySelectorAll('[data-inv-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Delete this invoice?')) return;
+        try { await api.del(`/invoices/${b.dataset.invDel}`); toast('Deleted'); loadInvoices(); loadClients(); } catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function openInvoiceModal(inv, presetClient) {
+    const editing = !!inv;
+    const selClient = inv?.client_id ?? presetClient ?? '';
+    modal(`<h3>${editing ? 'Edit invoice' : 'New invoice'}</h3>
+      <div class="form-row"><div class="field"><label>Client</label><select id="ivClient"><option value="">Select a client…</option>${CLIENTS.map((c) => `<option value="${c.id}" ${selClient == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('')}</select></div>
+        <div class="field"><label>Amount (${CURRENCY})</label><input type="number" step="0.01" min="0" id="ivAmount" value="${inv?.amount ?? ''}" placeholder="0.00"></div></div>
+      <div class="form-row"><div class="field"><label>Invoice # (optional)</label><input id="ivNumber" value="${esc(inv?.number || '')}" placeholder="e.g. INV-001"></div>
+        <div class="field"><label>Date</label><input type="date" id="ivDate" value="${esc(inv?.invoice_date || todayISO())}"></div></div>
+      <div class="form-row"><div class="field"><label>Status</label><select id="ivStatus"><option value="UNPAID" ${inv?.status !== 'PAID' ? 'selected' : ''}>Unpaid</option><option value="PAID" ${inv?.status === 'PAID' ? 'selected' : ''}>Paid</option></select></div>
+        <div class="field"></div></div>
+      <div class="form-row one"><div class="field"><label>Note (optional)</label><textarea id="ivNote">${esc(inv?.note || '')}</textarea></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create invoice'}</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const payload = { client_id: $('#ivClient').value, amount: $('#ivAmount').value, number: $('#ivNumber').value, invoice_date: $('#ivDate').value, status: $('#ivStatus').value, note: $('#ivNote').value };
+      if (!payload.client_id) return toast('Please choose a client', true);
+      if (!(Number(payload.amount) > 0)) return toast('Enter an amount greater than 0', true);
+      try {
+        if (editing) await api.put(`/invoices/${inv.id}`, payload); else await api.post('/invoices', payload);
+        closeModal(); toast(editing ? 'Saved ✓' : 'Invoice created ✓'); loadInvoices(); loadClients();
       } catch (e) { toast(e.message, true); }
     });
   }

@@ -50,6 +50,7 @@ app.use('/api/achievements', require('./routes/achievements'));
 app.use('/api/kpi', require('./routes/kpi'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/workingdays', require('./routes/workingdays'));
+app.use('/api/invoices', require('./routes/invoices'));
 
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.
