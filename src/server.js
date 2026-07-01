@@ -9,6 +9,7 @@ const { db } = require('./db');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
 const { startRecurringScheduler } = require('./recurring');
+const { startSlackScheduler } = require('./slack');
 
 bootstrapAdmin(); // create first admin on a fresh database
 
@@ -52,6 +53,7 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/workingdays', require('./routes/workingdays'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/backup', require('./routes/backup'));
+app.use('/api/slack', require('./routes/slack'));
 
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.
@@ -84,4 +86,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`WeLitNexus portal running on http://localhost:${PORT}`);
   startRecurringScheduler(); // generate recurring tasks on boot + every 6h
+  startSlackScheduler();     // daily attendance summary to Slack (if configured)
 });

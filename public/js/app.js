@@ -1439,12 +1439,30 @@
            <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Download a complete snapshot of everything — employees, attendance, leaves, tasks, clients, and invoices — as a single database file you can keep on your computer.</p>
            <button class="btn btn-primary" id="backupBtn">⬇ Download backup (.db)</button>
          </div>
+       </div>
+       <div class="section" style="margin-top:30px;">
+         <h2 style="color:var(--navy);">Daily Slack summary</h2>
+         <div class="card" style="max-width:640px;">
+           <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Posts everyone's worked hours &amp; break to Slack automatically each day at 3 AM. Preview what it will say, or send a test now.</p>
+           <div class="row-actions"><button class="btn btn-ghost" id="slackPreviewBtn">Preview</button><button class="btn btn-primary" id="slackSendBtn">Send test to Slack</button></div>
+           <pre id="slackPreview" style="display:none;white-space:pre-wrap;background:var(--mist);border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:12px;font-size:.85rem;"></pre>
+         </div>
        </div>`);
     $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
     $('#backupBtn').addEventListener('click', () => {
       const a = document.createElement('a');
       a.href = '/api/backup'; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
       toast('Backup downloading…');
+    });
+    $('#slackPreviewBtn').addEventListener('click', async () => {
+      try {
+        const r = await api.get('/slack/preview');
+        const el = $('#slackPreview'); el.style.display = 'block';
+        el.textContent = (r.configured ? '' : '⚠ SLACK_WEBHOOK_URL not set — the daily post is disabled until you add it in Railway.\n\n') + r.text;
+      } catch (e) { toast(e.message, true); }
+    });
+    $('#slackSendBtn').addEventListener('click', async () => {
+      try { await api.post('/slack/send'); toast('Sent to Slack ✓'); } catch (e) { toast(e.message, true); }
     });
     loadEmployees();
   };
