@@ -1432,8 +1432,20 @@
     if (!isAdmin()) return navigate('dashboard');
     setMain('Admin', 'Manage employees and access.',
       `<div class="toolbar"><h2 style="margin:0;color:var(--navy);">Employees</h2><button class="btn btn-primary" id="addEmpBtn">+ Add employee</button></div>
-       <div id="empTable"></div>`);
+       <div id="empTable"></div>
+       <div class="section" style="margin-top:30px;">
+         <h2 style="color:var(--navy);">Data &amp; backup</h2>
+         <div class="card" style="max-width:640px;">
+           <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Download a complete snapshot of everything — employees, attendance, leaves, tasks, clients, and invoices — as a single database file you can keep on your computer.</p>
+           <button class="btn btn-primary" id="backupBtn">⬇ Download backup (.db)</button>
+         </div>
+       </div>`);
     $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
+    $('#backupBtn').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = '/api/backup'; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+      toast('Backup downloading…');
+    });
     loadEmployees();
   };
 
