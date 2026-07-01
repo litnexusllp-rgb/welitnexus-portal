@@ -11,30 +11,34 @@ const { now, todayStr, ZONE } = require('./time');
 const { summarize } = require('./compute');
 
 const activeUsers = db.prepare(`SELECT id, name, department FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`);
-const eventsForUserDay = db.prepare(`SELECT type, ts, day FROM events WHERE user_id = ? AND day = ? ORDER BY ts, id`);
+// Query by timestamp (not calendar day) so an overnight shift is one continuous
+// window even though its clock-in and clock-out fall on different dates.
+const eventsInRange = db.prepare(`SELECT type, ts FROM events WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts, id`);
 
 const fmt = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
 
-// Build the summary text (mrkdwn) for the shift ending this morning.
+// The "attendance day" boundary sits between shifts (default noon — between the
+// 2 AM shift end and the 4 PM start), so one overnight shift falls in one window.
+const cutoverHour = () => Math.min(23, Math.max(0, Number(process.env.ATTENDANCE_CUTOVER_HOUR ?? 12)));
+
+// Build the summary for the shift that ended this morning (the previous
+// attendance window: [yesterday cutover, today cutover]), computed by timestamp.
 function buildDailySummary() {
-  const today = todayStr();
-  const yDt = now().minus({ days: 1 });
-  const yesterday = yDt.toFormat('yyyy-LL-dd');
-  const nowMs = now().toMillis();
+  const dayStart = now().minus({ days: 1 }).set({ hour: cutoverHour(), minute: 0, second: 0, millisecond: 0 });
+  const startMs = dayStart.toMillis();
+  const endMs = dayStart.plus({ days: 1 }).toMillis();
+  const liveTs = Math.min(endMs, now().toMillis()); // close any still-open shift at now, not in the future
 
   const lines = [];
   let totalWorked = 0;
   for (const u of activeUsers.all()) {
-    const y = summarize(eventsForUserDay.all(u.id, yesterday), null);
-    const t = summarize(eventsForUserDay.all(u.id, today), nowMs);
-    const worked = y.workedMinutes + t.workedMinutes;
-    const brk = y.breakMinutes + t.breakMinutes;
-    if (worked > 0 || brk > 0) {
-      lines.push(`• *${u.name}* — worked *${fmt(worked)}*, break ${fmt(brk)}`);
-      totalWorked += worked;
+    const s = summarize(eventsInRange.all(u.id, startMs, endMs), liveTs);
+    if (s.workedMinutes > 0 || s.breakMinutes > 0) {
+      lines.push(`• *${u.name}* — worked *${fmt(s.workedMinutes)}*, break ${fmt(s.breakMinutes)}`);
+      totalWorked += s.workedMinutes;
     }
   }
-  const dateLabel = yDt.toFormat('ccc, dd LLL yyyy');
+  const dateLabel = dayStart.toFormat('ccc, dd LLL yyyy');
   const header = `:bar_chart: *Attendance summary — night of ${dateLabel}*`;
   if (!lines.length) return `${header}\n_No one clocked in._`;
   return `${header}\n${lines.join('\n')}\n_Total worked across the team: *${fmt(totalWorked)}*_`;
