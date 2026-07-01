@@ -751,7 +751,7 @@
   let clientGroupFilter = ''; // '' = all; otherwise a parent id (show it + its files)
   async function loadClients() {
     try {
-      const [{ clients }, invSummary] = await Promise.all([api.get('/clients/all'), api.get('/invoices/summary')]);
+      const [{ clients }, invSummary] = await Promise.all([api.get('/clients/all'), api.get('/invoices/summary/totals')]);
       ALL_CLIENTS = clients;
       // Rolled-up income per client: a parent includes its files' invoiced totals.
       const raw = invSummary.totals || {};
@@ -802,11 +802,12 @@
         <div class="field"><label>Stage</label><select id="cStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}" ${(c?.stage || 'PROSPECT') === s ? 'selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Parent client (optional — for a file under a CPA/parent)</label>
         <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter((x) => !x.parent_id && x.id !== c?.id).map((x) => `<option value="${x.id}" ${selParent == x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
+      <div class="form-row one"><div class="field"><label>Billing address (used on invoices — one line each)</label><textarea id="cBilling" placeholder="Continuum Associates\nHudson County\nJersey City New Jersey\nUnited States (USA)">${esc(c?.billing_address || '')}</textarea></div></div>
       <div class="form-row one"><div class="field"><label>Notes</label><textarea id="cNotes">${esc(c?.notes || '')}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, notes: $('#cNotes').value, parent_id: $('#cParent').value || null };
+      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, notes: $('#cNotes').value, parent_id: $('#cParent').value || null, billing_address: $('#cBilling').value };
       try {
         if (editing) await api.put(`/clients/${c.id}`, payload); else await api.post('/clients', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadClients(); loadLookups();
@@ -825,18 +826,22 @@
         <table><thead><tr><th>Client</th><th>Invoice #</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
         ${invoices.map((i) => `<tr><td><strong>${esc(i.client_parent_name ? i.client_parent_name + ' › ' + i.client_name : i.client_name)}</strong></td>
           <td>${esc(i.number || '—')}</td><td>${i.invoice_date ? fmtDate(i.invoice_date) : '—'}</td>
-          <td><strong>${fmtMoney(i.amount)}</strong></td>
+          <td><strong>${money(i.amount, i.currency)}</strong></td>
           <td>${i.status === 'PAID' ? '<span class="badge b-done">Paid</span>' : '<span class="badge b-pending">Unpaid</span>'}</td>
           <td class="row-actions">
+            <button class="btn btn-navy btn-sm" data-inv-pdf="${i.id}">PDF</button>
             <button class="btn btn-ghost btn-sm" data-inv-toggle="${i.id}" data-paid="${i.status === 'PAID' ? 0 : 1}">${i.status === 'PAID' ? 'Mark unpaid' : 'Mark paid'}</button>
             <button class="btn btn-ghost btn-sm" data-inv-edit="${i.id}">Edit</button>
             <button class="btn btn-danger btn-sm" data-inv-del="${i.id}">✕</button></td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No invoices yet. Use “+ New invoice” or “+ Invoice” on a client row.</div>`;
       const byId = {}; invoices.forEach((i) => { byId[i.id] = i; });
+      el.querySelectorAll('[data-inv-pdf]').forEach((b) => b.addEventListener('click', () => openInvoicePdf(b.dataset.invPdf)));
       el.querySelectorAll('[data-inv-toggle]').forEach((b) => b.addEventListener('click', async () => {
         try { await api.post(`/invoices/${b.dataset.invToggle}/status`, { status: Number(b.dataset.paid) ? 'PAID' : 'UNPAID' }); toast('Updated'); loadInvoices(); loadClients(); } catch (e) { toast(e.message, true); }
       }));
-      el.querySelectorAll('[data-inv-edit]').forEach((b) => b.addEventListener('click', () => openInvoiceModal(byId[b.dataset.invEdit])));
+      el.querySelectorAll('[data-inv-edit]').forEach((b) => b.addEventListener('click', async () => {
+        try { const { invoice } = await api.get(`/invoices/${b.dataset.invEdit}`); openInvoiceModal(invoice); } catch (e) { toast(e.message, true); }
+      }));
       el.querySelectorAll('[data-inv-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm('Delete this invoice?')) return;
         try { await api.del(`/invoices/${b.dataset.invDel}`); toast('Deleted'); loadInvoices(); loadClients(); } catch (e) { toast(e.message, true); }
@@ -844,29 +849,134 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  // Your firm's details for the "Billed By" block on the PDF. Edit here.
+  const BILL_FROM = { name: 'LIT Nexus LLP', lines: ['Mohali,', 'India'], email: 'litnexusllp@gmail.com', phone: '+91 98140 11601' };
+  const curSym = (cur) => ({ USD: '$', INR: '₹', GBP: '£', EUR: '€', CAD: 'C$', AUD: 'A$' }[cur] || (cur ? cur + ' ' : '$'));
+  const money = (n, cur) => curSym(cur) + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const billToFor = (c) => c ? [c.name, c.billing_address || ''].filter(Boolean).join('\n') : '';
+
   function openInvoiceModal(inv, presetClient) {
     const editing = !!inv;
     const selClient = inv?.client_id ?? presetClient ?? '';
+    let rows = (inv?.items && inv.items.length) ? inv.items.map((it) => ({ ...it })) : [{ item: '', description: '', quantity: 1, rate: 0 }];
+    const initialBillTo = inv?.bill_to || billToFor(CLIENTS.find((c) => c.id == selClient));
     modal(`<h3>${editing ? 'Edit invoice' : 'New invoice'}</h3>
       <div class="form-row"><div class="field"><label>Client</label><select id="ivClient"><option value="">Select a client…</option>${CLIENTS.map((c) => `<option value="${c.id}" ${selClient == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('')}</select></div>
-        <div class="field"><label>Amount (${CURRENCY})</label><input type="number" step="0.01" min="0" id="ivAmount" value="${inv?.amount ?? ''}" placeholder="0.00"></div></div>
-      <div class="form-row"><div class="field"><label>Invoice # (optional)</label><input id="ivNumber" value="${esc(inv?.number || '')}" placeholder="e.g. INV-001"></div>
-        <div class="field"><label>Date</label><input type="date" id="ivDate" value="${esc(inv?.invoice_date || todayISO())}"></div></div>
-      <div class="form-row"><div class="field"><label>Status</label><select id="ivStatus"><option value="UNPAID" ${inv?.status !== 'PAID' ? 'selected' : ''}>Unpaid</option><option value="PAID" ${inv?.status === 'PAID' ? 'selected' : ''}>Paid</option></select></div>
-        <div class="field"></div></div>
-      <div class="form-row one"><div class="field"><label>Note (optional)</label><textarea id="ivNote">${esc(inv?.note || '')}</textarea></div></div>
+        <div class="field"><label>Invoice #</label><input id="ivNumber" value="${esc(inv?.number || '')}" placeholder="e.g. 106"></div></div>
+      <div class="form-row"><div class="field"><label>Invoice date</label><input type="date" id="ivDate" value="${esc(inv?.invoice_date || todayISO())}"></div>
+        <div class="field"><label>Due date</label><input type="date" id="ivDue" value="${esc(inv?.due_date || '')}"></div></div>
+      <div class="form-row"><div class="field"><label>Currency</label><input id="ivCurrency" value="${esc(inv?.currency || 'USD')}" style="max-width:130px;text-transform:uppercase;"></div>
+        <div class="field"><label>Status</label><select id="ivStatus"><option value="UNPAID" ${inv?.status !== 'PAID' ? 'selected' : ''}>Unpaid</option><option value="PAID" ${inv?.status === 'PAID' ? 'selected' : ''}>Paid</option></select></div></div>
+      <div class="form-row one"><div class="field"><label>Billed to (client name + address, one line each)</label><textarea id="ivBillTo" placeholder="Client name\nAddress line">${esc(initialBillTo)}</textarea></div></div>
+      <div class="field"><label>Line items</label><div id="ivItems"></div>
+        <button class="btn btn-ghost btn-sm" id="ivAddItem" style="margin-top:6px;">+ Add item</button></div>
+      <div style="text-align:right;margin-top:12px;font-weight:800;color:var(--navy);font-size:1.05rem;">Total: <span id="ivTotal">—</span></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create invoice'}</button></div>`);
+
+    const cur = () => $('#ivCurrency').value.toUpperCase() || 'USD';
+    function updateTotal() {
+      const total = rows.reduce((s, r) => s + (Number(r.quantity) || 0) * (Number(r.rate) || 0), 0);
+      $('#ivTotal').textContent = money(total, cur());
+    }
+    function renderItems() {
+      $('#ivItems').innerHTML = rows.map((r, idx) => `<div class="form-row" style="margin-bottom:6px;align-items:flex-start;gap:8px;">
+        <div class="field" style="flex:2;"><input placeholder="Item (e.g. Bookkeeping)" data-ii="item" data-idx="${idx}" value="${esc(r.item)}"><textarea placeholder="Description (optional)" data-ii="description" data-idx="${idx}" style="margin-top:4px;min-height:40px;">${esc(r.description)}</textarea></div>
+        <div class="field" style="flex:0 0 64px;"><input type="number" step="0.01" min="0" placeholder="Qty" data-ii="quantity" data-idx="${idx}" value="${r.quantity}"></div>
+        <div class="field" style="flex:0 0 84px;"><input type="number" step="0.01" min="0" placeholder="Rate" data-ii="rate" data-idx="${idx}" value="${r.rate}"></div>
+        <div class="field" style="flex:0 0 90px;padding-top:9px;text-align:right;font-weight:600;" data-amt="${idx}">${money((Number(r.quantity) || 0) * (Number(r.rate) || 0), cur())}</div>
+        <div style="flex:0 0 auto;padding-top:5px;"><button class="btn btn-danger btn-sm" data-ii-del="${idx}">✕</button></div></div>`).join('');
+      updateTotal();
+      $('#ivItems').querySelectorAll('[data-ii]').forEach((inp) => inp.addEventListener('input', () => {
+        const idx = Number(inp.dataset.idx), field = inp.dataset.ii;
+        rows[idx][field] = (field === 'quantity' || field === 'rate') ? (Number(inp.value) || 0) : inp.value;
+        if (field === 'quantity' || field === 'rate') {
+          const cell = $('#ivItems').querySelector(`[data-amt="${idx}"]`);
+          if (cell) cell.textContent = money((Number(rows[idx].quantity) || 0) * (Number(rows[idx].rate) || 0), cur());
+          updateTotal();
+        }
+      }));
+      $('#ivItems').querySelectorAll('[data-ii-del]').forEach((b) => b.addEventListener('click', () => { rows.splice(Number(b.dataset.iiDel), 1); if (!rows.length) rows = [{ item: '', description: '', quantity: 1, rate: 0 }]; renderItems(); }));
+    }
+    renderItems();
+    $('#ivAddItem').addEventListener('click', () => { rows.push({ item: '', description: '', quantity: 1, rate: 0 }); renderItems(); });
+    $('#ivCurrency').addEventListener('input', renderItems);
+    $('#ivClient').addEventListener('change', (e) => {
+      const c = CLIENTS.find((x) => x.id == e.target.value);
+      if (c && !$('#ivBillTo').value.trim()) $('#ivBillTo').value = billToFor(c);
+    });
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { client_id: $('#ivClient').value, amount: $('#ivAmount').value, number: $('#ivNumber').value, invoice_date: $('#ivDate').value, status: $('#ivStatus').value, note: $('#ivNote').value };
-      if (!payload.client_id) return toast('Please choose a client', true);
-      if (!(Number(payload.amount) > 0)) return toast('Enter an amount greater than 0', true);
+      const items = rows.filter((r) => r.item || r.description || Number(r.quantity) || Number(r.rate));
+      const total = items.reduce((s, r) => s + (Number(r.quantity) || 0) * (Number(r.rate) || 0), 0);
+      if (!$('#ivClient').value) return toast('Please choose a client', true);
+      if (!items.length || !(total > 0)) return toast('Add at least one line item with an amount', true);
+      const payload = { client_id: $('#ivClient').value, number: $('#ivNumber').value, invoice_date: $('#ivDate').value, due_date: $('#ivDue').value, currency: cur(), bill_to: $('#ivBillTo').value, status: $('#ivStatus').value, items };
       try {
         if (editing) await api.put(`/invoices/${inv.id}`, payload); else await api.post('/invoices', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Invoice created ✓'); loadInvoices(); loadClients();
       } catch (e) { toast(e.message, true); }
     });
   }
+
+  // Build the Refrens-style invoice HTML and open the browser print dialog
+  // (Save as PDF). No dependencies; renders same-origin so it stays within CSP.
+  async function openInvoicePdf(id) {
+    let inv;
+    try { inv = (await api.get(`/invoices/${id}`)).invoice; } catch (e) { return toast(e.message, true); }
+    const cur = inv.currency || 'USD';
+    const P = '#5b4bb8'; // brand violet used in the reference invoice
+    const clientTitle = inv.client_parent_name ? `${inv.client_parent_name} › ${inv.client_name}` : inv.client_name;
+    const billTo = (inv.bill_to || clientTitle).split('\n').filter(Boolean);
+    const items = inv.items || [];
+    const rowsHtml = items.map((it, i) => `<tr style="background:${i % 2 ? '#f1eefb' : '#faf9fe'};">
+        <td style="padding:14px 10px;vertical-align:top;color:#555;">${i + 1}.</td>
+        <td style="padding:14px 10px;vertical-align:top;"><div style="font-weight:600;color:#222;">${escP(it.item)}</div>${it.description ? `<div style="color:#555;font-size:13px;margin-top:6px;white-space:pre-line;">${escP(it.description)}</div>` : ''}</td>
+        <td style="padding:14px 10px;vertical-align:top;text-align:center;color:#333;">${it.quantity}</td>
+        <td style="padding:14px 10px;vertical-align:top;text-align:right;color:#333;">${money(it.rate, cur)}</td>
+        <td style="padding:14px 10px;vertical-align:top;text-align:right;color:#222;font-weight:600;">${money(it.quantity * it.rate, cur)}</td></tr>`).join('');
+    const infoRow = (label, value) => `<tr><td style="padding:3px 24px 3px 0;color:#555;font-size:13px;">${label}</td><td style="padding:3px 0;font-weight:700;color:#222;">${escP(value || '—')}</td></tr>`;
+    const box = (title, inner) => `<div style="flex:1;background:#f6f4fc;border-radius:10px;padding:18px 20px;">
+        <div style="color:${P};font-size:20px;font-weight:700;margin-bottom:8px;">${title}</div>${inner}</div>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${escP(inv.number || inv.id)}</title>
+      <style>@page{margin:0} body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}</style></head>
+      <body><div style="max-width:820px;margin:0 auto;padding:44px 44px 24px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div style="color:${P};font-size:40px;font-weight:700;">Invoice</div>
+          <img src="/img/lit-logo-color.png" style="height:52px;width:auto;" alt="LIT Nexus"/>
+        </div>
+        <table style="margin-top:18px;border-collapse:collapse;">
+          ${infoRow('Invoice No #', inv.number || String(inv.id))}
+          ${infoRow('Invoice Date', inv.invoice_date ? fmtDate(inv.invoice_date) : '—')}
+          ${inv.due_date ? infoRow('Due Date', fmtDate(inv.due_date)) : ''}
+        </table>
+        <div style="display:flex;gap:20px;margin-top:26px;">
+          ${box('Billed By', `<div style="font-weight:700;">${escP(BILL_FROM.name)}</div>${BILL_FROM.lines.map((l) => `<div style="color:#333;">${escP(l)}</div>`).join('')}<div style="margin-top:6px;"><strong>Email:</strong> ${escP(BILL_FROM.email)}</div><div><strong>Phone:</strong> ${escP(BILL_FROM.phone)}</div>`)}
+          ${box('Billed To', `<div style="font-weight:700;">${escP(billTo[0] || '')}</div>${billTo.slice(1).map((l) => `<div style="color:#333;">${escP(l)}</div>`).join('')}`)}
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-top:28px;font-size:14px;">
+          <thead><tr style="background:${P};color:#fff;">
+            <th style="padding:12px 10px;text-align:left;width:34px;"></th>
+            <th style="padding:12px 10px;text-align:left;">Item</th>
+            <th style="padding:12px 10px;text-align:center;">Quantity</th>
+            <th style="padding:12px 10px;text-align:right;">Rate</th>
+            <th style="padding:12px 10px;text-align:right;">Amount</th></tr></thead>
+          <tbody>${rowsHtml}</tbody></table>
+        <div style="display:flex;justify-content:flex-end;margin-top:24px;">
+          <table style="border-collapse:collapse;min-width:300px;border-top:2px solid #333;border-bottom:2px solid #333;">
+            <tr><td style="padding:14px 16px;font-weight:700;font-size:17px;">Total (${escP(cur)})</td>
+                <td style="padding:14px 16px;text-align:right;font-weight:800;font-size:19px;">${money(inv.amount, cur)}</td></tr></table>
+        </div>
+        <div style="text-align:center;color:#555;margin-top:40px;font-size:14px;">For any enquiry, reach out via email at <strong>${escP(BILL_FROM.email)}</strong>, call on <strong>${escP(BILL_FROM.phone)}</strong></div>
+        <div style="color:#999;font-size:11px;margin-top:60px;">This is an electronically generated document, no signature is required.</div>
+      </div></body></html>`;
+    const img = new Image(); img.src = '/img/lit-logo-color.png'; // warm the cache
+    const w = window.open('', '_blank');
+    if (!w) return toast('Allow pop-ups to generate the PDF', true);
+    w.document.write(html); w.document.close();
+    setTimeout(() => { try { w.focus(); w.print(); } catch (_e) {} }, 500);
+  }
+  // Escape for the PDF window (own helper so it doesn't depend on esc()).
+  function escP(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   const FREQ_LABEL = { WEEKLY: 'Weekly', MONTHLY: 'Monthly', QUARTERLY: 'Quarterly', YEARLY: 'Yearly' };
   async function loadRecurring() {

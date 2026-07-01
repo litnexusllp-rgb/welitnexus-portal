@@ -26,11 +26,11 @@ const listPending = db.prepare(
 );
 const getOne = db.prepare(`SELECT * FROM clients WHERE id = ?`);
 const insertClient = db.prepare(
-  `INSERT INTO clients (name, code, business_type, stage, notes, approval, created_by, parent_id, active, created_ts)
-   VALUES (@name, @code, @business_type, @stage, @notes, @approval, @created_by, @parent_id, 1, @created_ts)`
+  `INSERT INTO clients (name, code, business_type, stage, notes, billing_address, approval, created_by, parent_id, active, created_ts)
+   VALUES (@name, @code, @business_type, @stage, @notes, @billing_address, @approval, @created_by, @parent_id, 1, @created_ts)`
 );
 const updateClient = db.prepare(
-  `UPDATE clients SET name=@name, code=@code, business_type=@business_type, stage=@stage, notes=@notes, parent_id=@parent_id WHERE id=@id`
+  `UPDATE clients SET name=@name, code=@code, business_type=@business_type, stage=@stage, notes=@notes, billing_address=@billing_address, parent_id=@parent_id WHERE id=@id`
 );
 const setActive = db.prepare(`UPDATE clients SET active = ? WHERE id = ?`);
 const setApproval = db.prepare(`UPDATE clients SET approval = ? WHERE id = ?`);
@@ -69,6 +69,7 @@ router.post('/', requireAuth, (req, res) => {
     business_type: String(req.body.business_type || '').slice(0, 100),
     stage: cleanStage(req.body.stage, 'PROSPECT'),
     notes: String(req.body.notes || '').slice(0, 500),
+    billing_address: String(req.body.billing_address || '').slice(0, 500),
     approval: admin ? 'APPROVED' : 'PENDING',
     created_by: req.user.id,
     parent_id: resolveParent(req.body.parent_id, null),
@@ -97,6 +98,7 @@ router.put('/:id', requireAdmin, (req, res) => {
     business_type: String(req.body.business_type ?? c.business_type ?? '').slice(0, 100),
     stage: cleanStage(req.body.stage, c.stage || 'PROSPECT'),
     notes: String(req.body.notes ?? c.notes),
+    billing_address: String(req.body.billing_address ?? c.billing_address ?? '').slice(0, 500),
     parent_id: req.body.parent_id === undefined ? c.parent_id : resolveParent(req.body.parent_id, c.id),
   });
   res.json({ client: getOne.get(c.id) });

@@ -172,8 +172,11 @@ CREATE TABLE IF NOT EXISTS invoices (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id    INTEGER NOT NULL,
   number       TEXT    DEFAULT '',       -- optional invoice number/reference
-  amount       REAL    NOT NULL DEFAULT 0,
+  amount       REAL    NOT NULL DEFAULT 0, -- total (sum of line items)
   invoice_date TEXT    DEFAULT '',        -- yyyy-LL-dd
+  due_date     TEXT    DEFAULT '',
+  currency     TEXT    NOT NULL DEFAULT 'USD',
+  bill_to      TEXT    DEFAULT '',        -- snapshot of the client's billing address
   status       TEXT    NOT NULL DEFAULT 'UNPAID', -- UNPAID | PAID
   note         TEXT    DEFAULT '',
   created_by   INTEGER,
@@ -181,6 +184,19 @@ CREATE TABLE IF NOT EXISTS invoices (
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
+
+-- Line items on an invoice (item, qty, rate; amount = qty * rate).
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id  INTEGER NOT NULL,
+  item        TEXT    DEFAULT '',
+  description TEXT    DEFAULT '',
+  quantity    REAL    NOT NULL DEFAULT 1,
+  rate        REAL    NOT NULL DEFAULT 0,
+  position    INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_items_inv ON invoice_items(invoice_id);
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.
@@ -194,6 +210,10 @@ for (const stmt of [
   `ALTER TABLE clients ADD COLUMN approval TEXT NOT NULL DEFAULT 'APPROVED'`,
   `ALTER TABLE clients ADD COLUMN created_by INTEGER`,
   `ALTER TABLE clients ADD COLUMN parent_id INTEGER`,
+  `ALTER TABLE clients ADD COLUMN billing_address TEXT DEFAULT ''`,
+  `ALTER TABLE invoices ADD COLUMN due_date TEXT DEFAULT ''`,
+  `ALTER TABLE invoices ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'`,
+  `ALTER TABLE invoices ADD COLUMN bill_to TEXT DEFAULT ''`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }
