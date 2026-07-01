@@ -7,7 +7,7 @@
 // tail of the current day — i.e. the whole overnight shift that just ended.
 
 const { db } = require('./db');
-const { now, attendanceToday, attendanceWindow, DateTime, ZONE } = require('./time');
+const { now, attendanceToday, attendanceWindow, DateTime, ZONE, ATT_CUTOVER } = require('./time');
 const { summarize } = require('./compute');
 
 const activeUsers = db.prepare(`SELECT id, name, department FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`);
@@ -17,10 +17,14 @@ const eventsInRange = db.prepare(`SELECT type, ts FROM events WHERE user_id = ? 
 
 const fmt = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
 
-// Build the summary for the shift that just ended — the most recently completed
-// attendance day (yesterday's shift window), computed by timestamp.
+// Build the summary for the shift that just ended, computed by timestamp.
+// Before the cutover (early morning, when the 3 AM summary fires) the current
+// attendance day IS that just-finished overnight shift, so report it as-is.
+// After the cutover (a daytime preview) the current day is a fresh empty shift,
+// so look back one day to last night's completed shift.
 function buildDailySummary() {
-  const attDate = DateTime.fromISO(attendanceToday(), { zone: ZONE }).minus({ days: 1 }).toFormat('yyyy-LL-dd');
+  const back = now().hour < ATT_CUTOVER() ? 0 : 1;
+  const attDate = DateTime.fromISO(attendanceToday(), { zone: ZONE }).minus({ days: back }).toFormat('yyyy-LL-dd');
   const { startMs, endMs } = attendanceWindow(attDate);
   const liveTs = Math.min(endMs, now().toMillis()); // close any still-open shift at now, not in the future
 
