@@ -7,7 +7,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAdmin } = require('../auth');
-const { now, todayStr, dayFromTs, DateTime, ZONE } = require('../time');
+const { now, attendanceToday, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 
 const router = express.Router();
@@ -44,7 +44,7 @@ router.get('/', requireAdmin, (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
-  const today = todayStr();
+  const today = attendanceToday();
   const startMs = DateTime.fromISO(start, { zone: ZONE }).startOf('day').toMillis();
   const endMs = DateTime.fromISO(end, { zone: ZONE }).endOf('day').toMillis();
 

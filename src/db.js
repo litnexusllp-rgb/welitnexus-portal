@@ -220,4 +220,29 @@ for (const stmt of [
 // Index on the (possibly just-added) client_id column.
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`);
 
+// --- One-time re-bucketing of attendance events into "shift days" ---------
+// Historically each event's `day` was the calendar day it happened on, so an
+// overnight shift (e.g. 4 PM–2 AM) was split across two days and its worked
+// hours were double-counted. We now file every event under its attendance day
+// (cutover-adjusted, default 8 AM). Recompute `day` for any rows where it no
+// longer matches, so existing data re-buckets correctly. Idempotent: once every
+// row already matches, this updates nothing on subsequent boots.
+try {
+  const { attendanceDayFromTs } = require('./time');
+  const rows = db.prepare(`SELECT id, ts, day FROM events`).all();
+  const fix = db.prepare(`UPDATE events SET day = ? WHERE id = ?`);
+  const rebucket = db.transaction((list) => {
+    let n = 0;
+    for (const r of list) {
+      const d = attendanceDayFromTs(r.ts);
+      if (d !== r.day) { fix.run(d, r.id); n++; }
+    }
+    return n;
+  });
+  const changed = rebucket(rows);
+  if (changed) console.log(`Attendance re-bucketing: updated ${changed} event(s) to shift days.`);
+} catch (e) {
+  console.error('Attendance re-bucketing skipped:', e.message);
+}
+
 module.exports = { db, DB_PATH };

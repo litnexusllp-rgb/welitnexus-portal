@@ -7,7 +7,7 @@
 // tail of the current day — i.e. the whole overnight shift that just ended.
 
 const { db } = require('./db');
-const { now, todayStr, ZONE } = require('./time');
+const { now, attendanceToday, attendanceWindow, DateTime, ZONE } = require('./time');
 const { summarize } = require('./compute');
 
 const activeUsers = db.prepare(`SELECT id, name, department FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`);
@@ -17,16 +17,11 @@ const eventsInRange = db.prepare(`SELECT type, ts FROM events WHERE user_id = ? 
 
 const fmt = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
 
-// The "attendance day" boundary sits between shifts (default noon — between the
-// 2 AM shift end and the 4 PM start), so one overnight shift falls in one window.
-const cutoverHour = () => Math.min(23, Math.max(0, Number(process.env.ATTENDANCE_CUTOVER_HOUR ?? 12)));
-
-// Build the summary for the shift that ended this morning (the previous
-// attendance window: [yesterday cutover, today cutover]), computed by timestamp.
+// Build the summary for the shift that just ended — the most recently completed
+// attendance day (yesterday's shift window), computed by timestamp.
 function buildDailySummary() {
-  const dayStart = now().minus({ days: 1 }).set({ hour: cutoverHour(), minute: 0, second: 0, millisecond: 0 });
-  const startMs = dayStart.toMillis();
-  const endMs = dayStart.plus({ days: 1 }).toMillis();
+  const attDate = DateTime.fromISO(attendanceToday(), { zone: ZONE }).minus({ days: 1 }).toFormat('yyyy-LL-dd');
+  const { startMs, endMs } = attendanceWindow(attDate);
   const liveTs = Math.min(endMs, now().toMillis()); // close any still-open shift at now, not in the future
 
   const lines = [];
@@ -38,7 +33,7 @@ function buildDailySummary() {
       totalWorked += s.workedMinutes;
     }
   }
-  const dateLabel = dayStart.toFormat('ccc, dd LLL yyyy');
+  const dateLabel = DateTime.fromISO(attDate, { zone: ZONE }).toFormat('ccc, dd LLL yyyy');
   const header = `:bar_chart: *Attendance summary — night of ${dateLabel}*`;
   if (!lines.length) return `${header}\n_No one clocked in._`;
   return `${header}\n${lines.join('\n')}\n_Total worked across the team: *${fmt(totalWorked)}*_`;

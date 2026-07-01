@@ -9,7 +9,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAdmin } = require('../auth');
-const { now, todayStr, DateTime, ZONE } = require('../time');
+const { now, attendanceToday, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 
 const router = express.Router();
@@ -54,12 +54,12 @@ function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverrid
 router.get('/attendance', requireAdmin, (req, res) => {
   const user = getUser.get(Number(req.query.user_id));
   if (!user) return res.status(404).json({ error: 'Employee not found' });
-  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end)) ? String(req.query.end) : todayStr();
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end)) ? String(req.query.end) : attendanceToday();
   const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.start)) ? String(req.query.start)
     : DateTime.fromISO(end, { zone: ZONE }).startOf('month').toFormat('yyyy-LL-dd');
   if (start > end) return res.status(400).json({ error: 'Start must be before end' });
 
-  const today = todayStr();
+  const today = attendanceToday();
   const byDay = {};
   for (const e of eventsForUserBetween.all(user.id, start, end)) (byDay[e.day] = byDay[e.day] || []).push(e);
   const holidaySet = {};
@@ -103,7 +103,7 @@ router.get('/register', requireAdmin, (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
-  const today = todayStr();
+  const today = attendanceToday();
   const days = eachDay(start, end);
 
   const holidaySet = {};
