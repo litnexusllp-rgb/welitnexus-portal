@@ -9,8 +9,16 @@ const { summarize, VALID } = require('../compute');
 const router = express.Router();
 
 const insertEvent = db.prepare(
-  `INSERT INTO events (user_id, type, ts, day, note) VALUES (?, ?, ?, ?, ?)`
+  `INSERT INTO events (user_id, type, ts, day, note, device) VALUES (?, ?, ?, ?, ?, ?)`
 );
+
+// Classify the punching device from the browser's User-Agent header.
+// Phones/tablets send "Mobi"/"Android"/"iPhone"/"iPad"; everything else is a PC.
+function deviceFrom(req) {
+  const ua = String(req.get('user-agent') || '');
+  if (!ua) return '';
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(ua) ? 'MOBILE' : 'PC';
+}
 const eventsForUserDay = db.prepare(
   `SELECT * FROM events WHERE user_id = ? AND day = ? ORDER BY ts ASC, id ASC`
 );
@@ -41,7 +49,7 @@ router.post('/punch', requireAuth, (req, res) => {
     return res.status(409).json({ error: `Cannot ${type} while ${state}` });
   }
   const ts = now().toMillis();
-  insertEvent.run(req.user.id, type, ts, attendanceDayFromTs(ts), note); // file under the shift day
+  insertEvent.run(req.user.id, type, ts, attendanceDayFromTs(ts), note, deviceFrom(req)); // file under the shift day
   const updated = eventsForUserDay.all(req.user.id, day);
   const summary = summarize(updated, now().toMillis());
   res.json({ day, ...summary, allowed: VALID[summary.state], events: updated });
@@ -77,11 +85,14 @@ router.get('/today', requireAdmin, (req, res) => {
   const people = activeUsers.all().map((u) => {
     const events = byUser[u.id] || [];
     const s = summarize(events, now().toMillis());
+    // Device of the most recent punch that recorded one (their latest session).
+    const lastWithDevice = [...events].reverse().find((e) => e.device);
     return {
       id: u.id, name: u.name, department: u.department, title: u.title,
       state: events.length ? s.state : 'OFF',
       workedMinutes: s.workedMinutes, breakMinutes: s.breakMinutes,
       firstIn: s.firstIn, lastOut: s.lastOut,
+      device: lastWithDevice ? lastWithDevice.device : '',
     };
   });
   res.json({ day, people });
@@ -134,7 +145,7 @@ router.post('/admin/event', requireAdmin, (req, res) => {
   if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
   const ts = toTs(day, time);
   if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
-  insertEvent.run(user.id, type, ts, attendanceDayFromTs(ts), `edited by ${req.user.name}`);
+  insertEvent.run(user.id, type, ts, attendanceDayFromTs(ts), `edited by ${req.user.name}`, ''); // manual entry — no device
   const events = eventsForUserDay.all(user.id, day);
   res.json({ user, day, events: withTimes(events), ...summarize(events, day === attendanceToday() ? now().toMillis() : null) });
 });

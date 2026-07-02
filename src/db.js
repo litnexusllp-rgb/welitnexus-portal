@@ -214,6 +214,7 @@ for (const stmt of [
   `ALTER TABLE invoices ADD COLUMN due_date TEXT DEFAULT ''`,
   `ALTER TABLE invoices ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'`,
   `ALTER TABLE invoices ADD COLUMN bill_to TEXT DEFAULT ''`,
+  `ALTER TABLE events ADD COLUMN device TEXT DEFAULT ''`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

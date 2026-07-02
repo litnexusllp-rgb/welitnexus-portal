@@ -173,6 +173,8 @@ tbody tr:hover { background: #eef5fb; }
 .admin-only { display: none; }
 body.is-admin .admin-only { display: block; }
 .row-actions { display: flex; gap: 6px; }
+/* Phone/PC indicator next to a name in attendance tables. */
+.dev-tag { display: inline-block; margin-left: 6px; font-size: 0.72rem; font-weight: 600; color: var(--slate); background: var(--mist); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; vertical-align: middle; white-space: nowrap; }
 
 /* ---------- Task filter bar (Tasks page) ---------- */
 .task-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }

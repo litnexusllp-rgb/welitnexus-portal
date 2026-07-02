@@ -205,25 +205,28 @@
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
       DASH_LIVE = { receivedAt: Date.now(), working }; // anchor for the live tick
       const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+      // Small phone/PC indicator next to a name, from their latest punch's device.
+      const deviceTag = (d) => d === 'MOBILE' ? ' <span class="dev-tag" title="Clocked in from a phone">📱 Mobile</span>'
+        : d === 'PC' ? ' <span class="dev-tag" title="Clocked in from a computer">💻 PC</span>' : '';
       host.innerHTML = `
         <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
           <div class="section" style="margin-bottom:0;">
             <h2>🟢 Currently in (${working.length})</h2>
             ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th></tr></thead><tbody>
-              ${working.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td></tr>`).join('')}
+              ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td></tr>`).join('')}
             </tbody></table>` : `<div class="empty">No one is clocked in right now.</div>`}
           </div>
           <div class="section" style="margin-bottom:0;">
             <h2>☕ On break (${onBreak.length})</h2>
             ${onBreak.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
-              ${onBreak.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
+              ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
             </tbody></table>` : `<div class="empty">No one is on break.</div>`}
           </div>
         </div>
         <div class="section">
           <h2>✅ Clocked out today (${clockedOut.length})</h2>
           ${clockedOut.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
-            ${clockedOut.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.department || '—')}</td>
+            ${clockedOut.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td>
               <td>${fmtTime(p.firstIn)}</td><td>${fmtTime(p.lastOut)}</td>
               <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
           </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
