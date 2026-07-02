@@ -238,7 +238,10 @@ body.is-admin .admin-only { display: block; }
   .sidebar { flex-direction: row; overflow-x: auto; padding: 12px; align-items: center; gap: 8px; }
   .sidebar .me, .logout, .sidebar .spacer { display: none; }
   .sidebar-logo { display: block; height: 26px; width: auto; margin: 0 6px 0 0; flex-shrink: 0; } /* keep brand on mobile */
-  .nav-item { white-space: nowrap; }
+  /* Nav becomes a horizontal scrolling bar — without this the buttons stack
+     vertically and the sidebar swallows the top of the screen. */
+  #nav { display: flex; flex-direction: row; gap: 6px; }
+  .nav-item { white-space: nowrap; width: auto; flex-shrink: 0; margin-bottom: 0; }
   .main { max-height: none; padding: 20px 18px; }
   .form-row { grid-template-columns: 1fr; }
 }

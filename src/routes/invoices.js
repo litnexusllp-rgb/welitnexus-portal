@@ -17,6 +17,8 @@ const listAll = db.prepare(`${SELECT} ORDER BY (i.invoice_date = '') ASC, i.invo
 const getRow = db.prepare(`${SELECT} WHERE i.id = ?`);
 const rawGetOne = db.prepare(`SELECT * FROM invoices WHERE id = ?`);
 const getClient = db.prepare(`SELECT id FROM clients WHERE id = ?`);
+// Find another invoice with the same (non-empty) number — for uniqueness checks.
+const findByNumber = db.prepare(`SELECT id FROM invoices WHERE number = ? AND number != '' AND id != ?`);
 const itemsFor = db.prepare(`SELECT id, item, description, quantity, rate FROM invoice_items WHERE invoice_id = ? ORDER BY position, id`);
 const insertInvoice = db.prepare(
   `INSERT INTO invoices (client_id, number, amount, invoice_date, due_date, currency, bill_to, status, note, created_by, created_ts)
@@ -80,6 +82,7 @@ router.get('/summary/totals', requireAdmin, (_req, res) => {
 router.post('/', requireAdmin, (req, res) => {
   const inv = clean(req.body);
   if (!inv.client_id || !getClient.get(inv.client_id)) return res.status(400).json({ error: 'A valid client is required' });
+  if (inv.number && findByNumber.get(inv.number, 0)) return res.status(409).json({ error: `Invoice number "${inv.number}" is already in use` });
   const { items, total } = parseItems(req.body.items);
   if (!items.length || !(total > 0)) return res.status(400).json({ error: 'Add at least one line item with an amount' });
   const create = db.transaction(() => {
@@ -95,6 +98,7 @@ router.put('/:id', requireAdmin, (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const inv = clean(req.body, existing);
   if (!inv.client_id || !getClient.get(inv.client_id)) return res.status(400).json({ error: 'A valid client is required' });
+  if (inv.number && findByNumber.get(inv.number, existing.id)) return res.status(409).json({ error: `Invoice number "${inv.number}" is already in use` });
   const { items, total } = parseItems(req.body.items);
   if (!items.length || !(total > 0)) return res.status(400).json({ error: 'Add at least one line item with an amount' });
   const save = db.transaction(() => {

@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { db } = require('./db');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
@@ -37,6 +38,19 @@ app.use(helmet({
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use(loadUser);
+
+// Generous throttle on mutating API calls (reads are unrestricted). Blunts
+// abuse/runaway scripts without getting in the way of normal use. Login has
+// its own stricter limiter in routes/auth.js.
+const writeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
+  message: { error: 'Too many requests. Please slow down and try again shortly.' },
+});
+app.use('/api', writeLimiter);
 
 // API routes
 app.use('/api/auth', require('./routes/auth'));

@@ -21,15 +21,55 @@
 
   function toast(msg, isErr) {
     const t = $('#toast');
+    // Errors interrupt (assertive); successes wait politely. Screen readers
+    // announce the toast via aria-live on the element.
+    t.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
+    t.setAttribute('role', isErr ? 'alert' : 'status');
     t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
     setTimeout(() => { t.className = 'toast'; }, 2600);
   }
+  let lastFocusBeforeModal = null;
   function modal(html) {
-    $('#modal').innerHTML = html;
+    const m = $('#modal');
+    m.innerHTML = html;
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    // Label the dialog by its first heading for screen readers.
+    const h = m.querySelector('h3, h2');
+    if (h) { if (!h.id) h.id = 'modalTitle'; m.setAttribute('aria-labelledby', h.id); }
+    else m.removeAttribute('aria-labelledby');
+    // Associate each field's <label> with its control so it's announced.
+    m.querySelectorAll('.field').forEach((f, i) => {
+      const label = f.querySelector('label');
+      const ctrl = f.querySelector('input, select, textarea');
+      if (label && ctrl) { if (!ctrl.id) ctrl.id = `modalField${i}`; label.setAttribute('for', ctrl.id); }
+    });
+    lastFocusBeforeModal = document.activeElement;
     $('#modalBg').classList.add('show');
+    // Move focus into the dialog (first field, else the dialog itself).
+    const first = m.querySelector('input, select, textarea, button');
+    (first || m).focus();
   }
-  function closeModal() { $('#modalBg').classList.remove('show'); }
+  function closeModal() {
+    $('#modalBg').classList.remove('show');
+    // Return focus to whatever opened the modal.
+    if (lastFocusBeforeModal && document.contains(lastFocusBeforeModal)) lastFocusBeforeModal.focus();
+    lastFocusBeforeModal = null;
+  }
   $('#modalBg').addEventListener('click', (e) => { if (e.target.id === 'modalBg') closeModal(); });
+  // Escape closes the modal; Tab is trapped inside it while open.
+  document.addEventListener('keydown', (e) => {
+    if (!$('#modalBg').classList.contains('show')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+    if (e.key === 'Tab') {
+      const f = [...$('#modal').querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0]; const last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
 
   // ---------- auth bootstrap ----------
   async function boot() {
@@ -379,7 +419,7 @@
       ${leaves.map((l) => `<tr>
         <td>${esc(l.name)}</td><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
         <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
-        <td class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button>
+        <td class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}" data-days="${l.days}" data-balance="${l.leave_balance ?? ''}" data-name="${esc(l.name)}">Approve</button>
           <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></td>
       </tr>`).join('')}</tbody></table>`;
   }
@@ -390,6 +430,11 @@
       b.addEventListener('click', async () => {
         const id = b.dataset.approve || b.dataset.reject;
         const decision = b.dataset.approve ? 'APPROVED' : 'REJECTED';
+        // Warn before approving a request that exceeds the employee's balance.
+        if (b.dataset.approve && b.dataset.balance !== '') {
+          const days = Number(b.dataset.days); const bal = Number(b.dataset.balance);
+          if (days > bal && !confirm(`${b.dataset.name} has ${bal} day(s) left but this request is ${days} day(s). Approving takes the balance to ${bal - days}. Approve anyway?`)) return;
+        }
         try { await api.post(`/leaves/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓' : 'Rejected');
           navigate(document.querySelector('.nav-item.active').dataset.view);
         } catch (e) { toast(e.message, true); }
@@ -1216,7 +1261,7 @@
     const m = $('#kpiMonth').value || thisMonthISO();
     const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Tasks Done', 'On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points'];
     const lines = [head.join(',')].concat(KPI_ROWS.map((r) => [
-      `"${r.name.replace(/"/g, '""')}"`, `"${(r.department || '').replace(/"/g, '""')}"`,
+      csvCell(r.name), csvCell(r.department || ''),
       r.daysPresent, r.hoursWorked, r.tasksDone, r.onTimePct === null ? '' : r.onTimePct,
       r.openTasks, r.leaveDays, r.achievementsAcknowledged, r.achievementsPending, r.points,
     ].join(',')));
@@ -1413,9 +1458,17 @@
     if (!REGISTER) return toast('Nothing to export', true);
     const head = ['Employee', 'Department'].concat(REGISTER.days.map((d) => d.slice(8))).concat(['Present', 'Leave', 'Absent']);
     const lines = [head.join(',')].concat(REGISTER.users.map((u) => [
-      `"${u.name.replace(/"/g, '""')}"`, `"${(u.department || '').replace(/"/g, '""')}"`,
+      csvCell(u.name), csvCell(u.department || ''),
     ].concat(REGISTER.days.map((d) => STATUS_CODE[u.cells[d]] || '')).concat([u.totals.present, u.totals.leave, u.totals.absent]).join(',')));
     downloadCsv(lines.join('\n'), `attendance-register-${REGISTER.month}.csv`);
+  }
+
+  // Quote a CSV field and neutralise formula injection: a leading =,+,-,@ (or
+  // tab/CR) makes Excel/Sheets treat the cell as a formula, so prefix a quote.
+  function csvCell(v) {
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
   }
 
   function downloadCsv(text, filename) {

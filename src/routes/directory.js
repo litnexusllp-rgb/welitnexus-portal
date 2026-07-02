@@ -23,6 +23,11 @@ const updateUser = db.prepare(
 );
 const setActive = db.prepare(`UPDATE users SET active = ? WHERE id = ?`);
 const setPassword = db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`);
+// Count active admins OTHER than the given user — used to prevent locking the
+// firm out by demoting/deactivating the last administrator.
+const otherActiveAdmins = db.prepare(
+  `SELECT COUNT(*) AS c FROM users WHERE role = 'ADMIN' AND active = 1 AND id != ?`
+);
 
 // Everyone sees the directory of active employees.
 router.get('/', requireAuth, (_req, res) => res.json({ users: listAll.all() }));
@@ -71,6 +76,11 @@ router.put('/:id', requireAdmin, (req, res) => {
       return res.status(409).json({ error: 'Employee code already in use by another employee' });
     }
   }
+  // Don't let the last active admin be demoted — it would lock everyone out.
+  const newRole = String(req.body.role ?? existing.role).toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
+  if (existing.role === 'ADMIN' && newRole !== 'ADMIN' && otherActiveAdmins.get(existing.id).c === 0) {
+    return res.status(409).json({ error: 'This is the last admin — promote another admin before removing admin rights.' });
+  }
   updateUser.run({
     id: existing.id,
     name: String(req.body.name ?? existing.name),
@@ -95,8 +105,15 @@ router.post('/:id/password', requireAdmin, (req, res) => {
 
 // ADMIN: deactivate / reactivate.
 router.post('/:id/active', requireAdmin, (req, res) => {
-  setActive.run(req.body.active ? 1 : 0, Number(req.params.id));
-  res.json({ user: getOne.get(Number(req.params.id)) });
+  const id = Number(req.params.id);
+  const target = getOne.get(id);
+  if (!target) return res.status(404).json({ error: 'Not found' });
+  // Don't let the last active admin be deactivated — it would lock everyone out.
+  if (!req.body.active && target.role === 'ADMIN' && otherActiveAdmins.get(id).c === 0) {
+    return res.status(409).json({ error: 'This is the last admin — promote another admin before deactivating this account.' });
+  }
+  setActive.run(req.body.active ? 1 : 0, id);
+  res.json({ user: getOne.get(id) });
 });
 
 module.exports = router;

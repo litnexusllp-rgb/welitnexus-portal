@@ -14,11 +14,16 @@ const insertLeave = db.prepare(
 const leavesForUser = db.prepare(`SELECT * FROM leaves WHERE user_id = ? ORDER BY start_date DESC`);
 const getLeave = db.prepare(`SELECT * FROM leaves WHERE id = ?`);
 const allPending = db.prepare(
-  `SELECT l.*, u.name FROM leaves l JOIN users u ON u.id = l.user_id
+  `SELECT l.*, u.name, u.leave_balance FROM leaves l JOIN users u ON u.id = l.user_id
    WHERE l.status = 'PENDING' ORDER BY l.created_ts ASC`
 );
 const allLeaves = db.prepare(
-  `SELECT l.*, u.name FROM leaves l JOIN users u ON u.id = l.user_id ORDER BY l.start_date DESC LIMIT 200`
+  `SELECT l.*, u.name, u.leave_balance FROM leaves l JOIN users u ON u.id = l.user_id ORDER BY l.start_date DESC LIMIT 200`
+);
+// Existing pending/approved leaves for a user that overlap a [start,end] range.
+const overlappingLeaves = db.prepare(
+  `SELECT id FROM leaves WHERE user_id = ? AND status IN ('PENDING','APPROVED')
+   AND start_date <= ? AND end_date >= ? LIMIT 1`
 );
 const setStatus = db.prepare(
   `UPDATE leaves SET status = ?, decided_by = ?, decided_ts = ?, admin_note = ? WHERE id = ?`
@@ -35,6 +40,12 @@ router.post('/', requireAuth, (req, res) => {
   const reason = String(req.body.reason || '').slice(0, 500);
   const span = inclusiveDays(start, end);
   if (!span) return res.status(400).json({ error: 'Invalid date range' });
+  // Can't apply for leave that has already started (before today).
+  if (start < todayStr()) return res.status(400).json({ error: 'Leave cannot start in the past' });
+  // Block overlapping requests so the same days aren't double-booked.
+  if (overlappingLeaves.get(req.user.id, end, start)) {
+    return res.status(409).json({ error: 'You already have a leave request covering some of these dates' });
+  }
   const days = kind === 'HALF' ? 0.5 : span;
   const info = insertLeave.run(req.user.id, start, end, kind, reason, days, now().toMillis());
   res.json({ leave: getLeave.get(info.lastInsertRowid) });
