@@ -423,6 +423,12 @@
   let taskStatus = '';
   let taskPriority = '';
   const collapsedGroups = new Set();
+  // Row action menus are <details> elements, which don't close each other or on
+  // an outside click. This one-time listener closes any open menu when the click
+  // lands outside it — so only one ⋯ menu is ever open at a time.
+  document.addEventListener('click', (e) => {
+    document.querySelectorAll('details.rowmenu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+  });
   VIEWS.tasks = async () => {
     const emp = !isAdmin();
     setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your work, organised by client.',
