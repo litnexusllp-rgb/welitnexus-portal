@@ -196,6 +196,14 @@ body.is-admin .admin-only { display: block; }
 /* Fixed column widths so every client group's table lines up identically,
    and long task names wrap onto the next line instead of stretching a column. */
 .ttable { table-layout: fixed; }
+/* Let a row's ⋯ action menu overflow the table edge (the base table clips it
+   with overflow:hidden, which hid Edit/Delete on the last row of a group).
+   Switch to separate borders so the corners can still be rounded. */
+.ttable { overflow: visible; border-collapse: separate; border-spacing: 0; }
+.ttable thead th:first-child { border-top-left-radius: var(--radius); }
+.ttable thead th:last-child { border-top-right-radius: var(--radius); }
+.ttable tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius); }
+.ttable tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius); }
 .ttable th:nth-child(1), .ttable td:nth-child(1) { width: 34%; }
 .ttable th:nth-child(2), .ttable td:nth-child(2) { width: 19%; }
 .ttable th:nth-child(3), .ttable td:nth-child(3) { width: 11%; }
