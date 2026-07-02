@@ -679,7 +679,7 @@
       el.innerHTML = order.map((g) => `
         <div class="tgroup ${collapsedGroups.has(g) ? 'collapsed' : ''}">
           <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g)}</h2><span class="cnt">(${groups[g].length})</span></div>
-          <table><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
+          <table class="ttable"><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
           ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
             <td>${assigneeInlineSelect(t)}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
             <td style="text-align:right;"><details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">

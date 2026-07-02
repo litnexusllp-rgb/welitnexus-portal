@@ -193,6 +193,23 @@ body.is-admin .admin-only { display: block; }
 .tgroup-head .cnt { color: var(--slate); font-weight: 500; font-size: .85rem; }
 .tgroup.collapsed table { display: none; }
 
+/* Fixed column widths so every client group's table lines up identically,
+   and long task names wrap onto the next line instead of stretching a column. */
+.ttable { table-layout: fixed; }
+.ttable th:nth-child(1), .ttable td:nth-child(1) { width: 34%; }
+.ttable th:nth-child(2), .ttable td:nth-child(2) { width: 19%; }
+.ttable th:nth-child(3), .ttable td:nth-child(3) { width: 11%; }
+.ttable th:nth-child(4), .ttable td:nth-child(4) { width: 13%; }
+.ttable th:nth-child(5), .ttable td:nth-child(5) { width: 15%; }
+.ttable th:nth-child(6), .ttable td:nth-child(6) { width: 8%; }
+.ttable td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.ttable .assignee-sel { width: 100%; max-width: 100%; }
+/* Keep the middle columns from spilling into each other on narrow screens
+   (Status + actions columns are left alone so their dropdowns stay visible). */
+.ttable th:nth-child(2), .ttable td:nth-child(2),
+.ttable th:nth-child(3), .ttable td:nth-child(3),
+.ttable th:nth-child(4), .ttable td:nth-child(4) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Inline assignee select in a row */
 .assignee-sel { padding: 5px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; font-size: 0.85rem; font-family: var(--font); color: var(--ink); max-width: 140px; }
 .assignee-sel:hover { border-color: var(--line); background: var(--mist); }
