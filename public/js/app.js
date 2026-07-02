@@ -418,15 +418,36 @@
 
   // ---------- Tasks ----------
   let taskClientFilter = '';
+  let taskSearch = '';
+  let taskAssignee = '';
+  let taskStatus = '';
+  let taskPriority = '';
+  const collapsedGroups = new Set();
   VIEWS.tasks = async () => {
     const emp = !isAdmin();
     setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your work, organised by client.',
-      `<div class="admin-only toolbar">
-         <div style="display:flex;gap:10px;align-items:center;">
+      `<div class="admin-only">
+         <div class="toolbar">
            <h2 style="margin:0;color:var(--navy);">All tasks</h2>
-           <select id="clientFilter" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></select>
+           <button class="btn btn-primary" id="newTaskBtn">+ Assign task</button></div>
+         <div class="task-filters">
+           <input id="taskSearch" class="tf-search" placeholder="Search title, person or client…" autocomplete="off">
+           <select id="clientFilter" class="tf-sel"></select>
+           <select id="assigneeFilter" class="tf-sel"></select>
+           <div class="tf-chips" id="statusChips">
+             <button class="chip on" data-st="">All</button>
+             <button class="chip" data-st="TODO">To do</button>
+             <button class="chip" data-st="IN_PROGRESS">In progress</button>
+             <button class="chip" data-st="DONE">Done</button>
+           </div>
+           <div class="tf-chips" id="priChips">
+             <button class="chip on" data-pri="">Any priority</button>
+             <button class="chip" data-pri="HIGH">High</button>
+             <button class="chip" data-pri="MEDIUM">Medium</button>
+             <button class="chip" data-pri="LOW">Low</button>
+           </div>
          </div>
-         <button class="btn btn-primary" id="newTaskBtn">+ Assign task</button></div>
+       </div>
        <div class="admin-only" id="allTasks" style="margin-bottom:28px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">My tasks</h2>
          ${emp ? '<div class="row-actions"><button class="btn btn-ghost" id="suggestClientBtn">Suggest a client</button><button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button></div>' : ''}</div>
@@ -438,6 +459,20 @@
         + CLIENTS.map((c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
       $('#clientFilter').value = taskClientFilter;
       $('#clientFilter').addEventListener('change', (e) => { taskClientFilter = e.target.value; loadAllTasks(); });
+      $('#assigneeFilter').innerHTML = `<option value="">Anyone</option>`
+        + USERS.map((u) => `<option value="${u.id}" ${taskAssignee == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+      $('#assigneeFilter').value = taskAssignee;
+      $('#assigneeFilter').addEventListener('change', (e) => { taskAssignee = e.target.value; loadAllTasks(); });
+      const search = $('#taskSearch');
+      search.value = taskSearch;
+      search.addEventListener('input', (e) => { taskSearch = e.target.value; loadAllTasks(); });
+      const chipRow = (sel, attr, set) => $(sel).addEventListener('click', (e) => {
+        const b = e.target.closest('button[' + attr + ']'); if (!b) return;
+        $(sel).querySelectorAll('.chip').forEach((c) => c.classList.remove('on'));
+        b.classList.add('on'); set(b.getAttribute(attr)); loadAllTasks();
+      });
+      chipRow('#statusChips', 'data-st', (v) => { taskStatus = v; });
+      chipRow('#priChips', 'data-pri', (v) => { taskPriority = v; });
       $('#newTaskBtn').addEventListener('click', () => openTaskModal());
       loadAllTasks();
     }
@@ -614,13 +649,27 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  // Inline assignee dropdown for a task row — reassign without opening a modal.
+  function assigneeInlineSelect(t) {
+    return `<select class="assignee-sel" data-assignee="${t.id}" title="Reassign">${USERS.map((u) => `<option value="${u.id}" ${u.id == t.assignee_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
+  }
+
   async function loadAllTasks() {
     try {
       let { tasks } = await api.get('/tasks/all');
       if (taskClientFilter === 'none') tasks = tasks.filter((t) => !t.client_id);
       else if (taskClientFilter) tasks = tasks.filter((t) => t.client_id == taskClientFilter || t.client_parent_id == taskClientFilter); // roll up: a CPA shows its files too
+      if (taskAssignee) tasks = tasks.filter((t) => t.assignee_id == taskAssignee);
+      if (taskStatus) tasks = tasks.filter((t) => t.status === taskStatus);
+      if (taskPriority) tasks = tasks.filter((t) => t.priority === taskPriority);
+      if (taskSearch.trim()) {
+        const q = taskSearch.trim().toLowerCase();
+        tasks = tasks.filter((t) => [t.title, t.description, t.assignee_name, t.client_name, t.client_parent_name]
+          .some((f) => String(f || '').toLowerCase().includes(q)));
+      }
+      const filtered = !!(taskClientFilter || taskAssignee || taskStatus || taskPriority || taskSearch.trim());
       const el = $('#allTasks');
-      if (!tasks.length) { el.innerHTML = `<div class="empty">No tasks here yet.</div>`; return; }
+      if (!tasks.length) { el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet.'}</div>`; return; }
 
       // Roll sub-client (file) tasks up under their parent CPA; standalone
       // clients group on their own; untagged tasks go under "General".
@@ -628,14 +677,29 @@
       tasks.forEach((t) => { const k = t.client_parent_name || t.client_name || '— General —'; (groups[k] = groups[k] || []).push(t); });
       const order = Object.keys(groups).sort((a, b) => (a === '— General —') - (b === '— General —') || a.localeCompare(b));
       el.innerHTML = order.map((g) => `
-        <div class="section" style="margin-bottom:18px;">
-          <h2 style="font-size:1rem;">${esc(g)} <span style="color:var(--slate);font-weight:500;">(${groups[g].length})</span></h2>
+        <div class="tgroup ${collapsedGroups.has(g) ? 'collapsed' : ''}">
+          <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g)}</h2><span class="cnt">(${groups[g].length})</span></div>
           <table><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
           ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
-            <td>${esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
-            <td class="row-actions"><button class="btn btn-ghost btn-sm" data-checklist-task="${t.id}">✓ Checklist</button><button class="btn btn-ghost btn-sm" data-edit-task="${t.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-task="${t.id}">✕</button></td></tr>`).join('')}
+            <td>${assigneeInlineSelect(t)}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
+            <td style="text-align:right;"><details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
+              <button data-checklist-task="${t.id}">✓ Checklist</button>
+              <button data-edit-task="${t.id}">✎ Edit</button>
+              <button class="danger" data-del-task="${t.id}">🗑 Delete</button>
+            </div></details></td></tr>`).join('')}
           </tbody></table></div>`).join('');
+      // Collapse / expand a client group (remembered while the page is open).
+      el.querySelectorAll('.tgroup-head').forEach((h, i) => h.addEventListener('click', () => {
+        const g = order[i];
+        if (collapsedGroups.has(g)) collapsedGroups.delete(g); else collapsedGroups.add(g);
+        h.closest('.tgroup').classList.toggle('collapsed');
+      }));
       wireStatusSelects(el, () => { loadAllTasks(); loadMyTasks(); });
+      el.querySelectorAll('[data-assignee]').forEach((s) => s.addEventListener('change', async () => {
+        try { await api.put(`/tasks/${s.dataset.assignee}`, { assignee_id: Number(s.value) }); toast('Reassigned ✓'); loadAllTasks(); loadMyTasks(); }
+        catch (e) { toast(e.message, true); loadAllTasks(); }
+      }));
+      el.querySelectorAll('.rowmenu-list button').forEach((b) => b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')));
       el.querySelectorAll('[data-checklist-task]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(tasks.find((t) => t.id == b.dataset.checklistTask), () => { loadAllTasks(); loadMyTasks(); })));
       el.querySelectorAll('[data-edit-task]').forEach((b) => b.addEventListener('click', () => openTaskModal(tasks.find((t) => t.id == b.dataset.editTask))));
       el.querySelectorAll('[data-del-task]').forEach((b) => b.addEventListener('click', async () => {

@@ -173,6 +173,41 @@ tbody tr:hover { background: #eef5fb; }
 .admin-only { display: none; }
 body.is-admin .admin-only { display: block; }
 .row-actions { display: flex; gap: 6px; }
+
+/* ---------- Task filter bar (Tasks page) ---------- */
+.task-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+.task-filters .tf-search { flex: 1; min-width: 180px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 0.88rem; font-family: var(--font); }
+.task-filters .tf-sel { padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 0.85rem; background: var(--white); font-family: var(--font); }
+.task-filters .tf-search:focus, .task-filters .tf-sel:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(14,159,126,.15); }
+.tf-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chip { padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--white); color: var(--slate); font-size: 0.82rem; font-weight: 600; font-family: var(--font); }
+.chip:hover { border-color: var(--teal); }
+.chip.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+
+/* Collapsible task group */
+.tgroup { margin-bottom: 14px; }
+.tgroup-head { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 4px; user-select: none; }
+.tgroup-head .caret { transition: transform .15s; color: var(--slate); font-size: .8rem; }
+.tgroup.collapsed .caret { transform: rotate(-90deg); }
+.tgroup-head h2 { font-size: 1rem; color: var(--navy); margin: 0; }
+.tgroup-head .cnt { color: var(--slate); font-weight: 500; font-size: .85rem; }
+.tgroup.collapsed table { display: none; }
+
+/* Inline assignee select in a row */
+.assignee-sel { padding: 5px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; font-size: 0.85rem; font-family: var(--font); color: var(--ink); max-width: 140px; }
+.assignee-sel:hover { border-color: var(--line); background: var(--mist); }
+.assignee-sel:focus { outline: none; border-color: var(--teal); background: var(--white); }
+
+/* Per-row action menu (kebab) */
+.rowmenu { position: relative; display: inline-block; }
+.rowmenu > summary { list-style: none; cursor: pointer; padding: 4px 10px; border-radius: 7px; color: var(--slate); font-weight: 700; }
+.rowmenu > summary::-webkit-details-marker { display: none; }
+.rowmenu > summary:hover { background: var(--mist); color: var(--navy); }
+.rowmenu[open] > summary { background: var(--mist); }
+.rowmenu-list { position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--white); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); min-width: 158px; z-index: 20; padding: 6px; }
+.rowmenu-list button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; padding: 8px 10px; border-radius: 7px; font-size: 0.86rem; color: var(--ink); font-family: var(--font); }
+.rowmenu-list button:hover { background: var(--mist); }
+.rowmenu-list button.danger { color: var(--danger); }
 @media (max-width: 760px) {
   .app.show { grid-template-columns: 1fr; }
   .sidebar { flex-direction: row; overflow-x: auto; padding: 12px; align-items: center; gap: 8px; }
