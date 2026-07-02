@@ -4,6 +4,7 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now } = require('../time');
+const { notify } = require('../notify');
 
 const router = express.Router();
 
@@ -97,7 +98,12 @@ router.post('/', requireAuth, (req, res) => {
     checklist.forEach((text, i) => insertChecklistItem.run(info.lastInsertRowid, text, i));
     return info.lastInsertRowid;
   });
-  res.json({ task: withChecklist(getTask.get(create())) });
+  const created = getTask.get(create());
+  // Tell the assignee (unless they created it for themselves).
+  if (created.assignee_id !== req.user.id) {
+    notify(created.assignee_id, { type: 'TASK', title: 'New task assigned', body: `${req.user.name} assigned you "${created.title}".`, link: 'tasks' });
+  }
+  res.json({ task: withChecklist(created) });
 });
 
 // My tasks.
@@ -171,7 +177,12 @@ router.put('/:id', requireAdmin, (req, res) => {
     db.prepare('DELETE FROM task_checklist WHERE task_id = ?').run(task.id);
     parseChecklist(req.body.checklist).forEach((text, i) => insertChecklistItem.run(task.id, text, i));
   }
-  res.json({ task: withChecklist(getTask.get(task.id)) });
+  const updated = getTask.get(task.id);
+  // Notify on a genuine reassignment to someone other than the editing admin.
+  if (updated.assignee_id !== task.assignee_id && updated.assignee_id !== req.user.id) {
+    notify(updated.assignee_id, { type: 'TASK', title: 'Task assigned to you', body: `${req.user.name} assigned you "${updated.title}".`, link: 'tasks' });
+  }
+  res.json({ task: withChecklist(updated) });
 });
 
 // ADMIN: delete task.

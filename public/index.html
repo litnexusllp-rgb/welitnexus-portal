@@ -35,12 +35,18 @@
         <button class="nav-item" data-view="tasks"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span> Tasks</button>
         <button class="nav-item admin-only" data-view="clients"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></span> Clients</button>
         <button class="nav-item" data-view="achievements"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><path d="M9 13.2 7.5 21 12 18.2 16.5 21 15 13.2"/></svg></span> Achievements</button>
+        <button class="nav-item" data-view="noticeboard"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a2 2 0 0 1 2-2h2l9-4v14l-9-4H5a2 2 0 0 1-2-2z"/><path d="M8 15v4a1.5 1.5 0 0 0 3 0v-3"/></svg></span> Notice board</button>
+        <button class="nav-item admin-only" data-view="trends"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16"/><path d="M7 15l3-4 3 3 4-6"/></svg></span> Trends</button>
         <button class="nav-item admin-only" data-view="kpi"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20v-5M12 20V8M17 20v-9"/></svg></span> KPIs</button>
         <button class="nav-item admin-only" data-view="reports"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16 10 10l4 4 6-7"/><path d="M16 7h4v4"/></svg></span> Reports</button>
         <button class="nav-item" data-view="calendar"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="15" rx="2.5"/><path d="M4 10h16M8.5 3v4.5M15.5 3v4.5"/></svg></span> Holidays</button>
         <button class="nav-item" data-view="directory"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M20.5 19a5.5 5.5 0 0 0-3.5-5.1"/></svg></span> Directory</button>
         <button class="nav-item admin-only" data-view="admin"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M19 7h1"/><path d="M4 17h7M17 17h3"/><circle cx="16" cy="7" r="2.2"/><circle cx="13" cy="17" r="2.2"/></svg></span> Admin</button>
       </nav>
+      <button class="nav-item bell" id="bellBtn" aria-label="Notifications">
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></span>
+        Notifications <span class="bell-badge" id="bellBadge" hidden>0</span>
+      </button>
       <div class="spacer"></div>
       <div class="me">
         <div class="nm" id="meName">—</div>

@@ -4,6 +4,7 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now, todayStr, inclusiveDays } = require('../time');
+const { notify } = require('../notify');
 
 const router = express.Router();
 
@@ -133,6 +134,13 @@ router.post('/:id/decide', requireAdmin, (req, res) => {
     if (decision === 'APPROVED') adjustBalance.run(leave.days, leave.user_id);
   });
   decide();
+  // Let the employee know their request was decided.
+  notify(leave.user_id, {
+    type: 'LEAVE',
+    title: decision === 'APPROVED' ? 'Leave approved' : 'Leave rejected',
+    body: `Your leave from ${leave.start_date}${leave.end_date !== leave.start_date ? ' to ' + leave.end_date : ''} was ${decision.toLowerCase()}${note ? ` — ${note}` : ''}.`,
+    link: 'leaves',
+  });
   res.json({ leave: getLeave.get(leave.id) });
 });
 

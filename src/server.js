@@ -68,6 +68,10 @@ app.use('/api/workingdays', require('./routes/workingdays'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/slack', require('./routes/slack'));
+app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/announcements', require('./routes/announcements'));
+app.use('/api/punch-requests', require('./routes/punchRequests'));
+app.use('/api/analytics', require('./routes/analytics'));
 
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.

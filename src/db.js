@@ -197,6 +197,52 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_items_inv ON invoice_items(invoice_id);
+
+-- In-app notifications: one row per user per event (leave decided, task
+-- assigned, punch-request decided, new announcement, etc.).
+CREATE TABLE IF NOT EXISTS notifications (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,          -- who should see it
+  type       TEXT    NOT NULL,          -- LEAVE | TASK | PUNCH | ANNOUNCEMENT | GENERAL
+  title      TEXT    NOT NULL,
+  body       TEXT    DEFAULT '',
+  link_view  TEXT    DEFAULT '',        -- which portal view to open when clicked
+  read       INTEGER NOT NULL DEFAULT 0,
+  created_ts INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read);
+
+-- Employee-submitted attendance corrections ("fix my punch"). An admin
+-- approves (which inserts the real punch) or rejects.
+CREATE TABLE IF NOT EXISTS punch_requests (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL,
+  day         TEXT    NOT NULL,         -- attendance day (yyyy-LL-dd)
+  type        TEXT    NOT NULL,         -- IN | OUT | BREAK_START | BREAK_END
+  time        TEXT    NOT NULL,         -- HH:mm (office zone)
+  reason      TEXT    DEFAULT '',
+  status      TEXT    NOT NULL DEFAULT 'PENDING', -- PENDING | APPROVED | REJECTED
+  decided_by  INTEGER,
+  decided_ts  INTEGER,
+  admin_note  TEXT    DEFAULT '',
+  created_ts  INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_punch_requests_status ON punch_requests(status);
+CREATE INDEX IF NOT EXISTS idx_punch_requests_user ON punch_requests(user_id);
+
+-- Company notice board. Admins post; everyone reads.
+CREATE TABLE IF NOT EXISTS announcements (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  title      TEXT    NOT NULL,
+  body       TEXT    DEFAULT '',
+  pinned     INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER,
+  created_ts INTEGER NOT NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_ts ON announcements(created_ts);
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.

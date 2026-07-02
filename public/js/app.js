@@ -71,6 +71,56 @@
     }
   });
 
+  // ---------- Notifications (bell) ----------
+  let notifTimer = null;
+  // Relative "time ago" for notification timestamps.
+  function fmtWhen(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+    return new Date(ts).toLocaleDateString();
+  }
+  async function refreshNotifCount() {
+    try {
+      const { unread } = await api.get('/notifications/count');
+      const b = $('#bellBadge');
+      if (unread > 0) { b.hidden = false; b.textContent = unread > 99 ? '99+' : String(unread); }
+      else { b.hidden = true; }
+    } catch (_e) { /* offline / logged out — ignore */ }
+  }
+  function startNotifications() { refreshNotifCount(); clearInterval(notifTimer); notifTimer = setInterval(refreshNotifCount, 30000); }
+  function stopNotifications() { clearInterval(notifTimer); }
+
+  async function openNotifications() {
+    let data;
+    try { data = await api.get('/notifications'); } catch (e) { return toast(e.message, true); }
+    const list = data.notifications;
+    modal(`<h3>Notifications</h3>
+      <div class="modal-actions" style="justify-content:space-between;margin-top:0;margin-bottom:12px;">
+        <span style="color:var(--slate);font-size:.85rem;align-self:center;">${data.unread} unread</span>
+        <button class="btn btn-ghost btn-sm" id="nMarkAll" ${data.unread ? '' : 'disabled'}>Mark all read</button>
+      </div>
+      <div class="notif-list">
+        ${list.length ? list.map((n) => `<button class="notif ${n.read ? '' : 'unread'}" data-nid="${n.id}" data-link="${esc(n.link_view || '')}">
+          <div class="nt">${esc(n.title)}</div>${n.body ? `<div class="nb">${esc(n.body)}</div>` : ''}
+          <div class="nw">${fmtWhen(n.created_ts)}</div></button>`).join('')
+        : `<div class="empty">No notifications yet.</div>`}
+      </div>`);
+    $('#nMarkAll')?.addEventListener('click', async () => {
+      try { await api.post('/notifications/read-all'); refreshNotifCount(); closeModal(); } catch (e) { toast(e.message, true); }
+    });
+    $('#modal').querySelectorAll('.notif').forEach((b) => b.addEventListener('click', async () => {
+      try { await api.post(`/notifications/${b.dataset.nid}/read`); } catch (_e) {}
+      refreshNotifCount();
+      const link = b.dataset.link;
+      closeModal();
+      if (link && VIEWS[link]) navigate(link);
+    }));
+  }
+  $('#bellBtn').addEventListener('click', openNotifications);
+
   // ---------- auth bootstrap ----------
   async function boot() {
     try {
@@ -92,6 +142,7 @@
     document.body.classList.toggle('is-admin', isAdmin());
     $('#meName').textContent = ME.name;
     $('#meRole').textContent = `${ME.title || ME.role} · ${ME.department || '—'}`;
+    startNotifications();
     navigate('dashboard');
   }
 
@@ -106,7 +157,7 @@
 
   $('#logoutBtn').addEventListener('click', async () => {
     try { await api.post('/auth/logout'); } catch (_e) {}
-    ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; showLogin();
+    ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); showLogin();
   });
 
   $('#changePwBtn').addEventListener('click', openChangePassword);
@@ -198,8 +249,8 @@
     const host = $('#' + hostId); if (!host) return; // navigated away
     try {
       const reqs = [api.get('/attendance/today')];
-      if (withApprovals) reqs.push(api.get('/leaves/pending'));
-      const [today, pend] = await Promise.all(reqs);
+      if (withApprovals) { reqs.push(api.get('/leaves/pending')); reqs.push(api.get('/punch-requests/pending')); }
+      const [today, pend, punchPend] = await Promise.all(reqs);
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
@@ -234,8 +285,12 @@
         ${withApprovals ? `<div class="section">
           <h2>Pending leave approvals (${pend.leaves.length})</h2>
           ${pend.leaves.length ? leaveApprovalTable(pend.leaves) : `<div class="empty">Nothing waiting for approval. 🎉</div>`}
+        </div>
+        <div class="section">
+          <h2>Attendance correction requests (${punchPend.requests.length})</h2>
+          ${punchPend.requests.length ? punchApprovalTable(punchPend.requests) : `<div class="empty">No correction requests. 🎉</div>`}
         </div>` : ''}`;
-      if (withApprovals) wireLeaveApprovals();
+      if (withApprovals) { wireLeaveApprovals(); wirePunchApprovals(); }
       tickDashTimers(); // paint the first tick immediately
     } catch (e) { toast(e.message, true); }
   }
@@ -256,11 +311,48 @@
          <div class="card clock" id="clockCard"></div>
        </div>
        <div class="admin-only section" style="margin-top:8px;"><h2 style="color:var(--navy);">Team — live now</h2><div id="clockTeam"></div></div>
-       <div class="section"><h2>My last 14 days</h2><div id="timesheet"></div></div>`);
+       <div class="section"><div class="toolbar"><h2 style="margin:0;">My last 14 days</h2><button class="btn btn-ghost btn-sm" id="fixPunchBtn">🛠 Request a correction</button></div><div id="timesheet"></div></div>
+       <div class="section"><h2>My correction requests</h2><div id="myPunchReqs"></div></div>`);
     await renderClock();
     loadTimesheet();
+    $('#fixPunchBtn').addEventListener('click', () => openPunchRequestModal());
+    loadMyPunchRequests();
     if (isAdmin()) startLiveAttendance('clockTeam', false); // live team timers + 10s refresh
   };
+
+  const PUNCH_LABEL = { IN: 'Clock in', OUT: 'Clock out', BREAK_START: 'Break start', BREAK_END: 'Break end' };
+  const REQ_BADGE = { PENDING: 'b-pending', APPROVED: 'b-approved', REJECTED: 'b-high' };
+  function openPunchRequestModal() {
+    modal(`<h3>Request an attendance correction</h3>
+      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Forgot to clock in/out or punched the wrong time? Send it to an admin to add for you.</p>
+      <div class="form-row"><div class="field"><label>Day</label><input type="date" id="prDay" value="${todayISO()}"></div>
+        <div class="field"><label>What to add</label><select id="prType">${Object.entries(PUNCH_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>
+      <div class="form-row"><div class="field"><label>Time (24h)</label><input type="time" id="prTime"></div><div class="field"></div></div>
+      <div class="form-row one"><div class="field"><label>Reason</label><textarea id="prReason" placeholder="e.g. Forgot to clock out, left at 6:30pm"></textarea></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSend">Send request</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSend').addEventListener('click', async () => {
+      const payload = { day: $('#prDay').value, type: $('#prType').value, time: $('#prTime').value, reason: $('#prReason').value };
+      if (!payload.day || !payload.time) return toast('Pick a day and time', true);
+      try { await api.post('/punch-requests', payload); closeModal(); toast('Request sent to admin ✓'); loadMyPunchRequests(); }
+      catch (e) { toast(e.message, true); }
+    });
+  }
+  async function loadMyPunchRequests() {
+    try {
+      const { requests } = await api.get('/punch-requests/mine');
+      const el = $('#myPunchReqs'); if (!el) return;
+      if (!requests.length) { el.innerHTML = `<div class="empty">No correction requests.</div>`; return; }
+      el.innerHTML = `<table><thead><tr><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
+        ${requests.map((r) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(r.time)}</td>
+          <td>${esc(r.reason || '—')}</td><td><span class="badge ${REQ_BADGE[r.status] || ''}">${cap(r.status)}</span>${r.admin_note ? `<div style="color:var(--slate);font-size:.76rem;margin-top:3px;">${esc(r.admin_note)}</div>` : ''}</td>
+          <td>${r.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel-req="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}
+      </tbody></table>`;
+      el.querySelectorAll('[data-cancel-req]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api.post(`/punch-requests/${b.dataset.cancelReq}/cancel`); toast('Cancelled'); loadMyPunchRequests(); } catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { toast(e.message, true); }
+  }
 
   async function renderClock() {
     let status;
@@ -303,6 +395,106 @@
           <td>${fmtMins(d.workedMinutes)}</td><td>${fmtMins(d.breakMinutes)}</td></tr>`).join('')}
       </tbody></table>`;
     } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- Notice board ----------
+  VIEWS.noticeboard = async () => {
+    setMain('Notice board', 'Company updates and announcements.',
+      `${isAdmin() ? '<div class="toolbar"><span></span><button class="btn btn-primary" id="newNoticeBtn">+ Post notice</button></div>' : ''}
+       <div id="noticeList"></div>`);
+    if (isAdmin()) $('#newNoticeBtn').addEventListener('click', () => openNoticeModal());
+    loadNotices();
+  };
+  async function loadNotices() {
+    try {
+      const { announcements } = await api.get('/announcements');
+      const el = $('#noticeList'); if (!el) return;
+      if (!announcements.length) { el.innerHTML = `<div class="empty">No announcements yet.</div>`; return; }
+      el.innerHTML = announcements.map((a) => `<div class="notice ${a.pinned ? 'pinned' : ''}">
+        <h3>${esc(a.title)}${a.pinned ? '<span class="pin-tag">📌 Pinned</span>' : ''}</h3>
+        <div class="meta">${esc(a.author || 'Admin')} · ${fmtWhen(a.created_ts)}</div>
+        ${a.body ? `<div class="body">${esc(a.body)}</div>` : ''}
+        ${isAdmin() ? `<div class="row-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" data-edit-notice="${a.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-notice="${a.id}">Delete</button></div>` : ''}
+      </div>`).join('');
+      el.querySelectorAll('[data-edit-notice]').forEach((b) => b.addEventListener('click', () => openNoticeModal(announcements.find((a) => a.id == b.dataset.editNotice))));
+      el.querySelectorAll('[data-del-notice]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Delete this notice?')) return;
+        try { await api.del(`/announcements/${b.dataset.delNotice}`); toast('Deleted'); loadNotices(); } catch (e) { toast(e.message, true); }
+      }));
+    } catch (e) { toast(e.message, true); }
+  }
+  function openNoticeModal(a) {
+    const editing = !!a;
+    modal(`<h3>${editing ? 'Edit notice' : 'Post a notice'}</h3>
+      <div class="form-row one"><div class="field"><label>Title</label><input id="anTitle" value="${esc(a?.title || '')}"></div></div>
+      <div class="form-row one"><div class="field"><label>Message</label><textarea id="anBody" rows="5" style="min-height:120px;">${esc(a?.body || '')}</textarea></div></div>
+      <div class="form-row one"><div class="field" style="flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" id="anPin" ${a?.pinned ? 'checked' : ''} style="width:auto;"> <label for="anPin" style="margin:0;">Pin to top</label></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Post'}</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const payload = { title: $('#anTitle').value, body: $('#anBody').value, pinned: $('#anPin').checked };
+      if (!payload.title.trim()) return toast('A title is required', true);
+      try {
+        if (editing) await api.put(`/announcements/${a.id}`, payload); else await api.post('/announcements', payload);
+        closeModal(); toast(editing ? 'Saved ✓' : 'Posted ✓'); loadNotices();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
+  // ---------- Trends (admin analytics, hand-drawn SVG — CSP-safe) ----------
+  VIEWS.trends = async () => {
+    setMain('Trends', 'How attendance and billing are moving over time.',
+      `<div id="trends"><div class="empty">Loading…</div></div>`);
+    try {
+      const d = await api.get('/analytics');
+      const nf = (n) => n.toLocaleString();
+      const anyRev = d.revenue.some((m) => m.invoiced > 0);
+      const anyClient = d.clients.some((c) => c.invoiced > 0);
+      $('#trends').innerHTML = `
+        <div class="chart-card"><h2>Hours worked — last 30 days</h2>
+          ${vbars(d.attendance, (r) => r.hours, (r) => r.day.slice(5), 'var(--teal)', 'h')}
+        </div>
+        <div class="chart-card"><h2>Revenue per month — last 12 months</h2>
+          ${anyRev ? groupedBars(d.revenue, ['invoiced', 'paid'], ['#b9c7d6', 'var(--teal)'], nf)
+            + `<div class="chart-legend"><span><i style="background:#b9c7d6"></i>Invoiced</span><span><i style="background:var(--teal)"></i>Paid</span></div>`
+            : `<div class="empty">No invoices yet — this fills in as you bill clients.</div>`}
+        </div>
+        <div class="chart-card"><h2>Top clients — invoiced vs paid</h2>
+          ${anyClient ? hbars(d.clients) + `<div class="chart-legend"><span><i style="background:#c9d6e2"></i>Invoiced</span><span><i style="background:var(--teal)"></i>Paid</span></div>`
+            : `<div class="empty">No client billing yet.</div>`}
+        </div>`;
+    } catch (e) { $('#trends').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  // Vertical bar chart.
+  function vbars(rows, val, lab, color, unit) {
+    const W = 720, H = 220, pad = 30; const n = rows.length || 1;
+    const bw = (W - 2 * pad) / n; const max = Math.max(1, ...rows.map(val));
+    const bars = rows.map((r, i) => { const h = (val(r) / max) * (H - 2 * pad); const x = pad + i * bw; const y = H - pad - h;
+      return `<rect x="${(x + bw * 0.15).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="${color}"><title>${esc(lab(r))}: ${val(r)}${unit}</title></rect>`; }).join('');
+    const labels = rows.map((r, i) => i % 5 === 0 ? `<text x="${(pad + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" font-size="10" fill="#8a97a3" text-anchor="middle">${esc(lab(r))}</text>` : '').join('');
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" role="img"><line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e3eaf1"/>${bars}${labels}</svg>`;
+  }
+  // Grouped (two series) vertical bars.
+  function groupedBars(rows, keys, colors, fmtv) {
+    const W = 720, H = 240, pad = 34; const n = rows.length || 1;
+    const gw = (W - 2 * pad) / n; const max = Math.max(1, ...rows.flatMap((r) => keys.map((k) => r[k])));
+    const bars = rows.map((r, i) => { const x = pad + i * gw;
+      return keys.map((k, ki) => { const h = (r[k] / max) * (H - 2 * pad); const bw = gw * 0.32; const bx = x + gw * 0.16 + ki * bw; const y = H - pad - h;
+        return `<rect x="${bx.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.9).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="${colors[ki]}"><title>${esc(r.label)} ${k}: ${fmtv(r[k])}</title></rect>`; }).join(''); }).join('');
+    const labels = rows.map((r, i) => `<text x="${(pad + i * gw + gw / 2).toFixed(1)}" y="${H - 8}" font-size="10" fill="#8a97a3" text-anchor="middle">${esc(r.label)}</text>`).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" role="img"><line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e3eaf1"/>${bars}${labels}</svg>`;
+  }
+  // Horizontal bars: invoiced (light) with paid (teal) overlaid.
+  function hbars(rows) {
+    const W = 720, rh = 34, pad = 8, labelW = 170; const H = rows.length * rh + 10;
+    const max = Math.max(1, ...rows.map((r) => r.invoiced)); const track = W - labelW - 80;
+    const bars = rows.map((r, i) => { const y = i * rh + pad; const full = (r.invoiced / max) * track; const paid = (r.paid / max) * track;
+      const nm = r.name.length > 24 ? r.name.slice(0, 23) + '…' : r.name;
+      return `<text x="0" y="${y + 17}" font-size="12" fill="#1c2733">${esc(nm)}</text>
+        <rect x="${labelW}" y="${y + 4}" width="${full.toFixed(1)}" height="18" rx="3" fill="#c9d6e2"><title>${esc(r.name)} invoiced ${r.invoiced}</title></rect>
+        <rect x="${labelW}" y="${y + 4}" width="${paid.toFixed(1)}" height="18" rx="3" fill="var(--teal)"><title>${esc(r.name)} paid ${r.paid}</title></rect>
+        <text x="${(labelW + full + 6).toFixed(1)}" y="${y + 18}" font-size="11" fill="#51626f">${r.invoiced.toLocaleString()}</text>`; }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" role="img">${bars}</svg>`;
   }
 
   // ---------- Leaves ----------
@@ -425,6 +617,27 @@
         <td class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}" data-days="${l.days}" data-balance="${l.leave_balance ?? ''}" data-name="${esc(l.name)}">Approve</button>
           <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></td>
       </tr>`).join('')}</tbody></table>`;
+  }
+
+  function punchApprovalTable(requests) {
+    return `<table><thead><tr><th>Employee</th><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Action</th></tr></thead><tbody>
+      ${requests.map((r) => `<tr>
+        <td>${esc(r.name)}</td><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(r.time)}</td><td>${esc(r.reason || '—')}</td>
+        <td class="row-actions"><button class="btn btn-primary btn-sm" data-preq-approve="${r.id}">Approve</button>
+          <button class="btn btn-danger btn-sm" data-preq-reject="${r.id}">Reject</button></td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+  function wirePunchApprovals() {
+    document.querySelectorAll('[data-preq-approve],[data-preq-reject]').forEach((b) => {
+      if (b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', async () => {
+        const id = b.dataset.preqApprove || b.dataset.preqReject;
+        const decision = b.dataset.preqApprove ? 'APPROVED' : 'REJECTED';
+        try { await api.post(`/punch-requests/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓ — punch added' : 'Rejected');
+          navigate(document.querySelector('.nav-item.active').dataset.view);
+        } catch (e) { toast(e.message, true); }
+      });
+    });
   }
 
   function wireLeaveApprovals() {
