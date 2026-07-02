@@ -6,6 +6,7 @@
 
 const { db } = require('./db');
 const { now } = require('./time');
+const { dmUser } = require('./slackNotify');
 
 const insert = db.prepare(
   `INSERT INTO notifications (user_id, type, title, body, link_view, created_ts)
@@ -18,6 +19,7 @@ const activeUserIds = db.prepare(`SELECT id FROM users WHERE active = 1`);
 function notify(userId, { type = 'GENERAL', title, body = '', link = '' }) {
   if (!userId || !title) return;
   insert.run(userId, type, String(title).slice(0, 160), String(body).slice(0, 500), String(link).slice(0, 40), now().toMillis());
+  dmUser(userId, title, body); // also DM on Slack if SLACK_BOT_TOKEN is set (no-op otherwise)
 }
 
 // Notify every active admin (optionally excluding one user, e.g. the actor).
