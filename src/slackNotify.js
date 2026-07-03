@@ -59,4 +59,42 @@ function dmUser(userId, title, body) {
   })();
 }
 
-module.exports = { dmUser, enabled };
+// Plain-English hint for common Slack API error codes.
+function hintFor(error) {
+  switch (error) {
+    case 'not_authed':
+    case 'invalid_auth':
+      return 'The bot token is missing or wrong. Check SLACK_BOT_TOKEN on Railway — it must be the Bot User OAuth Token starting with "xoxb-".';
+    case 'token_revoked':
+    case 'account_inactive':
+      return 'The Slack token was revoked or the app was removed. Reinstall the app to your workspace and paste the new token into SLACK_BOT_TOKEN.';
+    case 'missing_scope':
+      return 'The Slack app is missing a permission. Add users:read.email, chat:write and im:write under Bot Token Scopes, then Reinstall the app, and update the token.';
+    case 'users_not_found':
+      return 'No Slack user has this email. Make sure the person\'s portal email exactly matches the email on their Slack account.';
+    default:
+      return 'Slack returned an unexpected error. Double-check the token and that the app is installed to your workspace.';
+  }
+}
+
+// Admin diagnostic: run the whole DM chain for one email and report exactly
+// where it succeeds or fails, in plain English.
+async function diagnose(email) {
+  if (!enabled()) return { ok: false, step: 'token', error: 'not_set', message: 'SLACK_BOT_TOKEN is not set on the server. Add it in Railway and redeploy.' };
+  try {
+    const auth = await slackPost('auth.test', {});
+    if (!auth.ok) return { ok: false, step: 'token', error: auth.error, message: hintFor(auth.error) };
+    const base = { workspace: auth.team, botUser: auth.user };
+    const look = await slackGet('users.lookupByEmail', { email });
+    if (!look.ok) return { ok: false, step: 'lookup', error: look.error, message: hintFor(look.error), ...base };
+    const open = await slackPost('conversations.open', { users: look.user.id });
+    if (!open.ok) return { ok: false, step: 'open', error: open.error, message: hintFor(open.error), ...base };
+    const post = await slackPost('chat.postMessage', { channel: open.channel.id, text: '✅ LIT Nexus portal is connected to Slack. This is a test message — you can ignore it.' });
+    if (!post.ok) return { ok: false, step: 'send', error: post.error, message: hintFor(post.error), ...base };
+    return { ok: true, message: `Success — a test DM was sent to ${email} in the "${auth.team}" workspace.`, ...base };
+  } catch (e) {
+    return { ok: false, step: 'network', error: e.message, message: 'Could not reach Slack. Check the server has internet access.' };
+  }
+}
+
+module.exports = { dmUser, enabled, diagnose };

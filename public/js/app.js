@@ -1786,6 +1786,14 @@
            <div class="row-actions"><button class="btn btn-ghost" id="slackPreviewBtn">Preview</button><button class="btn btn-primary" id="slackSendBtn">Send test to Slack</button></div>
            <pre id="slackPreview" style="display:none;white-space:pre-wrap;background:var(--mist);border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:12px;font-size:.85rem;"></pre>
          </div>
+       </div>
+       <div class="section" style="margin-top:30px;">
+         <h2 style="color:var(--navy);">Slack direct messages (DMs)</h2>
+         <div class="card" style="max-width:640px;">
+           <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Sends leave decisions, task assignments, punch approvals and announcements to each person's Slack as a private message. Click test to send yourself a DM and check the connection.</p>
+           <button class="btn btn-primary" id="slackDmTestBtn">Test Slack DM connection</button>
+           <div id="slackDmResult" style="display:none;margin-top:12px;border-radius:8px;padding:12px;font-size:.88rem;line-height:1.5;"></div>
+         </div>
        </div>`);
     $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
     $('#backupBtn').addEventListener('click', () => {
@@ -1802,6 +1810,24 @@
     });
     $('#slackSendBtn').addEventListener('click', async () => {
       try { await api.post('/slack/send'); toast('Sent to Slack ✓'); } catch (e) { toast(e.message, true); }
+    });
+    $('#slackDmTestBtn').addEventListener('click', async () => {
+      const box = $('#slackDmResult'); const btn = $('#slackDmTestBtn');
+      btn.disabled = true; box.style.display = 'block'; box.style.background = 'var(--mist)'; box.style.border = '1px solid var(--line)'; box.style.color = 'var(--slate)';
+      box.textContent = 'Testing…';
+      try {
+        const r = await api.post('/notifications/slack-test');
+        if (r.ok) {
+          box.style.background = '#eafaf3'; box.style.border = '1px solid #b7e6d4'; box.style.color = 'var(--teal-dark)';
+          box.innerHTML = `✅ <strong>Connected.</strong> ${esc(r.message)}<br><span style="color:var(--slate);font-size:.82rem;">Check your Slack — the test DM should be there.</span>`;
+        } else {
+          box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+          box.innerHTML = `⚠️ <strong>Not working${r.step ? ` (failed at: ${esc(r.step)})` : ''}.</strong><br>${esc(r.message || '')}${r.error ? `<br><span style="color:var(--slate);font-size:.8rem;">Slack error code: ${esc(r.error)}</span>` : ''}`;
+        }
+      } catch (e) {
+        box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+        box.textContent = e.message;
+      } finally { btn.disabled = false; }
     });
     loadEmployees();
   };

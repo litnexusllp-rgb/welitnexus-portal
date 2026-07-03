@@ -2,7 +2,8 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth } = require('../auth');
+const { requireAuth, requireAdmin } = require('../auth');
+const { diagnose } = require('../slackNotify');
 
 const router = express.Router();
 
@@ -32,6 +33,13 @@ router.post('/:id/read', requireAuth, (req, res) => {
 router.post('/read-all', requireAuth, (req, res) => {
   markAllRead.run(req.user.id);
   res.json({ unread: 0 });
+});
+
+// ADMIN: test the Slack DM connection by sending a test message to yourself.
+// Reports exactly where the chain fails (token / scope / email / send).
+router.post('/slack-test', requireAdmin, async (req, res) => {
+  const result = await diagnose(req.user.email);
+  res.json(result);
 });
 
 module.exports = router;
