@@ -13,12 +13,17 @@ const getUserFull = db.prepare('SELECT * FROM users WHERE id = ?');
 const setPassword = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
 
 // Throttle login attempts to blunt brute-force / credential-stuffing.
+// Only FAILED attempts count (skipSuccessfulRequests), and the cap is high
+// enough that a whole team behind one shared mobile-carrier IP (CGNAT) can all
+// sign in — a successful login never consumes the budget, so only repeated
+// wrong-password attempts from one IP are throttled.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,        // 15 minutes
-  max: 10,                         // 10 attempts per IP per window
+  max: 50,                         // failed attempts per IP per window
+  skipSuccessfulRequests: true,    // don't count successful logins
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many login attempts. Please wait a few minutes and try again.' },
+  message: { error: 'Too many failed login attempts. Please wait a few minutes and try again.' },
 });
 
 router.post('/login', loginLimiter, (req, res) => {

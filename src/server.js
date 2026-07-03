@@ -42,11 +42,16 @@ app.use(loadUser);
 // Generous throttle on mutating API calls (reads are unrestricted). Blunts
 // abuse/runaway scripts without getting in the way of normal use. Login has
 // its own stricter limiter in routes/auth.js.
+// Keyed PER SIGNED-IN USER (not per IP), so a whole team sharing one mobile-
+// carrier IP (CGNAT) each gets their own budget; anonymous traffic falls back
+// to per-IP.
 const writeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => (req.user ? `u:${req.user.id}` : req.ip),
+  validate: false, // custom keyGenerator with an IP fallback — skip the IPv6 check
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
   message: { error: 'Too many requests. Please slow down and try again shortly.' },
 });
