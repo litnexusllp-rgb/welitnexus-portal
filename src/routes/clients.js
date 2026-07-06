@@ -26,11 +26,11 @@ const listPending = db.prepare(
 );
 const getOne = db.prepare(`SELECT * FROM clients WHERE id = ?`);
 const insertClient = db.prepare(
-  `INSERT INTO clients (name, code, business_type, stage, notes, billing_address, approval, created_by, parent_id, active, created_ts)
-   VALUES (@name, @code, @business_type, @stage, @notes, @billing_address, @approval, @created_by, @parent_id, 1, @created_ts)`
+  `INSERT INTO clients (name, code, business_type, stage, notes, billing_address, email, approval, created_by, parent_id, active, created_ts)
+   VALUES (@name, @code, @business_type, @stage, @notes, @billing_address, @email, @approval, @created_by, @parent_id, 1, @created_ts)`
 );
 const updateClient = db.prepare(
-  `UPDATE clients SET name=@name, code=@code, business_type=@business_type, stage=@stage, notes=@notes, billing_address=@billing_address, parent_id=@parent_id WHERE id=@id`
+  `UPDATE clients SET name=@name, code=@code, business_type=@business_type, stage=@stage, notes=@notes, billing_address=@billing_address, email=@email, parent_id=@parent_id WHERE id=@id`
 );
 const setActive = db.prepare(`UPDATE clients SET active = ? WHERE id = ?`);
 const setApproval = db.prepare(`UPDATE clients SET approval = ? WHERE id = ?`);
@@ -70,6 +70,7 @@ router.post('/', requireAuth, (req, res) => {
     stage: cleanStage(req.body.stage, 'PROSPECT'),
     notes: String(req.body.notes || '').slice(0, 500),
     billing_address: String(req.body.billing_address || '').slice(0, 500),
+    email: String(req.body.email || '').trim().slice(0, 160),
     approval: admin ? 'APPROVED' : 'PENDING',
     created_by: req.user.id,
     parent_id: resolveParent(req.body.parent_id, null),
@@ -99,6 +100,7 @@ router.put('/:id', requireAdmin, (req, res) => {
     stage: cleanStage(req.body.stage, c.stage || 'PROSPECT'),
     notes: String(req.body.notes ?? c.notes),
     billing_address: String(req.body.billing_address ?? c.billing_address ?? '').slice(0, 500),
+    email: String(req.body.email ?? c.email ?? '').trim().slice(0, 160),
     parent_id: req.body.parent_id === undefined ? c.parent_id : resolveParent(req.body.parent_id, c.id),
   });
   res.json({ client: getOne.get(c.id) });

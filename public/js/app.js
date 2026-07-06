@@ -1022,8 +1022,9 @@
     if (!isAdmin()) return navigate('dashboard');
     setMain('Clients', 'Your client list and the recurring work scheduled for each.',
       `<div id="pendingClients"></div>
-       <div class="toolbar"><div style="display:flex;gap:10px;align-items:center;">
+       <div class="toolbar"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
            <h2 style="margin:0;color:var(--navy);">Clients</h2>
+           <input id="clientSearch" class="client-search" type="search" placeholder="Search name, type or email…" autocomplete="off">
            <select id="clientFilter" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></select>
          </div><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
        <div id="clientTable" style="margin-bottom:30px;"></div>
@@ -1034,7 +1035,9 @@
        <div id="recTable"></div>`);
     await loadLookups();
     $('#addClientBtn').addEventListener('click', () => openClientModal());
-    $('#clientFilter').addEventListener('change', (e) => { clientGroupFilter = e.target.value; loadClients(); });
+    $('#clientFilter').addEventListener('change', (e) => { clientGroupFilter = e.target.value; renderClientTable(); });
+    $('#clientSearch').value = clientSearch;
+    $('#clientSearch').addEventListener('input', (e) => { clientSearch = e.target.value; renderClientTable(); });
     $('#addInvoiceBtn').addEventListener('click', () => openInvoiceModal());
     $('#addRecBtn').addEventListener('click', () => openRecurringModal());
     $('#runRecBtn').addEventListener('click', async () => {
@@ -1080,46 +1083,115 @@
   const fmtMoney = (n) => CURRENCY + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   let ALL_CLIENTS = []; // cached for the parent-client picker
   let clientGroupFilter = ''; // '' = all; otherwise a parent id (show it + its files)
+  let clientSearch = '';
+  let clientSort = { key: 'name', dir: 1 }; // 1 = asc, -1 = desc
+  let CLIENT_INCOME = {};   // client id -> rolled-up invoiced total
+  let CLIENT_DEADLINE = {}; // client id -> soonest upcoming open-task due date (yyyy-mm-dd)
+
+  const notSet = () => `<span class="muted-empty">Not set</span>`;
+  // One combined Status badge from active + approval + stage.
+  function clientStatusBadge(c) {
+    if (!c.active) return `<span class="badge b-low">Archived</span>`;
+    if (c.approval === 'PENDING') return `<span class="badge b-pending">Pending</span>`;
+    if (c.approval === 'REJECTED') return `<span class="badge b-high">Rejected</span>`;
+    return stageBadge(c.stage); // Signed = green, Interviewed = amber, Prospect = neutral
+  }
+
+  // Fetch clients + invoice totals + upcoming task deadlines, then render.
   async function loadClients() {
     try {
-      const [{ clients }, invSummary] = await Promise.all([api.get('/clients/all'), api.get('/invoices/summary/totals')]);
+      const [{ clients }, invSummary, tasksRes] = await Promise.all([
+        api.get('/clients/all'), api.get('/invoices/summary/totals'), api.get('/tasks/all'),
+      ]);
       ALL_CLIENTS = clients;
       // Rolled-up income per client: a parent includes its files' invoiced totals.
       const raw = invSummary.totals || {};
-      const income = {};
-      clients.forEach((c) => { income[c.id] = (raw[c.id]?.invoiced || 0); });
-      clients.forEach((c) => { if (c.parent_id && raw[c.id]) income[c.parent_id] = (income[c.parent_id] || 0) + (raw[c.id].invoiced || 0); });
-      // Filter dropdown: top-level clients (the ones that can hold files).
-      const filterEl = $('#clientFilter');
-      if (filterEl) {
-        const parents = clients.filter((c) => !c.parent_id);
-        filterEl.innerHTML = `<option value="">All clients</option>` + parents.map((p) => `<option value="${p.id}" ${clientGroupFilter == p.id ? 'selected' : ''}>${esc(p.name)} + files</option>`).join('');
-        filterEl.value = clientGroupFilter;
-      }
-      const shown = clientGroupFilter
-        ? clients.filter((c) => c.id == clientGroupFilter || c.parent_id == clientGroupFilter)
-        : clients;
-      const el = $('#clientTable');
-      el.innerHTML = shown.length ? `<table><thead><tr><th>Client</th><th>Parent</th><th>Business type</th><th>Stage</th><th>Income</th><th>Active</th><th></th></tr></thead><tbody>
-        ${shown.map((c) => `<tr style="${c.active ? '' : 'opacity:.5'}"><td>${c.parent_name ? '<span style="color:var(--slate)">↳ </span>' : ''}<strong>${esc(c.name)}</strong>${c.approval === 'PENDING' ? ' <span class="badge b-pending" style="font-size:.66rem">Pending</span>' : c.approval === 'REJECTED' ? ' <span class="badge b-rejected" style="font-size:.66rem">Rejected</span>' : ''}</td>
-          <td>${c.parent_name ? esc(c.parent_name) : '<span style="color:var(--slate)">—</span>'}</td>
-          <td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
-          <td>${income[c.id] ? `<strong>${fmtMoney(income[c.id])}</strong>` : '<span style="color:var(--slate)">—</span>'}</td>
-          <td>${c.active ? badge('approved') : badge('rejected')}</td>
-          <td class="row-actions">
-            <button class="btn btn-ghost btn-sm" data-invoice-client="${c.id}" title="Create an invoice for this client">+ Invoice</button>
-            ${!c.parent_id && c.approval === 'APPROVED' ? `<button class="btn btn-ghost btn-sm" data-add-file="${c.id}" title="Add a file under this client">+ File</button>` : ''}
-            <button class="btn btn-ghost btn-sm" data-edit-client="${c.id}">Edit</button>
-            <button class="btn ${c.active ? 'btn-danger' : 'btn-primary'} btn-sm" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? 'Archive' : 'Restore'}</button></td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No clients here.</div>`;
-      const byId = {}; clients.forEach((c) => { byId[c.id] = c; });
-      el.querySelectorAll('[data-invoice-client]').forEach((b) => b.addEventListener('click', () => openInvoiceModal(null, b.dataset.invoiceClient)));
-      el.querySelectorAll('[data-add-file]').forEach((b) => b.addEventListener('click', () => openClientModal(null, b.dataset.addFile)));
-      el.querySelectorAll('[data-edit-client]').forEach((b) => b.addEventListener('click', () => openClientModal(byId[b.dataset.editClient])));
-      el.querySelectorAll('[data-toggle-client]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/clients/${b.dataset.toggleClient}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadClients(); loadLookups(); } catch (e) { toast(e.message, true); }
-      }));
+      CLIENT_INCOME = {};
+      clients.forEach((c) => { CLIENT_INCOME[c.id] = (raw[c.id]?.invoiced || 0); });
+      clients.forEach((c) => { if (c.parent_id && raw[c.id]) CLIENT_INCOME[c.parent_id] = (CLIENT_INCOME[c.parent_id] || 0) + (raw[c.id].invoiced || 0); });
+      // Next deadline per client = soonest upcoming due date among its open tasks.
+      CLIENT_DEADLINE = {};
+      const today = todayISO();
+      (tasksRes.tasks || []).forEach((t) => {
+        if (t.status === 'DONE' || !t.client_id || !t.due_date || t.due_date < today) return;
+        const cur = CLIENT_DEADLINE[t.client_id];
+        if (!cur || t.due_date < cur) CLIENT_DEADLINE[t.client_id] = t.due_date;
+      });
+      renderClientTable();
     } catch (e) { toast(e.message, true); }
+  }
+
+  // Sortable header cell.
+  function sortableTh(label, key) {
+    const on = clientSort.key === key;
+    const caret = on ? (clientSort.dir === 1 ? '▲' : '▼') : '↕';
+    return `<th class="sortable ${on ? 'sorted' : ''}" data-sort="${key}">${esc(label)}<span class="caret">${caret}</span></th>`;
+  }
+
+  // Apply the current filter/search/sort to the cached clients and paint the table.
+  function renderClientTable() {
+    const el = $('#clientTable'); if (!el) return;
+    const clients = ALL_CLIENTS;
+    // Filter dropdown: top-level clients (the ones that can hold files).
+    const filterEl = $('#clientFilter');
+    if (filterEl) {
+      const parents = clients.filter((c) => !c.parent_id);
+      filterEl.innerHTML = `<option value="">All clients</option>` + parents.map((p) => `<option value="${p.id}" ${clientGroupFilter == p.id ? 'selected' : ''}>${esc(p.name)} + files</option>`).join('');
+      filterEl.value = clientGroupFilter;
+    }
+    let shown = clientGroupFilter
+      ? clients.filter((c) => c.id == clientGroupFilter || c.parent_id == clientGroupFilter)
+      : clients.slice();
+    const q = clientSearch.trim().toLowerCase();
+    if (q) shown = shown.filter((c) => [c.name, c.business_type, c.email, c.code, c.parent_name].some((f) => String(f || '').toLowerCase().includes(q)));
+
+    // Sorting
+    const rank = { SIGNED: 3, INTERVIEWED: 2, PROSPECT: 1 };
+    const val = (c) => {
+      switch (clientSort.key) {
+        case 'business_type': return String(c.business_type || '').toLowerCase();
+        case 'email': return String(c.email || '').toLowerCase();
+        case 'deadline': return CLIENT_DEADLINE[c.id] || '9999-99-99';
+        case 'income': return CLIENT_INCOME[c.id] || 0;
+        case 'status': return (c.active ? 10 : 0) + (rank[c.stage] || 0);
+        default: return String(c.name || '').toLowerCase();
+      }
+    };
+    shown.sort((a, b) => { const va = val(a), vb = val(b); return (va < vb ? -1 : va > vb ? 1 : 0) * clientSort.dir; });
+
+    el.innerHTML = shown.length ? `<table class="ttable-clients"><thead><tr>
+        ${sortableTh('Client', 'name')}${sortableTh('Business type', 'business_type')}${sortableTh('Contact info', 'email')}${sortableTh('Next deadline', 'deadline')}${sortableTh('Income', 'income')}${sortableTh('Status', 'status')}<th></th></tr></thead><tbody>
+      ${shown.map((c) => `<tr style="${c.active ? '' : 'opacity:.55'}">
+        <td><div class="client-cell"><span class="avatar-sm">${esc(initials(c.name))}</span><div>
+          <div class="nm">${esc(c.name)}</div>
+          <div class="sub">${c.parent_name ? '↳ under ' + esc(c.parent_name) : (c.code ? esc(c.code) : 'Top-level client')}</div>
+        </div></div></td>
+        <td>${c.business_type ? esc(c.business_type) : notSet()}</td>
+        <td>${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : notSet()}</td>
+        <td>${CLIENT_DEADLINE[c.id] ? fmtDate(CLIENT_DEADLINE[c.id]) : notSet()}</td>
+        <td>${CLIENT_INCOME[c.id] ? `<strong>${fmtMoney(CLIENT_INCOME[c.id])}</strong>` : notSet()}</td>
+        <td>${clientStatusBadge(c)}</td>
+        <td style="text-align:right;"><details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
+          <button data-invoice-client="${c.id}">＋ Invoice</button>
+          ${!c.parent_id && c.approval === 'APPROVED' ? `<button data-add-file="${c.id}">＋ File</button>` : ''}
+          <button data-edit-client="${c.id}">✎ Edit</button>
+          <button class="${c.active ? 'danger' : ''}" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? '🗄 Archive' : '↩ Restore'}</button>
+        </div></details></td></tr>`).join('')}
+    </tbody></table>` : `<div class="empty">${clientSearch || clientGroupFilter ? 'No clients match your search.' : 'No clients here.'}</div>`;
+
+    const byId = {}; clients.forEach((c) => { byId[c.id] = c; });
+    el.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (clientSort.key === key) clientSort.dir *= -1; else clientSort = { key, dir: 1 };
+      renderClientTable();
+    }));
+    el.querySelectorAll('.rowmenu-list button').forEach((b) => b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')));
+    el.querySelectorAll('[data-invoice-client]').forEach((b) => b.addEventListener('click', () => openInvoiceModal(null, b.dataset.invoiceClient)));
+    el.querySelectorAll('[data-add-file]').forEach((b) => b.addEventListener('click', () => openClientModal(null, b.dataset.addFile)));
+    el.querySelectorAll('[data-edit-client]').forEach((b) => b.addEventListener('click', () => openClientModal(byId[b.dataset.editClient])));
+    el.querySelectorAll('[data-toggle-client]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api.post(`/clients/${b.dataset.toggleClient}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadClients(); loadLookups(); } catch (e) { toast(e.message, true); }
+    }));
   }
 
   function openClientModal(c, presetParent) {
@@ -1131,6 +1203,7 @@
         <div class="field"><label>Code</label><input id="cCode" value="${esc(c?.code || '')}" placeholder="e.g. TESH"></div></div>
       <div class="form-row"><div class="field"><label>Business type</label><input id="cBizType" value="${esc(c?.business_type || '')}" placeholder="e.g. Restaurant, E-commerce, Law firm"></div>
         <div class="field"><label>Stage</label><select id="cStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}" ${(c?.stage || 'PROSPECT') === s ? 'selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}</select></div></div>
+      <div class="form-row one"><div class="field"><label>Contact email</label><input id="cEmail" type="email" value="${esc(c?.email || '')}" placeholder="e.g. billing@client.com"></div></div>
       <div class="form-row one"><div class="field"><label>Parent client (optional — for a file under a CPA/parent)</label>
         <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter((x) => !x.parent_id && x.id !== c?.id).map((x) => `<option value="${x.id}" ${selParent == x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Billing address (used on invoices — one line each)</label><textarea id="cBilling" placeholder="Continuum Associates\nHudson County\nJersey City New Jersey\nUnited States (USA)">${esc(c?.billing_address || '')}</textarea></div></div>
@@ -1138,7 +1211,7 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, notes: $('#cNotes').value, parent_id: $('#cParent').value || null, billing_address: $('#cBilling').value };
+      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, email: $('#cEmail').value, notes: $('#cNotes').value, parent_id: $('#cParent').value || null, billing_address: $('#cBilling').value };
       try {
         if (editing) await api.put(`/clients/${c.id}`, payload); else await api.post('/clients', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadClients(); loadLookups();

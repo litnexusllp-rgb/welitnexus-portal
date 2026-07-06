@@ -197,6 +197,25 @@ body.is-admin .admin-only { display: block; }
 .notice .body { color: var(--ink); font-size: 0.9rem; white-space: pre-line; line-height: 1.5; }
 .notice .pin-tag { display: inline-block; font-size: 0.7rem; font-weight: 700; color: #9a6b00; background: #fdf1d8; border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
 
+/* Clients list — avatar, sortable headers, muted empties, name subtitle */
+.avatar-sm { width: 34px; height: 34px; border-radius: 50%; background: var(--navy); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; flex-shrink: 0; }
+.client-cell { display: flex; align-items: center; gap: 10px; }
+.client-cell .nm { font-weight: 700; color: var(--navy); line-height: 1.2; }
+.client-cell .sub { color: var(--slate); font-size: 0.76rem; margin-top: 1px; }
+.muted-empty { color: #aab6c0; font-size: 0.86rem; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--navy); }
+th.sortable .caret { opacity: .5; font-size: 0.7rem; margin-left: 3px; }
+th.sortable.sorted .caret { opacity: 1; color: var(--teal-dark); }
+.client-search { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 0.88rem; font-family: var(--font); min-width: 200px; }
+.client-search:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(14,159,126,.15); }
+/* Let the row ⋯ menu overflow the table edge (base table clips with overflow:hidden). */
+.ttable-clients { overflow: visible; border-collapse: separate; border-spacing: 0; }
+.ttable-clients thead th:first-child { border-top-left-radius: var(--radius); }
+.ttable-clients thead th:last-child { border-top-right-radius: var(--radius); }
+.ttable-clients tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius); }
+.ttable-clients tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius); }
+
 /* Trends charts */
 .chart-card { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin-bottom: 18px; }
 .chart-card h2 { font-size: 1rem; color: var(--navy); margin: 0 0 12px; }
