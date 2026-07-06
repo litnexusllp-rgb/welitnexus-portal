@@ -110,7 +110,20 @@ router.post('/', requireAuth, (req, res) => {
 router.get('/mine', requireAuth, (req, res) => res.json({ tasks: withChecklists(tasksForUser.all(req.user.id)) }));
 
 // ADMIN: every task.
-router.get('/all', requireAdmin, (_req, res) => res.json({ tasks: withChecklists(allTasks.all()) }));
+// The whole-team board. Read-only for employees (mutations below stay guarded:
+// edit/delete/reassign are admin-only; status changes require admin or assignee).
+router.get('/all', requireAuth, (_req, res) => res.json({ tasks: withChecklists(allTasks.all()) }));
+
+// ADMIN: persist a manual ordering (drag-and-drop within a client group).
+// Body: { ids: [taskId, ...] } in the desired display order.
+const setSortOrder = db.prepare(`UPDATE tasks SET sort_order = ? WHERE id = ?`);
+router.post('/reorder', requireAdmin, (req, res) => {
+  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean).slice(0, 500);
+  if (!ids.length) return res.status(400).json({ error: 'ids required' });
+  const apply = db.transaction(() => { ids.forEach((id, i) => setSortOrder.run(i, id)); });
+  apply();
+  res.json({ ok: true });
+});
 
 // Assignee (or admin) adds a checklist item to an existing task.
 router.post('/:id/checklist', requireAuth, (req, res) => {

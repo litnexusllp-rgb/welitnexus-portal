@@ -262,6 +262,7 @@ for (const stmt of [
   `ALTER TABLE invoices ADD COLUMN bill_to TEXT DEFAULT ''`,
   `ALTER TABLE events ADD COLUMN device TEXT DEFAULT ''`,
   `ALTER TABLE clients ADD COLUMN email TEXT DEFAULT ''`,
+  `ALTER TABLE tasks ADD COLUMN sort_order INTEGER`,
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

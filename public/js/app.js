@@ -683,74 +683,142 @@
   let taskAssignee = '';
   let taskStatus = '';
   let taskPriority = '';
+  let taskScope = null;        // 'MINE' | 'ALL' — defaulted by role on first visit
+  let taskOverdueOnly = false;
+  let allCollapsed = false;
+  const selectedTasks = new Set(); // ids picked via row checkboxes (bulk actions)
   const collapsedGroups = new Set();
-  // Row action menus are <details> elements, which don't close each other or on
+  // Row/pill menus are <details> elements, which don't close each other or on
   // an outside click. This one-time listener closes any open menu when the click
-  // lands outside it — so only one ⋯ menu is ever open at a time.
+  // lands outside it — so only one menu is ever open at a time.
   document.addEventListener('click', (e) => {
-    document.querySelectorAll('details.rowmenu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+    document.querySelectorAll('details.rowmenu[open], details.pillmenu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
   });
   VIEWS.tasks = async () => {
     const emp = !isAdmin();
-    setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your work, organised by client.',
-      `<div class="admin-only">
-         <div class="toolbar">
-           <h2 style="margin:0;color:var(--navy);">All tasks</h2>
-           <button class="btn btn-primary" id="newTaskBtn">+ Assign task</button></div>
-         <div class="task-filters">
-           <input id="taskSearch" class="tf-search" placeholder="Search title, person or client…" autocomplete="off">
-           <select id="clientFilter" class="tf-sel"></select>
-           <select id="assigneeFilter" class="tf-sel"></select>
-           <div class="tf-chips" id="statusChips">
-             <button class="chip on" data-st="">All</button>
-             <button class="chip" data-st="TODO">To do</button>
-             <button class="chip" data-st="IN_PROGRESS">In progress</button>
-             <button class="chip" data-st="DONE">Done</button>
-           </div>
-           <div class="tf-chips" id="priChips">
-             <button class="chip on" data-pri="">Any priority</button>
-             <button class="chip" data-pri="HIGH">High</button>
-             <button class="chip" data-pri="MEDIUM">Medium</button>
-             <button class="chip" data-pri="LOW">Low</button>
+    if (taskScope === null) taskScope = emp ? 'MINE' : 'ALL'; // staff default to their own work
+    selectedTasks.clear();
+    setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your work — switch to All tasks to see the whole team.',
+      `<div class="toolbar">
+         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+           <div class="seg" id="scopeSeg" role="tablist" aria-label="Task scope">
+             <button data-scope="MINE" class="${taskScope === 'MINE' ? 'on' : ''}">My tasks</button>
+             <button data-scope="ALL" class="${taskScope === 'ALL' ? 'on' : ''}">All tasks</button>
            </div>
          </div>
+         ${emp
+    ? '<div class="row-actions"><button class="btn btn-ghost" id="suggestClientBtn">Suggest a client</button><button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button></div>'
+    : '<button class="btn btn-primary" id="newTaskBtn">+ Assign task</button>'}
        </div>
-       <div class="admin-only" id="allTasks" style="margin-bottom:28px;"></div>
-       <div class="toolbar"><h2 style="margin:0;color:var(--navy);">My tasks</h2>
-         ${emp ? '<div class="row-actions"><button class="btn btn-ghost" id="suggestClientBtn">Suggest a client</button><button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button></div>' : ''}</div>
-       <div id="myTasks"></div>
-       ${emp ? '<div class="section" style="margin-top:26px;"><h2 style="color:var(--navy);">My recurring schedules</h2><div id="myRecurring"></div></div>' : ''}`);
-    if (isAdmin()) {
-      await loadLookups();
-      $('#clientFilter').innerHTML = `<option value="">All clients</option><option value="none">— No client —</option>`
-        + CLIENTS.map((c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
-      $('#clientFilter').value = taskClientFilter;
-      $('#clientFilter').addEventListener('change', (e) => { taskClientFilter = e.target.value; loadAllTasks(); });
-      $('#assigneeFilter').innerHTML = `<option value="">Anyone</option>`
-        + USERS.map((u) => `<option value="${u.id}" ${taskAssignee == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
-      $('#assigneeFilter').value = taskAssignee;
-      $('#assigneeFilter').addEventListener('change', (e) => { taskAssignee = e.target.value; loadAllTasks(); });
-      const search = $('#taskSearch');
-      search.value = taskSearch;
-      search.addEventListener('input', (e) => { taskSearch = e.target.value; loadAllTasks(); });
-      const chipRow = (sel, attr, set) => $(sel).addEventListener('click', (e) => {
-        const b = e.target.closest('button[' + attr + ']'); if (!b) return;
-        $(sel).querySelectorAll('.chip').forEach((c) => c.classList.remove('on'));
-        b.classList.add('on'); set(b.getAttribute(attr)); loadAllTasks();
-      });
-      chipRow('#statusChips', 'data-st', (v) => { taskStatus = v; });
-      chipRow('#priChips', 'data-pri', (v) => { taskPriority = v; });
-      $('#newTaskBtn').addEventListener('click', () => openTaskModal());
+       <div class="task-filters">
+         <input id="taskSearch" class="tf-search" placeholder="Search title, person or client…" autocomplete="off">
+         <select id="clientFilter" class="tf-sel"></select>
+         <select id="assigneeFilter" class="tf-sel"></select>
+         <div class="tf-chips" id="statusChips">
+           <button class="chip on" data-st="">All</button>
+           <button class="chip" data-st="TODO">To do</button>
+           <button class="chip" data-st="IN_PROGRESS">In progress</button>
+           <button class="chip" data-st="DONE">Done</button>
+         </div>
+         <div class="tf-chips" id="priChips">
+           <button class="chip on" data-pri="">Any priority</button>
+           <button class="chip" data-pri="HIGH">High</button>
+           <button class="chip" data-pri="MEDIUM">Medium</button>
+           <button class="chip" data-pri="LOW">Low</button>
+         </div>
+         <button class="chip ${taskOverdueOnly ? 'on' : ''}" id="overdueChip" title="Only tasks past their due date and not done">⏰ Overdue only</button>
+         <button class="chip" id="collapseAllBtn">${allCollapsed ? '⊞ Expand all' : '⊟ Collapse all'}</button>
+       </div>
+       <div id="allTasks" style="margin-bottom:28px;"></div>
+       ${emp ? '<div class="section" style="margin-top:26px;"><h2 style="color:var(--navy);">My recurring schedules</h2><div id="myRecurring"></div></div>' : ''}
+       <div class="bulkbar" id="bulkBar">
+         <span class="cnt" id="bulkCnt">0 selected</span>
+         <select id="bulkAssignee"><option value="">Assignee…</option></select>
+         <select id="bulkStatus"><option value="">Status…</option><option value="TODO">To do</option><option value="IN_PROGRESS">In progress</option><option value="DONE">Done</option></select>
+         <select id="bulkPriority"><option value="">Priority…</option><option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option></select>
+         <button class="btn btn-primary btn-sm" id="bulkApply">Apply</button>
+         <button class="btn btn-ghost btn-sm" id="bulkClear" style="color:#c3d2e0;">Clear</button>
+       </div>`);
+    await loadLookups();
+    $('#scopeSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-scope]'); if (!b) return;
+      taskScope = b.dataset.scope;
+      $('#scopeSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       loadAllTasks();
-    }
+    });
+    $('#clientFilter').innerHTML = `<option value="">All clients</option><option value="none">— No client —</option>`
+      + CLIENTS.map((c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
+    $('#clientFilter').value = taskClientFilter;
+    $('#clientFilter').addEventListener('change', (e) => { taskClientFilter = e.target.value; loadAllTasks(); });
+    $('#assigneeFilter').innerHTML = `<option value="">Anyone</option>`
+      + USERS.map((u) => `<option value="${u.id}" ${taskAssignee == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+    $('#assigneeFilter').value = taskAssignee;
+    $('#assigneeFilter').addEventListener('change', (e) => { taskAssignee = e.target.value; loadAllTasks(); });
+    const search = $('#taskSearch');
+    search.value = taskSearch;
+    search.addEventListener('input', (e) => { taskSearch = e.target.value; loadAllTasks(); });
+    const chipRow = (sel, attr, set) => $(sel).addEventListener('click', (e) => {
+      const b = e.target.closest('button[' + attr + ']'); if (!b) return;
+      $(sel).querySelectorAll('.chip').forEach((c) => c.classList.remove('on'));
+      b.classList.add('on'); set(b.getAttribute(attr)); loadAllTasks();
+    });
+    chipRow('#statusChips', 'data-st', (v) => { taskStatus = v; });
+    chipRow('#priChips', 'data-pri', (v) => { taskPriority = v; });
+    $('#overdueChip').addEventListener('click', () => {
+      taskOverdueOnly = !taskOverdueOnly;
+      $('#overdueChip').classList.toggle('on', taskOverdueOnly);
+      loadAllTasks();
+    });
+    $('#collapseAllBtn').addEventListener('click', () => {
+      allCollapsed = !allCollapsed;
+      $('#collapseAllBtn').textContent = allCollapsed ? '⊞ Expand all' : '⊟ Collapse all';
+      if (!allCollapsed) collapsedGroups.clear();
+      loadAllTasks({ collapseAll: allCollapsed });
+    });
     if (emp) {
-      await loadLookups();
       $('#addMyTaskBtn').addEventListener('click', openMyTaskModal);
       $('#suggestClientBtn').addEventListener('click', openProposeClientModal);
       loadMyRecurring();
+    } else {
+      $('#newTaskBtn').addEventListener('click', () => openTaskModal());
+      // Bulk bar wiring (admin only — bulk edits use admin endpoints).
+      $('#bulkAssignee').innerHTML = `<option value="">Assignee…</option>` + USERS.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+      $('#bulkClear').addEventListener('click', () => { selectedTasks.clear(); refreshBulkBar(); loadAllTasks(); });
+      $('#bulkApply').addEventListener('click', applyBulkActions);
     }
-    loadMyTasks();
+    loadAllTasks();
   };
+
+  // ----- Bulk actions -----
+  function refreshBulkBar() {
+    const bar = $('#bulkBar'); if (!bar) return;
+    bar.classList.toggle('show', selectedTasks.size > 0);
+    const c = $('#bulkCnt'); if (c) c.textContent = `${selectedTasks.size} selected`;
+  }
+  async function applyBulkActions() {
+    const ids = [...selectedTasks];
+    const assignee = $('#bulkAssignee').value, status = $('#bulkStatus').value, priority = $('#bulkPriority').value;
+    if (!ids.length) return;
+    if (!assignee && !status && !priority) return toast('Pick an assignee, status or priority to apply', true);
+    const btn = $('#bulkApply'); btn.disabled = true;
+    let ok = 0, failed = 0;
+    for (const id of ids) {
+      try {
+        if (assignee || priority) {
+          const patch = {};
+          if (assignee) patch.assignee_id = Number(assignee);
+          if (priority) patch.priority = priority;
+          await api.put(`/tasks/${id}`, patch);
+        }
+        if (status) await api.post(`/tasks/${id}/status`, { status });
+        ok++;
+      } catch (_e) { failed++; }
+    }
+    btn.disabled = false;
+    selectedTasks.clear(); refreshBulkBar();
+    toast(failed ? `Updated ${ok}, failed ${failed} (checklists may block Done)` : `Updated ${ok} task(s) ✓`, !!failed);
+    loadAllTasks();
+  }
 
   // Employee proposes a new client for admin approval.
   function openProposeClientModal() {
@@ -901,10 +969,13 @@
     $('#clDone').addEventListener('click', () => { closeModal(); if (onClose) onClose(); });
   }
 
+  // Legacy simple list — now only used if a #myTasks container exists (the
+  // unified board on the Tasks page replaced it; callers keep working).
   async function loadMyTasks() {
     try {
-      const { tasks } = await api.get('/tasks/mine');
       const el = $('#myTasks');
+      if (!el) { loadAllTasks(); return; } // unified board took over
+      const { tasks } = await api.get('/tasks/mine');
       el.innerHTML = tasks.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>
         ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}
           <div style="margin-top:6px;"><button class="btn btn-ghost btn-sm" data-mychecklist="${t.id}">${t.checklist && t.checklist.length ? 'Edit checklist' : '+ Add checklist'}</button></div></td>
@@ -921,59 +992,154 @@
     return `<select class="assignee-sel" data-assignee="${t.id}" title="Reassign">${USERS.map((u) => `<option value="${u.id}" ${u.id == t.assignee_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
   }
 
-  async function loadAllTasks() {
+  // Color-coded status pill; clicking opens a small menu to change state.
+  // Interactive only for admins or the task's own assignee.
+  const STATUS_META = { TODO: ['To do', 'spill-todo', '#8a97a3'], IN_PROGRESS: ['In progress', 'spill-in_progress', '#f5b942'], DONE: ['Done', 'spill-done', '#0e9f7e'] };
+  function statusPill(t) {
+    const [label, cls] = STATUS_META[t.status] || STATUS_META.TODO;
+    const canEdit = isAdmin() || t.assignee_id === ME.id;
+    if (!canEdit) return `<span class="spill ${cls} static">${label}</span>`;
+    const lockDone = openItems(t) > 0;
+    return `<details class="pillmenu"><summary><span class="spill ${cls}">${label} <span class="cv">▾</span></span></summary>
+      <div class="pill-list">
+        ${Object.entries(STATUS_META).map(([v, [l, , dot]]) => `<button data-setstatus="${t.id}:${v}" ${v === 'DONE' && lockDone ? 'disabled title="Finish the checklist first"' : ''} ${v === t.status ? 'style="font-weight:700;"' : ''}><span class="dot" style="background:${dot}"></span>${l}${v === t.status ? ' ✓' : ''}</button>`).join('')}
+      </div></details>`;
+  }
+  // Due-date cell: overdue (not done) = bold red; done = muted strike-through.
+  function dueCell(t) {
+    if (!t.due_date) return `<span class="muted-empty">Not set</span>`;
+    const label = fmtDate(t.due_date);
+    if (t.status === 'DONE') return `<span class="due-done">${label}</span>`;
+    if (t.due_date < todayISO()) return `<span class="due-overdue" title="Overdue">${label}</span>`;
+    return label;
+  }
+
+  async function loadAllTasks(opts = {}) {
     try {
+      const admin = isAdmin();
       let { tasks } = await api.get('/tasks/all');
+      const ALL = tasks; // unfiltered — for modal lookups by id
+      if (taskScope === 'MINE') tasks = tasks.filter((t) => t.assignee_id === ME.id);
       if (taskClientFilter === 'none') tasks = tasks.filter((t) => !t.client_id);
       else if (taskClientFilter) tasks = tasks.filter((t) => t.client_id == taskClientFilter || t.client_parent_id == taskClientFilter); // roll up: a CPA shows its files too
       if (taskAssignee) tasks = tasks.filter((t) => t.assignee_id == taskAssignee);
       if (taskStatus) tasks = tasks.filter((t) => t.status === taskStatus);
       if (taskPriority) tasks = tasks.filter((t) => t.priority === taskPriority);
+      if (taskOverdueOnly) { const today = todayISO(); tasks = tasks.filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today); }
       if (taskSearch.trim()) {
         const q = taskSearch.trim().toLowerCase();
         tasks = tasks.filter((t) => [t.title, t.description, t.assignee_name, t.client_name, t.client_parent_name]
           .some((f) => String(f || '').toLowerCase().includes(q)));
       }
-      const filtered = !!(taskClientFilter || taskAssignee || taskStatus || taskPriority || taskSearch.trim());
-      const el = $('#allTasks');
-      if (!tasks.length) { el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet.'}</div>`; return; }
+      const filtered = !!(taskClientFilter || taskAssignee || taskStatus || taskPriority || taskSearch.trim() || taskOverdueOnly || taskScope === 'MINE');
+      const el = $('#allTasks'); if (!el) return;
+      // prune selections that are no longer visible
+      const visibleIds = new Set(tasks.map((t) => t.id));
+      [...selectedTasks].forEach((id) => { if (!visibleIds.has(id)) selectedTasks.delete(id); });
+      refreshBulkBar();
+      if (!tasks.length && !admin) { el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet. 🎉'}</div>`; return; }
 
       // Roll sub-client (file) tasks up under their parent CPA; standalone
       // clients group on their own; untagged tasks go under "General".
       const groups = {};
       tasks.forEach((t) => { const k = t.client_parent_name || t.client_name || '— General —'; (groups[k] = groups[k] || []).push(t); });
       const order = Object.keys(groups).sort((a, b) => (a === '— General —') - (b === '— General —') || a.localeCompare(b));
-      el.innerHTML = order.map((g) => `
+      if (opts.collapseAll) order.forEach((g) => collapsedGroups.add(g));
+      // Within a group, manual order (drag) wins; unordered rows keep API order.
+      order.forEach((g) => groups[g].sort((a, b) => (a.sort_order ?? 1e9) - (b.sort_order ?? 1e9)));
+      // Map a group header back to a client id for quick-add.
+      const groupClientId = (g) => (g === '— General —' ? '' : (CLIENTS.find((c) => !c.parent_id && c.name === g)?.id || ''));
+
+      el.innerHTML = (order.length ? order : []).map((g) => `
         <div class="tgroup ${collapsedGroups.has(g) ? 'collapsed' : ''}">
           <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g)}</h2><span class="cnt">(${groups[g].length})</span></div>
-          <table class="ttable"><thead><tr><th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
-          ${groups[g].map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
-            <td>${assigneeInlineSelect(t)}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td>
-            <td style="text-align:right;"><details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
+          <table class="ttable"><thead><tr>${admin ? '<th style="width:52px;"></th>' : ''}<th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody data-group="${esc(g)}">
+          ${groups[g].map((t) => `<tr data-task-row="${t.id}">
+            ${admin ? `<td style="white-space:nowrap;"><span class="drag-h" data-drag="${t.id}" title="Drag to reorder">⠿</span> <input type="checkbox" class="task-check" data-sel="${t.id}" ${selectedTasks.has(t.id) ? 'checked' : ''}></td>` : ''}
+            <td><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
+            <td>${admin ? assigneeInlineSelect(t) : esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${dueCell(t)}</td><td>${statusPill(t)}</td>
+            <td style="text-align:right;">${admin || t.assignee_id === ME.id ? `<details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
               <button data-checklist-task="${t.id}">✓ Checklist</button>
-              <button data-edit-task="${t.id}">✎ Edit</button>
-              <button class="danger" data-del-task="${t.id}">🗑 Delete</button>
-            </div></details></td></tr>`).join('')}
-          </tbody></table></div>`).join('');
+              ${admin ? `<button data-edit-task="${t.id}">✎ Edit</button><button class="danger" data-del-task="${t.id}">🗑 Delete</button>` : ''}
+            </div></details>` : ''}</td></tr>`).join('')}
+          ${admin ? `<tr class="quickadd"><td colspan="7"><input data-quickadd="${esc(groupClientId(g))}" placeholder="＋ Add quick task to ${esc(g)} — type a title and press Enter" aria-label="Quick task for ${esc(g)}"></td></tr>` : ''}
+          </tbody></table></div>`).join('') || `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet.'}</div>`;
+
       // Collapse / expand a client group (remembered while the page is open).
       el.querySelectorAll('.tgroup-head').forEach((h, i) => h.addEventListener('click', () => {
         const g = order[i];
         if (collapsedGroups.has(g)) collapsedGroups.delete(g); else collapsedGroups.add(g);
         h.closest('.tgroup').classList.toggle('collapsed');
       }));
-      wireStatusSelects(el, () => { loadAllTasks(); loadMyTasks(); });
-      el.querySelectorAll('[data-assignee]').forEach((s) => s.addEventListener('change', async () => {
-        try { await api.put(`/tasks/${s.dataset.assignee}`, { assignee_id: Number(s.value) }); toast('Reassigned ✓'); loadAllTasks(); loadMyTasks(); }
-        catch (e) { toast(e.message, true); loadAllTasks(); }
+      const reload = () => loadAllTasks();
+      // Status pill menus
+      el.querySelectorAll('[data-setstatus]').forEach((b) => b.addEventListener('click', async () => {
+        const [id, status] = b.dataset.setstatus.split(':');
+        b.closest('details')?.removeAttribute('open');
+        try { await api.post(`/tasks/${id}/status`, { status }); toast('Updated ✓'); reload(); }
+        catch (e) { toast(e.message, true); }
+      }));
+      // Row selection checkboxes -> bulk bar
+      el.querySelectorAll('[data-sel]').forEach((cb) => cb.addEventListener('change', () => {
+        const id = Number(cb.dataset.sel);
+        if (cb.checked) selectedTasks.add(id); else selectedTasks.delete(id);
+        refreshBulkBar();
+      }));
+      // Quick add: Enter creates a task in that client group (To do / Medium).
+      el.querySelectorAll('[data-quickadd]').forEach((inp) => inp.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Enter') return;
+        const title = inp.value.trim(); if (!title) return;
+        inp.disabled = true;
+        try {
+          await api.post('/tasks', { title, client_id: inp.dataset.quickadd || null, assignee_id: ME.id, priority: 'MEDIUM' });
+          toast('Task added ✓'); reload();
+        } catch (err) { toast(err.message, true); inp.disabled = false; }
+      }));
+      // Drag-and-drop manual ordering within a group (admin).
+      if (admin) wireTaskDrag(el);
+      if (admin) el.querySelectorAll('[data-assignee]').forEach((s) => s.addEventListener('change', async () => {
+        try { await api.put(`/tasks/${s.dataset.assignee}`, { assignee_id: Number(s.value) }); toast('Reassigned ✓'); reload(); }
+        catch (e) { toast(e.message, true); reload(); }
       }));
       el.querySelectorAll('.rowmenu-list button').forEach((b) => b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')));
-      el.querySelectorAll('[data-checklist-task]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(tasks.find((t) => t.id == b.dataset.checklistTask), () => { loadAllTasks(); loadMyTasks(); })));
-      el.querySelectorAll('[data-edit-task]').forEach((b) => b.addEventListener('click', () => openTaskModal(tasks.find((t) => t.id == b.dataset.editTask))));
+      el.querySelectorAll('[data-checklist-task]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(ALL.find((t) => t.id == b.dataset.checklistTask), reload)));
+      el.querySelectorAll('[data-edit-task]').forEach((b) => b.addEventListener('click', () => openTaskModal(ALL.find((t) => t.id == b.dataset.editTask))));
       el.querySelectorAll('[data-del-task]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm('Delete this task?')) return;
-        try { await api.del(`/tasks/${b.dataset.delTask}`); toast('Deleted'); loadAllTasks(); loadMyTasks(); } catch (e) { toast(e.message, true); }
+        try { await api.del(`/tasks/${b.dataset.delTask}`); toast('Deleted'); reload(); } catch (e) { toast(e.message, true); }
       }));
     } catch (e) { toast(e.message, true); }
+  }
+
+  // HTML5 drag-and-drop: reorder rows within one client group's tbody, then
+  // persist the new order (sort_order) for every row in that group.
+  function wireTaskDrag(root) {
+    let dragging = null;
+    root.querySelectorAll('.drag-h').forEach((h) => {
+      const row = h.closest('tr');
+      h.addEventListener('mousedown', () => { row.draggable = true; });
+      row.addEventListener('dragstart', (e) => { dragging = row; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      row.addEventListener('dragend', async () => {
+        row.classList.remove('dragging'); row.draggable = false;
+        root.querySelectorAll('tr.drag-over').forEach((r) => r.classList.remove('drag-over'));
+        if (!dragging) return;
+        const tbody = dragging.closest('tbody'); dragging = null;
+        const ids = [...tbody.querySelectorAll('tr[data-task-row]')].map((r) => Number(r.dataset.taskRow));
+        try { await api.post('/tasks/reorder', { ids }); toast('Order saved ✓'); } catch (e) { toast(e.message, true); loadAllTasks(); }
+      });
+    });
+    root.querySelectorAll('tbody').forEach((tb) => {
+      tb.addEventListener('dragover', (e) => {
+        if (!dragging || dragging.closest('tbody') !== tb) return;
+        e.preventDefault();
+        const over = e.target.closest('tr[data-task-row]');
+        tb.querySelectorAll('tr.drag-over').forEach((r) => r.classList.remove('drag-over'));
+        if (!over || over === dragging) return;
+        over.classList.add('drag-over');
+        const rect = over.getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) over.before(dragging); else over.after(dragging);
+      });
+    });
   }
 
   function wireStatusSelects(root, reload) {
