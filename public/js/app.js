@@ -259,20 +259,26 @@
       // Small phone/PC indicator next to a name, from their latest punch's device.
       const deviceTag = (d) => d === 'MOBILE' ? ' <span class="dev-tag" title="Clocked in from a phone">📱 Mobile</span>'
         : d === 'PC' ? ' <span class="dev-tag" title="Clocked in from a computer">💻 PC</span>' : '';
+      // Active ratio for the "Team — live now" header (clock page).
+      const activeToday = today.people.filter((p) => p.state !== 'OFF').length;
+      const ratioEl = $('#teamRatio');
+      if (ratioEl) ratioEl.textContent = `· ${activeToday} of ${today.people.length} active today`;
+      // The "On break" panel collapses away when empty so "Clocked out today"
+      // moves up instead of leaving a large blank block.
       host.innerHTML = `
         <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
           <div class="section" style="margin-bottom:0;">
-            <h2>🟢 Currently in (${working.length})</h2>
+            <h2>🟢 Currently in (${working.length})${onBreak.length ? '' : ' <span class="ratio-ind">· no one on break</span>'}</h2>
             ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th></tr></thead><tbody>
               ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td></tr>`).join('')}
             </tbody></table>` : `<div class="empty">No one is clocked in right now.</div>`}
           </div>
-          <div class="section" style="margin-bottom:0;">
+          ${onBreak.length ? `<div class="section" style="margin-bottom:0;">
             <h2>☕ On break (${onBreak.length})</h2>
-            ${onBreak.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
+            <table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
               ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
-            </tbody></table>` : `<div class="empty">No one is on break.</div>`}
-          </div>
+            </tbody></table>
+          </div>` : ''}
         </div>
         <div class="section">
           <h2>✅ Clocked out today (${clockedOut.length})</h2>
@@ -310,7 +316,7 @@
       `<div class="cards" style="grid-template-columns:1fr;max-width:520px;">
          <div class="card clock" id="clockCard"></div>
        </div>
-       <div class="admin-only section" style="margin-top:8px;"><h2 style="color:var(--navy);">Team — live now</h2><div id="clockTeam"></div></div>
+       <div class="admin-only section" style="margin-top:8px;"><h2 style="color:var(--navy);">Team — live now<span class="ratio-ind" id="teamRatio"></span></h2><div id="clockTeam"></div></div>
        <div class="section"><div class="toolbar"><h2 style="margin:0;">My last 14 days</h2><button class="btn btn-ghost btn-sm" id="fixPunchBtn">🛠 Request a correction</button></div><div id="timesheet"></div></div>
        <div class="section"><h2>My correction requests</h2><div id="myPunchReqs"></div></div>`);
     await renderClock();
@@ -1693,22 +1699,46 @@
   };
 
   let KPI_ROWS = [];
+  let kpiSort = { key: '', dir: 1 }; // click a header to sort; click again to flip
+  const KPI_HOURS_HOT = 32; // hours above this (or any points) get the soft highlight
   async function loadKpi() {
     try {
       const m = $('#kpiMonth').value || thisMonthISO();
       const { rows } = await api.get(`/kpi?month=${m}`);
       KPI_ROWS = rows;
-      const el = $('#kpiTable'); if (!el) return;
-      el.innerHTML = rows.length ? `<table><thead><tr>
-          <th>Employee</th><th>Days</th><th>Hours</th><th>Tasks done</th><th>On-time</th><th>Open now</th><th>Leave days</th><th>Achievements</th><th>Points</th>
-        </tr></thead><tbody>
-        ${rows.map((r) => `<tr><td><strong>${esc(r.name)}</strong><div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
-          <td>${r.daysPresent}</td><td>${r.hoursWorked}</td><td>${r.tasksDone}</td>
-          <td>${r.onTimePct === null ? '—' : r.onTimePct + '%'}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
-          <td>${r.achievementsAcknowledged}${r.achievementsPending ? ` <span class="badge b-pending" title="awaiting review">+${r.achievementsPending}</span>` : ''}</td>
-          <td><strong>${r.points}</strong></td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No active employees.</div>`;
+      renderKpiTable();
     } catch (e) { toast(e.message, true); }
+  }
+  // Render is separate from the fetch so header-click sorting is instant.
+  function renderKpiTable() {
+    const el = $('#kpiTable'); if (!el) return;
+    const rows = [...KPI_ROWS];
+    if (kpiSort.key) {
+      const k = kpiSort.key, d = kpiSort.dir;
+      rows.sort((a, b) => {
+        const av = a[k], bv = b[k];
+        if (typeof av === 'string' || typeof bv === 'string') return d * String(av || '').localeCompare(String(bv || ''));
+        return d * ((av ?? -1) - (bv ?? -1)); // null on-time% sorts below 0
+      });
+    }
+    const COLS = [
+      ['name', 'Employee'], ['daysPresent', 'Days'], ['hoursWorked', 'Hours'], ['tasksDone', 'Tasks done'],
+      ['onTimePct', 'On-time'], ['openTasks', 'Open now'], ['leaveDays', 'Leave days'],
+      ['achievementsAcknowledged', 'Achievements'], ['points', 'Points'],
+    ];
+    const th = (k, label) => `<th class="th-sort ${kpiSort.key === k ? 'on' : ''}" data-sortk="${k}" title="Sort by ${label}">${label}<span class="si">${kpiSort.key === k ? (kpiSort.dir === 1 ? '▲' : '▼') : '↕'}</span></th>`;
+    el.innerHTML = rows.length ? `<table><thead><tr>${COLS.map(([k, l]) => th(k, l)).join('')}</tr></thead><tbody>
+      ${rows.map((r) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong><div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
+        <td>${r.daysPresent}</td><td>${r.hoursWorked}</td><td>${r.tasksDone}</td>
+        <td>${r.onTimePct === null ? '<span class="muted-empty" title="No tasks with due dates finished this month">N/A</span>' : r.onTimePct + '%'}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
+        <td>${r.achievementsAcknowledged}${r.achievementsPending ? ` <span class="badge b-pending" title="awaiting review">+${r.achievementsPending}</span>` : ''}</td>
+        <td><strong>${r.points}</strong></td></tr>`).join('')}
+    </tbody></table>` : `<div class="empty">No active employees.</div>`;
+    el.querySelectorAll('[data-sortk]').forEach((h) => h.addEventListener('click', () => {
+      const k = h.dataset.sortk;
+      if (kpiSort.key === k) kpiSort.dir = -kpiSort.dir; else kpiSort = { key: k, dir: k === 'name' ? 1 : -1 }; // numbers default high→low
+      renderKpiTable();
+    }));
   }
 
   function exportKpiCsv() {
@@ -1782,13 +1812,13 @@
         ${statCard('Present', t.present, 'value small')}${statCard('Leave', t.leave, 'value small')}
         ${statCard('Absent', t.absent, 'value small')}${statCard('Holidays', t.holiday, 'value small')}
         ${statCard('Hours worked', fmtMins(t.workedMinutes), 'value small')}</div>`;
-      $('#repTable').innerHTML = `<table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
+      $('#repTable').innerHTML = `<table class="dense"><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
         ${data.rows.map((r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
           <td>${badge(r.status)}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
           <td>${r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
           <td>${r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
           <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td>
-          <td>${r.status === 'FUTURE' ? '' : `<button class="btn btn-ghost btn-sm" data-fix-day="${r.day}">Fix</button>`}</td></tr>`).join('')}
+          <td>${r.status === 'FUTURE' ? '' : `<button class="btn-fix" data-fix-day="${r.day}" title="Correct this day's punches">Fix</button>`}</td></tr>`).join('')}
       </tbody></table>`;
       $('#repTable').querySelectorAll('[data-fix-day]').forEach((b) =>
         b.addEventListener('click', () => openAttendanceEditor(data.user.id, b.dataset.fixDay)));
