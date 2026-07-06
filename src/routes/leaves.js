@@ -67,6 +67,42 @@ router.post('/:id/cancel', requireAuth, (req, res) => {
   res.json({ leave: getLeave.get(leave.id) });
 });
 
+// ADMIN: mark leave for an employee directly (phone-in sick days, etc.).
+// Recorded as already APPROVED — balance is deducted and the employee is told.
+// Past dates are allowed here on purpose (recording what already happened).
+const insertApprovedLeave = db.prepare(
+  `INSERT INTO leaves (user_id, start_date, end_date, kind, reason, status, days, decided_by, decided_ts, created_ts)
+   VALUES (?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?, ?)`
+);
+router.post('/admin', requireAdmin, (req, res) => {
+  const user = getUser.get(Number(req.body.user_id));
+  if (!user || !user.active) return res.status(404).json({ error: 'Employee not found' });
+  const start = String(req.body.start_date || '');
+  const kind = String(req.body.kind || 'FULL').toUpperCase() === 'HALF' ? 'HALF' : 'FULL';
+  const end = kind === 'HALF' ? start : String(req.body.end_date || start);
+  const reason = String(req.body.reason || '').slice(0, 500);
+  const span = inclusiveDays(start, end);
+  if (!span) return res.status(400).json({ error: 'Invalid date range' });
+  if (overlappingLeaves.get(user.id, end, start)) {
+    return res.status(409).json({ error: `${user.name} already has a leave covering some of these dates` });
+  }
+  const days = kind === 'HALF' ? 0.5 : span;
+  let leaveId;
+  const record = db.transaction(() => {
+    const info = insertApprovedLeave.run(user.id, start, end, kind, reason, days, req.user.id, now().toMillis(), now().toMillis());
+    leaveId = info.lastInsertRowid;
+    adjustBalance.run(days, user.id);
+  });
+  record();
+  notify(user.id, {
+    type: 'LEAVE',
+    title: 'Leave recorded for you',
+    body: `${req.user.name} marked you on ${kind === 'HALF' ? 'half-day ' : ''}leave ${start}${end !== start ? ' to ' + end : ''}${reason ? ` — ${reason}` : ''}.`,
+    link: 'leaves',
+  });
+  res.json({ leave: getLeave.get(leaveId) });
+});
+
 // ADMIN: list pending + recent.
 router.get('/pending', requireAdmin, (_req, res) => res.json({ leaves: allPending.all() }));
 router.get('/all', requireAdmin, (_req, res) => res.json({ leaves: allLeaves.all() }));

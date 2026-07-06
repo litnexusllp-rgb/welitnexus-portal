@@ -508,9 +508,11 @@
     // Admins get a team view (approvals + who's off) — no personal apply/balance.
     if (isAdmin()) {
       setMain('Leaves', "Requests waiting for approval, and who's on leave.",
-        `<div class="section" id="adminLeaves"></div>
+        `<div class="toolbar"><span></span><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div>
+         <div class="section" id="adminLeaves"></div>
          <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div id="onLeave"></div></div>
          <div class="section"><h2>Leave balances</h2><div id="leaveSummary"></div></div>`);
+      $('#markLeaveBtn').addEventListener('click', openMarkLeaveModal);
       loadAdminLeaves();
       loadOnLeave();
       loadLeaveSummary();
@@ -527,9 +529,47 @@
   };
 
   const daysLabel = (n) => (n ? `${n} ${n === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>');
+
+  // Admin records a leave directly (e.g. someone phoned in sick).
+  let LEAVE_BALANCES = []; // cached from /leaves/summary for the balance hint
+  async function openMarkLeaveModal() {
+    if (!LEAVE_BALANCES.length) {
+      try { LEAVE_BALANCES = (await api.get('/leaves/summary')).rows; } catch (e) { return toast(e.message, true); }
+    }
+    modal(`<h3>Mark leave for an employee</h3>
+      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Recorded as approved right away — the employee is notified and their balance is updated. Past dates are allowed.</p>
+      <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser">${LEAVE_BALANCES.map((u) => `<option value="${u.id}" data-bal="${u.balance}">${esc(u.name)} — ${u.balance} left</option>`).join('')}</select></div>
+        <div class="field"><label>Type</label><select id="mlKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
+      <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${todayISO()}"></div>
+        <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${todayISO()}"></div></div>
+      <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
+    // Half day = a single date; keep end in lockstep and disable it.
+    const syncKind = () => { const half = $('#mlKind').value === 'HALF'; $('#mlEnd').disabled = half; if (half) $('#mlEnd').value = $('#mlStart').value; };
+    $('#mlKind').addEventListener('change', syncKind);
+    $('#mlStart').addEventListener('change', () => { if ($('#mlKind').value === 'HALF' || $('#mlEnd').value < $('#mlStart').value) $('#mlEnd').value = $('#mlStart').value; });
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const kind = $('#mlKind').value, start = $('#mlStart').value, end = kind === 'HALF' ? $('#mlStart').value : $('#mlEnd').value;
+      if (!start || !end) return toast('Pick the dates', true);
+      // Balance warning, same spirit as the approval flow.
+      const opt = $('#mlUser').selectedOptions[0];
+      const bal = Number(opt.dataset.bal);
+      const days = kind === 'HALF' ? 0.5 : Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+      if (days > 0 && days > bal && !confirm(`${opt.textContent.split(' — ')[0]} has ${bal} day(s) left but this is ${days} day(s). Their balance will go to ${bal - days}. Mark anyway?`)) return;
+      try {
+        await api.post('/leaves/admin', { user_id: $('#mlUser').value, kind, start_date: start, end_date: end, reason: $('#mlReason').value });
+        closeModal(); toast('Leave marked ✓');
+        LEAVE_BALANCES = []; // refetch next time — balance changed
+        loadAdminLeaves(); loadOnLeave(); loadLeaveSummary();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
   async function loadLeaveSummary() {
     try {
       const { rows } = await api.get('/leaves/summary');
+      LEAVE_BALANCES = rows;
       const el = $('#leaveSummary'); if (!el) return;
       el.innerHTML = rows.length ? `<p class="page-sub" style="margin:0 0 10px;">Click a row to see that employee's leave history.</p>
         <table><thead><tr><th>Employee</th><th>Department</th><th>Leaves left</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
