@@ -740,6 +740,7 @@
   let taskScope = null;        // 'MINE' | 'ALL' — defaulted by role on first visit
   let taskOverdueOnly = false;
   let allCollapsed = false;
+  let archivedCollapsed = true; // "📦 Archived — done" section starts folded away
   const selectedTasks = new Set(); // ids picked via row checkboxes (bulk actions)
   const collapsedGroups = new Set();
   // Row/pill menus are <details> elements, which don't close each other or on
@@ -769,10 +770,9 @@
          <select id="clientFilter" class="tf-sel"></select>
          <select id="assigneeFilter" class="tf-sel"></select>
          <div class="tf-chips" id="statusChips">
-           <button class="chip on" data-st="">All</button>
+           <button class="chip on" data-st="">All active</button>
            <button class="chip" data-st="TODO">To do</button>
            <button class="chip" data-st="IN_PROGRESS">In progress</button>
-           <button class="chip" data-st="DONE">Done</button>
          </div>
          <div class="tf-chips" id="priChips">
            <button class="chip on" data-pri="">Any priority</button>
@@ -1077,7 +1077,6 @@
       if (taskClientFilter === 'none') tasks = tasks.filter((t) => !t.client_id);
       else if (taskClientFilter) tasks = tasks.filter((t) => t.client_id == taskClientFilter || t.client_parent_id == taskClientFilter); // roll up: a CPA shows its files too
       if (taskAssignee) tasks = tasks.filter((t) => t.assignee_id == taskAssignee);
-      if (taskStatus) tasks = tasks.filter((t) => t.status === taskStatus);
       if (taskPriority) tasks = tasks.filter((t) => t.priority === taskPriority);
       if (taskOverdueOnly) { const today = todayISO(); tasks = tasks.filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today); }
       if (taskSearch.trim()) {
@@ -1085,13 +1084,18 @@
         tasks = tasks.filter((t) => [t.title, t.description, t.assignee_name, t.client_name, t.client_parent_name]
           .some((f) => String(f || '').toLowerCase().includes(q)));
       }
+      // Done tasks drop out of the active groups and collect in the Archived
+      // section below. The status chips only filter active (To do / In progress).
+      const archived = tasks.filter((t) => t.status === 'DONE');
+      tasks = tasks.filter((t) => t.status !== 'DONE');
+      if (taskStatus && taskStatus !== 'DONE') tasks = tasks.filter((t) => t.status === taskStatus);
       const filtered = !!(taskClientFilter || taskAssignee || taskStatus || taskPriority || taskSearch.trim() || taskOverdueOnly || taskScope === 'MINE');
       const el = $('#allTasks'); if (!el) return;
       // prune selections that are no longer visible
       const visibleIds = new Set(tasks.map((t) => t.id));
       [...selectedTasks].forEach((id) => { if (!visibleIds.has(id)) selectedTasks.delete(id); });
       refreshBulkBar();
-      if (!tasks.length && !admin) { el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet. 🎉'}</div>`; return; }
+      if (!tasks.length && !archived.length) { el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet. 🎉'}</div>`; return; }
 
       // Roll sub-client (file) tasks up under their parent CPA; standalone
       // clients group on their own; untagged tasks go under "General".
@@ -1104,8 +1108,8 @@
       // Map a group header back to a client id for quick-add.
       const groupClientId = (g) => (g === '— General —' ? '' : (CLIENTS.find((c) => !c.parent_id && c.name === g)?.id || ''));
 
-      el.innerHTML = (order.length ? order : []).map((g) => `
-        <div class="tgroup ${collapsedGroups.has(g) ? 'collapsed' : ''}">
+      const activeHtml = order.map((g) => `
+        <div class="tgroup active-group ${collapsedGroups.has(g) ? 'collapsed' : ''}">
           <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g)}</h2><span class="cnt">(${groups[g].length})</span></div>
           <table class="ttable"><thead><tr>${admin ? '<th style="width:52px;"></th>' : ''}<th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody data-group="${esc(g)}">
           ${groups[g].map((t) => `<tr data-task-row="${t.id}">
@@ -1117,15 +1121,37 @@
               ${admin ? `<button data-edit-task="${t.id}">✎ Edit</button><button class="danger" data-del-task="${t.id}">🗑 Delete</button>` : ''}
             </div></details>` : ''}</td></tr>`).join('')}
           ${admin ? `<tr class="quickadd"><td colspan="7"><input data-quickadd="${esc(groupClientId(g))}" placeholder="＋ Add quick task to ${esc(g)} — type a title and press Enter" aria-label="Quick task for ${esc(g)}"></td></tr>` : ''}
-          </tbody></table></div>`).join('') || `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet.'}</div>`;
+          </tbody></table></div>`).join('');
+      // Archived (Done) — folded away by default; reopen or delete from here.
+      const archivedHtml = archived.length ? `
+        <div class="tgroup archived-group ${archivedCollapsed ? 'collapsed' : ''}">
+          <div class="tgroup-head" id="archivedHead"><span class="caret">▾</span><h2>📦 Archived — done</h2><span class="cnt">(${archived.length})</span></div>
+          <table class="ttable"><thead><tr><th>Task</th><th>Client</th><th>Assignee</th><th>Completed</th><th></th></tr></thead><tbody>
+          ${archived.map((t) => `<tr>
+            <td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
+            <td>${t.client_name ? esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name) : '<span class="muted-empty">—</span>'}</td>
+            <td>${esc(t.assignee_name)}</td>
+            <td>${new Date(t.updated_ts).toLocaleDateString()}</td>
+            <td style="text-align:right;white-space:nowrap;">${admin || t.assignee_id === ME.id ? `<button class="btn btn-ghost btn-sm" data-reopen="${t.id}">↩ Reopen</button>` : ''}${admin ? ` <button class="btn btn-danger btn-sm" data-del-task="${t.id}" title="Delete permanently">🗑</button>` : ''}</td>
+          </tr>`).join('')}
+          </tbody></table></div>` : '';
+      const activeEmptyHtml = activeHtml ? '' : `<div class="empty">${filtered ? 'No active tasks match these filters.' : 'No active tasks — all clear. 🎉'}</div>`;
+      el.innerHTML = (activeHtml || activeEmptyHtml) + archivedHtml;
 
       // Collapse / expand a client group (remembered while the page is open).
-      el.querySelectorAll('.tgroup-head').forEach((h, i) => h.addEventListener('click', () => {
+      el.querySelectorAll('.active-group .tgroup-head').forEach((h, i) => h.addEventListener('click', () => {
         const g = order[i];
         if (collapsedGroups.has(g)) collapsedGroups.delete(g); else collapsedGroups.add(g);
         h.closest('.tgroup').classList.toggle('collapsed');
       }));
+      const archHead = $('#archivedHead');
+      if (archHead) archHead.addEventListener('click', () => { archivedCollapsed = !archivedCollapsed; archHead.closest('.tgroup').classList.toggle('collapsed'); });
       const reload = () => loadAllTasks();
+      // Reopen an archived (done) task — moves it back to In progress / active.
+      el.querySelectorAll('[data-reopen]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api.post(`/tasks/${b.dataset.reopen}/status`, { status: 'IN_PROGRESS' }); toast('Reopened ✓'); reload(); }
+        catch (e) { toast(e.message, true); }
+      }));
       // Status pill menus
       el.querySelectorAll('[data-setstatus]').forEach((b) => b.addEventListener('click', async () => {
         const [id, status] = b.dataset.setstatus.split(':');
