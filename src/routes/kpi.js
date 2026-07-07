@@ -12,6 +12,12 @@ const { summarize } = require('../compute');
 
 const router = express.Router();
 
+// Punctuality = clocked in by the shift start (+ a grace window). The team runs
+// an evening/overnight shift, so the default expected clock-in is 16:00 (4 PM);
+// both are configurable per firm.
+const SHIFT_START_HOUR = Math.min(23, Math.max(0, Number(process.env.SHIFT_START_HOUR ?? 16)));
+const SHIFT_GRACE_MIN = Math.max(0, Number(process.env.SHIFT_GRACE_MIN ?? 15));
+
 const activeUsers = db.prepare(
   `SELECT id, name, department, title, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
 );
@@ -54,13 +60,21 @@ router.get('/', requireAdmin, (req, res) => {
     const k = `${e.user_id}|${e.day}`;
     (byUserDay[k] = byUserDay[k] || []).push(e);
   }
-  const attendance = {}; // user_id -> { days, minutes }
+  const attendance = {}; // user_id -> { days, minutes, present, onTime }
   for (const k of Object.keys(byUserDay)) {
     const [uid, day] = k.split('|');
     const s = summarize(byUserDay[k], day === today ? now().toMillis() : null);
-    const a = (attendance[uid] = attendance[uid] || { days: 0, minutes: 0 });
+    const a = (attendance[uid] = attendance[uid] || { days: 0, minutes: 0, present: 0, onTime: 0 });
     a.days += 1;
     a.minutes += s.workedMinutes;
+    // Punctuality: was the first clock-in by the shift start (+ grace)?
+    if (s.firstIn != null) {
+      a.present += 1;
+      const cutoff = DateTime.fromISO(day, { zone: ZONE })
+        .set({ hour: SHIFT_START_HOUR, minute: 0, second: 0, millisecond: 0 })
+        .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
+      if (s.firstIn <= cutoff) a.onTime += 1;
+    }
   }
 
   // --- tasks completed in the month ---
@@ -91,7 +105,7 @@ router.get('/', requireAdmin, (req, res) => {
   }
 
   const rows = activeUsers.all().map((u) => {
-    const a = attendance[u.id] || { days: 0, minutes: 0 };
+    const a = attendance[u.id] || { days: 0, minutes: 0, present: 0, onTime: 0 };
     const t = tasks[u.id] || { done: 0, onTime: 0 };
     const x = ach[u.id] || { logged: 0, acknowledged: 0, points: 0, pending: 0 };
     return {
@@ -101,6 +115,8 @@ router.get('/', requireAdmin, (req, res) => {
       title: u.title,
       daysPresent: a.days,
       hoursWorked: Math.round((a.minutes / 60) * 10) / 10,
+      punctualPct: a.present ? Math.round((a.onTime / a.present) * 100) : null,
+      lateDays: a.present - a.onTime,
       tasksDone: t.done,
       tasksOnTime: t.onTime,
       onTimePct: t.done ? Math.round((t.onTime / t.done) * 100) : null,
@@ -114,7 +130,7 @@ router.get('/', requireAdmin, (req, res) => {
     };
   });
 
-  res.json({ month, start, end, rows });
+  res.json({ month, start, end, rows, shiftStart: SHIFT_START_HOUR, graceMin: SHIFT_GRACE_MIN });
 });
 
 module.exports = router;

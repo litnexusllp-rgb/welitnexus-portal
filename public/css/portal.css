@@ -242,6 +242,9 @@ th.th-sort:hover { color: var(--navy); background: #eaf1f7; }
 th.th-sort .si { font-size: 0.72rem; opacity: .45; margin-left: 3px; }
 th.th-sort.on .si { opacity: 1; color: var(--teal-dark); }
 
+/* KPI: flag poor punctuality */
+.kpi-late { color: var(--danger); font-weight: 600; }
+
 /* KPI: soft accent on bonus-earning rows (points > 0 or heavy hours) */
 tr.kpi-hot td { background: #f2faf6; }
 tr.kpi-hot:hover td { background: #e9f6f0; }

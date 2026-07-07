@@ -1766,7 +1766,7 @@
          <input type="month" id="kpiMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;">
          <button class="btn btn-ghost" id="kpiCsvBtn">Export CSV</button></div>
        <div id="kpiTable"></div>
-       <p class="page-sub" style="margin-top:14px;">On-time % = tasks finished by their due date. Points come from acknowledged achievements (review them on the Achievements page). Hours exclude breaks; days a person forgot to clock out count only the recorded time.</p>`);
+       <p class="page-sub" id="kpiNote" style="margin-top:14px;">Points come from acknowledged achievements (review them on the Achievements page). Hours exclude breaks; days a person forgot to clock out count only the recorded time.</p>`);
     $('#kpiMonth').addEventListener('change', loadKpi);
     $('#kpiCsvBtn').addEventListener('click', exportKpiCsv);
     loadKpi();
@@ -1778,9 +1778,14 @@
   async function loadKpi() {
     try {
       const m = $('#kpiMonth').value || thisMonthISO();
-      const { rows } = await api.get(`/kpi?month=${m}`);
+      const { rows, shiftStart, graceMin } = await api.get(`/kpi?month=${m}`);
       KPI_ROWS = rows;
       renderKpiTable();
+      const note = $('#kpiNote');
+      if (note && shiftStart != null) {
+        const h12 = ((shiftStart + 11) % 12) + 1, ap = shiftStart < 12 ? 'AM' : 'PM';
+        note.innerHTML = `<strong>Punctuality</strong> = clocked in by the shift start (${h12} ${ap}${graceMin ? ` + ${graceMin} min grace` : ''}) on days present. <strong>Tasks on-time</strong> = tasks finished by their due date. Points come from acknowledged achievements. Hours exclude breaks; days a person forgot to clock out count only the recorded time.`;
+      }
     } catch (e) { toast(e.message, true); }
   }
   // Render is separate from the fetch so header-click sorting is instant.
@@ -1796,15 +1801,18 @@
       });
     }
     const COLS = [
-      ['name', 'Employee'], ['daysPresent', 'Days'], ['hoursWorked', 'Hours'], ['tasksDone', 'Tasks done'],
-      ['onTimePct', 'On-time'], ['openTasks', 'Open now'], ['leaveDays', 'Leave days'],
+      ['name', 'Employee'], ['daysPresent', 'Days'], ['hoursWorked', 'Hours'], ['punctualPct', 'Punctuality'],
+      ['tasksDone', 'Tasks done'], ['onTimePct', 'Tasks on-time'], ['openTasks', 'Open now'], ['leaveDays', 'Leave days'],
       ['achievementsAcknowledged', 'Achievements'], ['points', 'Points'],
     ];
     const th = (k, label) => `<th class="th-sort ${kpiSort.key === k ? 'on' : ''}" data-sortk="${k}" title="Sort by ${label}">${label}<span class="si">${kpiSort.key === k ? (kpiSort.dir === 1 ? '▲' : '▼') : '↕'}</span></th>`;
+    const pctCell = (v, naTitle) => v === null ? `<span class="muted-empty" title="${naTitle}">N/A</span>` : v + '%';
     el.innerHTML = rows.length ? `<table><thead><tr>${COLS.map(([k, l]) => th(k, l)).join('')}</tr></thead><tbody>
       ${rows.map((r) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong><div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
-        <td>${r.daysPresent}</td><td>${r.hoursWorked}</td><td>${r.tasksDone}</td>
-        <td>${r.onTimePct === null ? '<span class="muted-empty" title="No tasks with due dates finished this month">N/A</span>' : r.onTimePct + '%'}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
+        <td>${r.daysPresent}</td><td>${r.hoursWorked}</td>
+        <td>${r.punctualPct === null ? '<span class="muted-empty" title="No clock-ins this month">N/A</span>' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}" title="${r.lateDays} late day${r.lateDays === 1 ? '' : 's'}">${r.punctualPct}%</span>`}</td>
+        <td>${r.tasksDone}</td>
+        <td>${pctCell(r.onTimePct, 'No tasks with due dates finished this month')}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
         <td>${r.achievementsAcknowledged}${r.achievementsPending ? ` <span class="badge b-pending" title="awaiting review">+${r.achievementsPending}</span>` : ''}</td>
         <td><strong>${r.points}</strong></td></tr>`).join('')}
     </tbody></table>` : `<div class="empty">No active employees.</div>`;
@@ -1818,10 +1826,11 @@
   function exportKpiCsv() {
     if (!KPI_ROWS.length) return toast('Nothing to export', true);
     const m = $('#kpiMonth').value || thisMonthISO();
-    const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Tasks Done', 'On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points'];
+    const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Punctuality %', 'Late Days', 'Tasks Done', 'Tasks On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points'];
     const lines = [head.join(',')].concat(KPI_ROWS.map((r) => [
       csvCell(r.name), csvCell(r.department || ''),
-      r.daysPresent, r.hoursWorked, r.tasksDone, r.onTimePct === null ? '' : r.onTimePct,
+      r.daysPresent, r.hoursWorked, r.punctualPct === null ? '' : r.punctualPct, r.lateDays,
+      r.tasksDone, r.onTimePct === null ? '' : r.onTimePct,
       r.openTasks, r.leaveDays, r.achievementsAcknowledged, r.achievementsPending, r.points,
     ].join(',')));
     const a = document.createElement('a');
