@@ -5,6 +5,7 @@ const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now, todayStr, inclusiveDays } = require('../time');
 const { notify } = require('../notify');
+const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
 
 const router = express.Router();
 
@@ -101,6 +102,14 @@ router.post('/admin', requireAdmin, (req, res) => {
     link: 'leaves',
   });
   res.json({ leave: getLeave.get(leaveId) });
+});
+
+// ADMIN: run the no-show check now (normally runs daily on a schedule).
+// Optional ?day=yyyy-mm-dd, else the most recently completed shift day.
+router.post('/flag-absences', requireAdmin, (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day)) ? String(req.query.day) : lastCompletedAttendanceDay();
+  const created = flagAbsences(day);
+  res.json({ day, created, leaves: allPending.all() });
 });
 
 // ADMIN: list pending + recent.

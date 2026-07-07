@@ -508,11 +508,19 @@
     // Admins get a team view (approvals + who's off) — no personal apply/balance.
     if (isAdmin()) {
       setMain('Leaves', "Requests waiting for approval, and who's on leave.",
-        `<div class="toolbar"><span></span><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div>
+        `<div class="toolbar"><span></span><div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn" title="Create pending leave for anyone who normally clocks in but didn't, for the last completed shift">⚠️ Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div></div>
          <div class="section" id="adminLeaves"></div>
          <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div id="onLeave"></div></div>
          <div class="section"><h2>Leave balances</h2><div id="leaveSummary"></div></div>`);
       $('#markLeaveBtn').addEventListener('click', openMarkLeaveModal);
+      $('#flagAbsBtn').addEventListener('click', async () => {
+        const btn = $('#flagAbsBtn'); btn.disabled = true;
+        try {
+          const r = await api.post('/leaves/flag-absences');
+          toast(r.created ? `Flagged ${r.created} absence(s) for ${r.day} ✓` : `No new absences for ${r.day}`);
+          loadAdminLeaves();
+        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+      });
       loadAdminLeaves();
       loadOnLeave();
       loadLeaveSummary();
