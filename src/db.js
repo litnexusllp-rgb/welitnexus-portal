@@ -263,6 +263,7 @@ for (const stmt of [
   `ALTER TABLE events ADD COLUMN device TEXT DEFAULT ''`,
   `ALTER TABLE clients ADD COLUMN email TEXT DEFAULT ''`,
   `ALTER TABLE tasks ADD COLUMN sort_order INTEGER`,
+  `ALTER TABLE users ADD COLUMN shift_start TEXT DEFAULT ''`, // HH:mm expected clock-in (per employee); blank = firm default
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

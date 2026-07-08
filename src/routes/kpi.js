@@ -12,14 +12,22 @@ const { summarize } = require('../compute');
 
 const router = express.Router();
 
-// Punctuality = clocked in by the shift start (+ a grace window). The team runs
-// an evening/overnight shift, so the default expected clock-in is 16:00 (4 PM);
-// both are configurable per firm.
+// Punctuality = clocked in by the employee's shift start (+ a grace window).
+// Each employee's shift start lives on their profile (users.shift_start, HH:mm);
+// when blank it falls back to the firm default. Grace is firm-wide.
 const SHIFT_START_HOUR = Math.min(23, Math.max(0, Number(process.env.SHIFT_START_HOUR ?? 16)));
 const SHIFT_GRACE_MIN = Math.max(0, Number(process.env.SHIFT_GRACE_MIN ?? 15));
 
+// Parse an employee's shift start into {h, m}, falling back to the firm default.
+function shiftStartOf(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+  if (m) return { h: Number(m[1]), m: Number(m[2]) };
+  return { h: SHIFT_START_HOUR, m: 0 };
+}
+const fmtHHmm = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
+
 const activeUsers = db.prepare(
-  `SELECT id, name, department, title, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
+  `SELECT id, name, department, title, shift_start, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
 );
 const eventsBetween = db.prepare(
   `SELECT user_id, type, ts, day FROM events WHERE day >= ? AND day <= ? ORDER BY user_id, ts, id`
@@ -54,6 +62,11 @@ router.get('/', requireAdmin, (req, res) => {
   const startMs = DateTime.fromISO(start, { zone: ZONE }).startOf('day').toMillis();
   const endMs = DateTime.fromISO(end, { zone: ZONE }).endOf('day').toMillis();
 
+  // Each active user's shift start (parsed once) for the punctuality check.
+  const users = activeUsers.all();
+  const userShift = {};
+  for (const u of users) userShift[u.id] = shiftStartOf(u.shift_start);
+
   // --- attendance: group events by user+day, summarize each day ---
   const byUserDay = {};
   for (const e of eventsBetween.all(start, end)) {
@@ -67,11 +80,12 @@ router.get('/', requireAdmin, (req, res) => {
     const a = (attendance[uid] = attendance[uid] || { days: 0, minutes: 0, present: 0, onTime: 0 });
     a.days += 1;
     a.minutes += s.workedMinutes;
-    // Punctuality: was the first clock-in by the shift start (+ grace)?
+    // Punctuality: was the first clock-in by THIS employee's shift start (+ grace)?
     if (s.firstIn != null) {
       a.present += 1;
+      const sh = userShift[uid] || { h: SHIFT_START_HOUR, m: 0 };
       const cutoff = DateTime.fromISO(day, { zone: ZONE })
-        .set({ hour: SHIFT_START_HOUR, minute: 0, second: 0, millisecond: 0 })
+        .set({ hour: sh.h, minute: sh.m, second: 0, millisecond: 0 })
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
       if (s.firstIn <= cutoff) a.onTime += 1;
     }
@@ -104,7 +118,7 @@ router.get('/', requireAdmin, (req, res) => {
     if (a.status === 'PENDING') r.pending += 1;
   }
 
-  const rows = activeUsers.all().map((u) => {
+  const rows = users.map((u) => {
     const a = attendance[u.id] || { days: 0, minutes: 0, present: 0, onTime: 0 };
     const t = tasks[u.id] || { done: 0, onTime: 0 };
     const x = ach[u.id] || { logged: 0, acknowledged: 0, points: 0, pending: 0 };
@@ -113,6 +127,7 @@ router.get('/', requireAdmin, (req, res) => {
       name: u.name,
       department: u.department,
       title: u.title,
+      shiftStart: fmtHHmm(userShift[u.id]),
       daysPresent: a.days,
       hoursWorked: Math.round((a.minutes / 60) * 10) / 10,
       punctualPct: a.present ? Math.round((a.onTime / a.present) * 100) : null,

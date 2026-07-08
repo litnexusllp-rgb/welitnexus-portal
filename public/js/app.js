@@ -1782,9 +1782,8 @@
       KPI_ROWS = rows;
       renderKpiTable();
       const note = $('#kpiNote');
-      if (note && shiftStart != null) {
-        const h12 = ((shiftStart + 11) % 12) + 1, ap = shiftStart < 12 ? 'AM' : 'PM';
-        note.innerHTML = `<strong>Punctuality</strong> = clocked in by the shift start (${h12} ${ap}${graceMin ? ` + ${graceMin} min grace` : ''}) on days present. <strong>Tasks on-time</strong> = tasks finished by their due date. Points come from acknowledged achievements. Hours exclude breaks; days a person forgot to clock out count only the recorded time.`;
+      if (note) {
+        note.innerHTML = `<strong>Punctuality</strong> = clocked in by each employee's own shift start (set on their profile${graceMin ? `, + ${graceMin} min grace` : ''}) on days present. <strong>Tasks on-time</strong> = tasks finished by their due date. Points come from acknowledged achievements. Hours exclude breaks; days a person forgot to clock out count only the recorded time.`;
       }
     } catch (e) { toast(e.message, true); }
   }
@@ -1810,7 +1809,7 @@
     el.innerHTML = rows.length ? `<table><thead><tr>${COLS.map(([k, l]) => th(k, l)).join('')}</tr></thead><tbody>
       ${rows.map((r) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong><div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
         <td>${r.daysPresent}</td><td>${r.hoursWorked}</td>
-        <td>${r.punctualPct === null ? '<span class="muted-empty" title="No clock-ins this month">N/A</span>' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}" title="${r.lateDays} late day${r.lateDays === 1 ? '' : 's'}">${r.punctualPct}%</span>`}</td>
+        <td>${r.punctualPct === null ? '<span class="muted-empty" title="No clock-ins this month">N/A</span>' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}" title="Shift start ${esc(r.shiftStart || '')} · ${r.lateDays} late day${r.lateDays === 1 ? '' : 's'}">${r.punctualPct}%</span>`}</td>
         <td>${r.tasksDone}</td>
         <td>${pctCell(r.onTimePct, 'No tasks with due dates finished this month')}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
         <td>${r.achievementsAcknowledged}${r.achievementsPending ? ` <span class="badge b-pending" title="awaiting review">+${r.achievementsPending}</span>` : ''}</td>
@@ -2214,7 +2213,7 @@
       <div class="form-row"><div class="field"><label>Name</label><input id="eName" value="${esc(u?.name || '')}"></div>
         <div class="field"><label>Email</label><input id="eEmail" value="${esc(u?.email || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Employee code</label><input id="eCode" value="${esc(u?.emp_code || '')}" placeholder="e.g. LN-001"></div>
-        <div class="field"></div></div>
+        <div class="field"><label>Shift start (for punctuality)</label><input type="time" id="eShift" value="${esc(u?.shift_start || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank to use the firm default.</div></div></div>
       <div class="form-row"><div class="field"><label>Department</label><input id="eDept" value="${esc(u?.department || '')}"></div>
         <div class="field"><label>Title</label><input id="eTitle" value="${esc(u?.title || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Phone</label><input id="ePhone" value="${esc(u?.phone || '')}"></div>
@@ -2224,7 +2223,7 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }
