@@ -652,10 +652,11 @@
         <div class="field"><label>End date</label><input type="date" id="lEnd" value="${todayISO()}"></div></div>
       <div class="form-row"><div class="field"><label>Type</label><select id="lKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div>
         <div class="field"><label>&nbsp;</label><div style="font-size:.82rem;color:var(--slate);padding-top:10px;">Half day counts as 0.5 days.</div></div></div>
-      <div class="form-row one"><div class="field"><label>Reason</label><textarea id="lReason" placeholder="Optional"></textarea></div></div>
+      <div class="form-row one"><div class="field"><label>Reason <span style="color:var(--danger);">*</span></label><textarea id="lReason" placeholder="Required — e.g. family function, medical, personal work"></textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSubmit">Submit request</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSubmit').addEventListener('click', async () => {
+      if (!$('#lReason').value.trim()) return toast('Please give a reason for your leave', true);
       try {
         await api.post('/leaves', { start_date: $('#lStart').value, end_date: $('#lEnd').value, kind: $('#lKind').value, reason: $('#lReason').value });
         closeModal(); toast('Request submitted ✓'); loadMyLeaves();
