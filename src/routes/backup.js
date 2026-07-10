@@ -9,8 +9,16 @@ const fs = require('fs');
 const path = require('path');
 const { db } = require('../db');
 const { now } = require('../time');
+const { requireAdmin } = require('../auth');
+const { sendBackup } = require('../backupMailer');
 
 const router = express.Router();
+
+// ADMIN: email a backup right now (test the scheduled email delivery).
+router.post('/email', requireAdmin, async (req, res) => {
+  const result = await sendBackup('Test');
+  res.json(result);
+});
 
 function allow(req, res, next) {
   const tokenOk = process.env.BACKUP_TOKEN && req.query.token === process.env.BACKUP_TOKEN;

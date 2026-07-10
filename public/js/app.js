@@ -2168,7 +2168,10 @@
          <h2 style="color:var(--navy);">Data &amp; backup</h2>
          <div class="card" style="max-width:640px;">
            <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Download a complete snapshot of everything — employees, attendance, leaves, tasks, clients, and invoices — as a single database file you can keep on your computer.</p>
-           <button class="btn btn-primary" id="backupBtn">⬇ Download backup (.db)</button>
+           <div class="row-actions"><button class="btn btn-primary" id="backupBtn">⬇ Download backup (.db)</button>
+             <button class="btn btn-ghost" id="emailBackupBtn" title="Send a backup email now to test the weekly/monthly delivery">✉️ Email a backup now</button></div>
+           <div id="emailBackupResult" style="display:none;margin-top:12px;border-radius:8px;padding:12px;font-size:.88rem;line-height:1.5;"></div>
+           <p style="margin:12px 0 0;color:var(--slate);font-size:.82rem;">Automated weekly + monthly backups arrive by email once SMTP is configured on the server.</p>
          </div>
        </div>
        <div class="section" style="margin-top:30px;">
@@ -2192,6 +2195,24 @@
       const a = document.createElement('a');
       a.href = '/api/backup'; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
       toast('Backup downloading…');
+    });
+    $('#emailBackupBtn').addEventListener('click', async () => {
+      const box = $('#emailBackupResult'); const btn = $('#emailBackupBtn');
+      btn.disabled = true; box.style.display = 'block'; box.style.background = 'var(--mist)'; box.style.border = '1px solid var(--line)'; box.style.color = 'var(--slate)';
+      box.textContent = 'Sending…';
+      try {
+        const r = await api.post('/backup/email');
+        if (r.ok) {
+          box.style.background = '#eafaf3'; box.style.border = '1px solid #b7e6d4'; box.style.color = 'var(--teal-dark)';
+          box.innerHTML = `✅ <strong>Sent.</strong> ${esc(r.message)} Check that inbox — it should have 6 CSVs plus the .db file.`;
+        } else {
+          box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+          box.innerHTML = `⚠️ <strong>Not sent.</strong> ${esc(r.message || r.error || '')}`;
+        }
+      } catch (e) {
+        box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+        box.textContent = e.message;
+      } finally { btn.disabled = false; }
     });
     $('#slackPreviewBtn').addEventListener('click', async () => {
       try {

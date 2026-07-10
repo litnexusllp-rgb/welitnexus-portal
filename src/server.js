@@ -12,6 +12,7 @@ const { bootstrapAdmin } = require('./bootstrap');
 const { startRecurringScheduler } = require('./recurring');
 const { startSlackScheduler } = require('./slack');
 const { startAbsenceScheduler } = require('./autoAbsence');
+const { startBackupScheduler } = require('./backupMailer');
 
 bootstrapAdmin(); // create first admin on a fresh database
 
@@ -112,4 +113,5 @@ app.listen(PORT, () => {
   startRecurringScheduler(); // generate recurring tasks on boot + every 6h
   startSlackScheduler();     // daily attendance summary to Slack (if configured)
   startAbsenceScheduler();   // daily: flag no-shows as pending leave for approval
+  startBackupScheduler();    // weekly + monthly data backup by email (if SMTP set)
 });
