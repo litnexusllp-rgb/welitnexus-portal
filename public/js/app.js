@@ -377,10 +377,29 @@
       <div class="now" id="liveClock">--:--:--</div>
       <div class="meta">Worked today: <strong>${fmtMins(status.workedMinutes)}</strong> · Breaks: ${fmtMins(status.breakMinutes)}</div>
       <div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
-    card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => punch(b.dataset.punch)));
+    card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
+      punch(b.dataset.punch);
+    }));
     clearInterval(clockTimer);
     const tick = () => { const el = $('#liveClock'); if (el) el.textContent = new Date().toLocaleTimeString(); };
     tick(); clockTimer = setInterval(tick, 1000);
+  }
+
+  // Second confirmation for clocking out — people were hitting it by mistake
+  // when they meant to take a break. Focus lands on Cancel, not the red button.
+  function confirmClockOut(status) {
+    const canBreak = (status.allowed || []).includes('BREAK_START');
+    modal(`<h3>End your shift?</h3>
+      <p style="color:var(--slate);margin:0 0 18px;font-size:.92rem;line-height:1.55;">Clocking out ends your shift for the day and stops your worked-hours timer.${canBreak ? ' If you just want to pause, use <strong>Start Break</strong> instead.' : ''}</p>
+      <div class="modal-actions" style="flex-wrap:wrap;gap:10px;">
+        <button class="btn btn-ghost" id="coCancel">Cancel</button>
+        ${canBreak ? '<button class="btn btn-primary" id="coBreak">☕ Start Break instead</button>' : ''}
+        <button class="btn btn-danger" id="coConfirm">⏹ Yes, clock out</button>
+      </div>`);
+    $('#coCancel').addEventListener('click', closeModal);
+    if (canBreak) $('#coBreak').addEventListener('click', () => { closeModal(); punch('BREAK_START'); });
+    $('#coConfirm').addEventListener('click', () => { closeModal(); punch('OUT'); });
   }
 
   async function punch(type) {
