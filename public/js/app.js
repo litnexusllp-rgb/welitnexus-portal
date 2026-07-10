@@ -924,7 +924,7 @@
         <div class="field"><label>Priority</label><select id="mtPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${p === 'MEDIUM' ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Title</label><input id="mtTitle" placeholder="e.g. Monthly bookkeeping"></div></div>
       <div class="form-row one"><div class="field"><label>Description</label><textarea id="mtDesc" placeholder="Optional"></textarea></div></div>
-      <div class="form-row"><div class="field"><label>Repeat</label><select id="mtRepeat"><option value="">One-time</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="YEARLY">Yearly</option></select></div>
+      <div class="form-row"><div class="field"><label>Repeat</label><select id="mtRepeat"><option value="">One-time</option><option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="YEARLY">Yearly</option></select></div>
         <div class="field"><label id="mtDueLabel">Due date</label><input type="date" id="mtDue" value="${todayISO()}"></div></div>
       <div class="form-row one"><div class="field"><label>Checklist — one item per line (optional)</label><textarea id="mtChecklist" placeholder="Points to tick off before this can be marked done"></textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Add</button></div>`);
@@ -956,7 +956,7 @@
       const { recurring } = await api.get('/recurring/mine');
       el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
         ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
-          <td>${FREQ_LABEL[r.frequency]}</td><td>${fmtDate(r.next_due)}</td><td>${r.active ? badge('approved') : badge('cancelled')}</td>
+          <td>${esc(freqText(r.frequency, r.step))}</td><td>${fmtDate(r.next_due)}</td><td>${r.active ? badge('approved') : badge('cancelled')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-mtoggle="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
             <button class="btn btn-danger btn-sm" data-mdel="${r.id}">✕</button></td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No recurring tasks yet. Use “+ Add task” and pick a Repeat option.</div>`;
@@ -1648,14 +1648,19 @@
   // Escape for the PDF window (own helper so it doesn't depend on esc()).
   function escP(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  const FREQ_LABEL = { WEEKLY: 'Weekly', MONTHLY: 'Monthly', QUARTERLY: 'Quarterly', YEARLY: 'Yearly' };
+  const FREQ_LABEL = { DAILY: 'Daily', WEEKLY: 'Weekly', MONTHLY: 'Monthly', QUARTERLY: 'Quarterly', YEARLY: 'Yearly' };
+  const FREQ_UNIT = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', QUARTERLY: 'quarter', YEARLY: 'year' };
+  // "Monthly" when step is 1, otherwise "Every 2 weeks".
+  const freqText = (freq, step) => (Number(step) > 1
+    ? `Every ${step} ${FREQ_UNIT[freq] || 'period'}s`
+    : (FREQ_LABEL[freq] || cap(String(freq || ''))));
   async function loadRecurring() {
     try {
       const { recurring } = await api.get('/recurring');
       const el = $('#recTable');
       el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Assignee</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
         ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
-          <td>${esc(r.assignee_name)}</td><td>${r.step > 1 ? r.step + ' × ' : ''}${FREQ_LABEL[r.frequency]}</td><td>${fmtDate(r.next_due)}</td>
+          <td>${esc(r.assignee_name)}</td><td>${esc(freqText(r.frequency, r.step))}</td><td>${fmtDate(r.next_due)}</td>
           <td>${r.active ? badge('approved') : badge('cancelled')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-rec="${r.id}">Edit</button>
             <button class="btn btn-ghost btn-sm" data-toggle-rec="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
@@ -1681,15 +1686,31 @@
       <div class="form-row"><div class="field"><label>Client</label><select id="rClient">${clientOptions(r?.client_id)}</select></div>
         <div class="field"><label>Assignee</label><select id="rAssignee">${userOptions(r?.assignee_id)}</select></div></div>
       <div class="form-row"><div class="field"><label>Repeats</label><select id="rFreq">${Object.keys(FREQ_LABEL).map((f) => `<option value="${f}" ${(r?.frequency || 'MONTHLY') === f ? 'selected' : ''}>${FREQ_LABEL[f]}</option>`).join('')}</select></div>
-        <div class="field"><label>Priority</label><select id="rPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${(r?.priority || 'MEDIUM') === p ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div></div>
-      <div class="form-row"><div class="field"><label>First due date</label><input type="date" id="rNext" value="${esc(r?.next_due || todayISO())}"></div>
-        <div class="field"><label>Create how many days early?</label><input type="number" id="rLead" min="0" value="${r?.lead_days ?? 7}"></div></div>
+        <div class="field"><label>Repeat every (custom)</label><input type="number" id="rStep" min="1" max="99" value="${r?.step ?? 1}">
+          <div id="rFreqHint" style="color:var(--slate);font-size:.78rem;margin-top:4px;"></div></div></div>
+      <div class="form-row"><div class="field"><label>Priority</label><select id="rPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${(r?.priority || 'MEDIUM') === p ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div>
+        <div class="field"><label>First due date</label><input type="date" id="rNext" value="${esc(r?.next_due || todayISO())}"></div></div>
+      <div class="form-row"><div class="field"><label>Create how many days early?</label><input type="number" id="rLead" min="0" value="${r?.lead_days ?? 7}"></div>
+        <div class="field"></div></div>
       <div class="form-row one"><div class="field"><label>Checklist — one item per line (copied onto each task)</label><textarea id="rChecklist" placeholder="e.g.\nReconcile bank\nMatch invoices\nReview VAT">${esc(parseChecklistJson(r?.checklist_json))}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create schedule'}</button></div>`);
+    // Live preview of the schedule, e.g. "Creates a task every 2 weeks."
+    const updateFreqHint = () => {
+      const f = $('#rFreq').value, s = Math.max(1, Number($('#rStep').value) || 1);
+      $('#rFreqHint').textContent = `Creates a task ${freqText(f, s).toLowerCase()}.`;
+    };
+    $('#rFreq').addEventListener('change', () => {
+      // A 7-day lead on a daily task would generate a week of tasks at once.
+      if ($('#rFreq').value === 'DAILY' && Number($('#rLead').value) > 1) $('#rLead').value = 0;
+      updateFreqHint();
+    });
+    $('#rStep').addEventListener('input', updateFreqHint);
+    updateFreqHint();
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       const payload = { title: $('#rTitle').value, description: $('#rDesc').value, client_id: $('#rClient').value || null, assignee_id: Number($('#rAssignee').value),
-        frequency: $('#rFreq').value, priority: $('#rPriority').value, next_due: $('#rNext').value, lead_days: Number($('#rLead').value), step: 1, checklist: $('#rChecklist').value };
+        frequency: $('#rFreq').value, priority: $('#rPriority').value, next_due: $('#rNext').value, lead_days: Number($('#rLead').value),
+        step: Math.max(1, Number($('#rStep').value) || 1), checklist: $('#rChecklist').value };
       try {
         if (editing) await api.put(`/recurring/${r.id}`, payload); else await api.post('/recurring', payload);
         closeModal(); toast(editing ? 'Saved ✓' : 'Schedule created ✓'); loadRecurring();

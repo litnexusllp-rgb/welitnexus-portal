@@ -8,7 +8,7 @@ const { generateDueTasks } = require('../recurring');
 
 const router = express.Router();
 
-const FREQ = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
+const FREQ = ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
 
 const SELECT = `SELECT r.*, u.name AS assignee_name, c.name AS client_name
@@ -43,7 +43,7 @@ function clean(body, existing) {
     assignee_id: Number(body.assignee_id ?? existing?.assignee_id),
     priority: PRI.includes(String(body.priority || '').toUpperCase()) ? String(body.priority).toUpperCase() : (existing?.priority || 'MEDIUM'),
     frequency: FREQ.includes(String(body.frequency || '').toUpperCase()) ? String(body.frequency).toUpperCase() : (existing?.frequency || 'MONTHLY'),
-    step: Math.max(1, Number(body.step ?? existing?.step ?? 1)),
+    step: Math.max(1, Math.min(99, Number(body.step ?? existing?.step ?? 1) || 1)), // "every N periods"
     lead_days: Math.max(0, Number(body.lead_days ?? existing?.lead_days ?? 7)),
     next_due: String(body.next_due ?? existing?.next_due ?? ''),
     checklist_json: body.checklist !== undefined ? JSON.stringify(parseChecklistLines(body.checklist)) : (existing?.checklist_json ?? ''),

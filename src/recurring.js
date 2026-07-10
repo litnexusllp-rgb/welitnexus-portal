@@ -15,6 +15,7 @@ function advance(dateStr, frequency, step) {
   const d = DateTime.fromISO(dateStr, { zone: ZONE });
   const n = Math.max(1, step || 1);
   switch (frequency) {
+    case 'DAILY':     return d.plus({ days: n }).toFormat('yyyy-LL-dd');
     case 'WEEKLY':    return d.plus({ weeks: n }).toFormat('yyyy-LL-dd');
     case 'QUARTERLY': return d.plus({ months: 3 * n }).toFormat('yyyy-LL-dd');
     case 'YEARLY':    return d.plus({ years: n }).toFormat('yyyy-LL-dd');
