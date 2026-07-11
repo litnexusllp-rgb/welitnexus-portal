@@ -1292,7 +1292,7 @@
            <h2 style="margin:0;color:var(--navy);">Clients</h2>
            <input id="clientSearch" class="client-search" type="search" placeholder="Search name, type or email…" autocomplete="off">
            <select id="clientFilter" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></select>
-         </div><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div>
+         </div><div class="row-actions"><button class="btn btn-ghost" id="importTasksBtn">📥 Import task list</button><button class="btn btn-primary" id="addClientBtn">+ Add client</button></div></div>
        <div id="clientTable" style="margin-bottom:30px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Invoices</h2><button class="btn btn-primary" id="addInvoiceBtn">+ New invoice</button></div>
        <div id="invoiceTable" style="margin-bottom:30px;"></div>
@@ -1301,6 +1301,7 @@
        <div id="recTable"></div>`);
     await loadLookups();
     $('#addClientBtn').addEventListener('click', () => openClientModal());
+    $('#importTasksBtn').addEventListener('click', () => openImportTasksModal());
     $('#clientFilter').addEventListener('change', (e) => { clientGroupFilter = e.target.value; renderClientTable(); });
     $('#clientSearch').value = clientSearch;
     $('#clientSearch').addEventListener('input', (e) => { clientSearch = e.target.value; renderClientTable(); });
@@ -1458,6 +1459,87 @@
     el.querySelectorAll('[data-toggle-client]').forEach((b) => b.addEventListener('click', async () => {
       try { await api.post(`/clients/${b.dataset.toggleClient}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadClients(); loadLookups(); } catch (e) { toast(e.message, true); }
     }));
+  }
+
+  // Minimal CSV parser (handles quoted fields, commas, and newlines inside quotes).
+  function parseCsv(text) {
+    const rows = []; let field = '', row = [], inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQ) {
+        if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (ch === '"') inQ = false;
+        else field += ch;
+      } else if (ch === '"') inQ = true;
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\r') { /* ignore */ }
+      else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else field += ch;
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+  const RECUR_FREQ = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
+  // Turn CSV rows into import items. Columns: Title, Frequency, Details, Owner, Priority.
+  function csvToItems(text) {
+    const rows = parseCsv(text).filter((r) => r.some((c) => String(c || '').trim()));
+    if (!rows.length) return [];
+    // Drop a header row if the first cell looks like a header.
+    if (/^(title|task)$/i.test(String(rows[0][0] || '').trim())) rows.shift();
+    return rows.map((r) => ({
+      title: String(r[0] || '').trim(),
+      frequency: String(r[1] || '').trim(),
+      description: String(r[2] || '').trim(),
+      owner: String(r[3] || '').trim(),
+      priority: String(r[4] || '').trim(),
+    })).filter((it) => it.title);
+  }
+
+  // Admin: bulk-import a task list (e.g. from a spreadsheet) onto one client.
+  function openImportTasksModal() {
+    const clientOpts = `<option value="">— Choose a client —</option>`
+      + CLIENTS.map((c) => `<option value="${c.id}">${esc(clientPath(c))}</option>`).join('')
+      + `<option value="__new">＋ New client…</option>`;
+    modal(`<h3>Import a task list</h3>
+      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;line-height:1.5;">Paste rows or choose a CSV with columns <strong>Title, Frequency, Details, Owner, Priority</strong>. Weekly/Monthly/Quarterly/Yearly become recurring schedules; Daily, “As needed” or blank become one-time tasks. Blank owner uses the default below.</p>
+      <div class="form-row"><div class="field"><label>Client</label><select id="biClient">${clientOpts}</select><input id="biNewName" placeholder="New client name" style="display:none;margin-top:8px;"></div>
+        <div class="field"><label>Default owner</label><select id="biOwner">${userOptions()}</select></div></div>
+      <div class="form-row one"><div class="field"><label>CSV file (optional)</label><input type="file" id="biFile" accept=".csv,text/csv"></div></div>
+      <div class="form-row one"><div class="field"><label>…or paste rows here</label><textarea id="biText" rows="6" placeholder="Post sales invoices,Daily,Enter customer invoices…,,\nWeekly payroll batch,Weekly,Copy prior week's JEs…,,High"></textarea></div></div>
+      <div id="biPreview" style="color:var(--slate);font-size:.85rem;margin:2px 0 4px;"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mImport">Import</button></div>`);
+    const preview = () => {
+      const items = csvToItems($('#biText').value);
+      const recur = items.filter((i) => RECUR_FREQ.includes(i.frequency.toUpperCase())).length;
+      $('#biPreview').textContent = items.length
+        ? `${items.length} task(s) — ${recur} recurring schedule(s), ${items.length - recur} one-time.`
+        : '';
+    };
+    $('#biClient').addEventListener('change', (e) => { $('#biNewName').style.display = e.target.value === '__new' ? 'block' : 'none'; });
+    $('#biFile').addEventListener('change', (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { $('#biText').value = String(reader.result || ''); preview(); };
+      reader.readAsText(f);
+    });
+    $('#biText').addEventListener('input', preview);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mImport').addEventListener('click', async () => {
+      const items = csvToItems($('#biText').value);
+      if (!items.length) return toast('Add at least one task (Title required)', true);
+      const clientSel = $('#biClient').value;
+      const payload = { default_assignee_id: Number($('#biOwner').value), items };
+      if (clientSel === '__new') { const nm = $('#biNewName').value.trim(); if (!nm) return toast('Enter the new client name', true); payload.client_name = nm; }
+      else if (clientSel) payload.client_id = Number(clientSel);
+      else return toast('Choose a client', true);
+      $('#mImport').disabled = true;
+      try {
+        const r = await api.post('/tasks/bulk', payload);
+        closeModal();
+        toast(`Imported ✓ — ${r.schedulesCreated} recurring, ${r.tasksCreated} one-time`);
+        loadClients(); loadRecurring(); loadLookups();
+      } catch (e) { toast(e.message, true); $('#mImport').disabled = false; }
+    });
   }
 
   function openClientModal(c, presetParent) {

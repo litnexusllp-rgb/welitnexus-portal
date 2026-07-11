@@ -5,6 +5,7 @@ const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now } = require('../time');
 const { notify } = require('../notify');
+const { generateDueTasks } = require('../recurring');
 
 const router = express.Router();
 
@@ -113,6 +114,76 @@ router.get('/mine', requireAuth, (req, res) => res.json({ tasks: withChecklists(
 // The whole-team board. Read-only for employees (mutations below stay guarded:
 // edit/delete/reassign are admin-only; status changes require admin or assignee).
 router.get('/all', requireAuth, (_req, res) => res.json({ tasks: withChecklists(allTasks.all()) }));
+
+// ADMIN: bulk-import a task list for one client (e.g. from a spreadsheet).
+// Frequency Weekly/Monthly/Quarterly/Yearly -> a recurring schedule; Daily,
+// "As needed", one-time or blank -> a single task. Owner is matched to a user
+// by name, falling back to the chosen default assignee.
+const findClientByName = db.prepare(`SELECT id FROM clients WHERE LOWER(name) = LOWER(?) LIMIT 1`);
+const insertClientBulk = db.prepare(
+  `INSERT INTO clients (name, approval, created_by, active, created_ts) VALUES (?, 'APPROVED', ?, 1, ?)`
+);
+const clientExists = db.prepare(`SELECT 1 FROM clients WHERE id = ?`);
+const activeUserExists = db.prepare(`SELECT 1 FROM users WHERE id = ? AND active = 1`);
+const activeUsersForMatch = db.prepare(`SELECT id, name FROM users WHERE active = 1`);
+const insertRecurringBulk = db.prepare(
+  `INSERT INTO recurring_tasks (title, description, client_id, assignee_id, priority, frequency, step, lead_days, next_due, checklist_json, active, created_by, created_ts)
+   VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, 1, 0, @next_due, '', 1, @created_by, @ts)`
+);
+const RECURRING_FREQ = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
+const cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+
+router.post('/bulk', requireAdmin, (req, res) => {
+  // Resolve the client: an existing id, or a name (reused if it exists, else created).
+  let clientId = req.body.client_id ? Number(req.body.client_id) : null;
+  const clientName = String(req.body.client_name || '').trim();
+  if (!clientId && clientName) {
+    const existing = findClientByName.get(clientName);
+    clientId = existing ? existing.id : insertClientBulk.run(clientName.slice(0, 120), req.user.id, now().toMillis()).lastInsertRowid;
+  }
+  if (clientId && !clientExists.get(clientId)) return res.status(400).json({ error: 'Unknown client' });
+  if (!clientId) return res.status(400).json({ error: 'Pick or name a client' });
+
+  const defaultAssignee = Number(req.body.default_assignee_id);
+  if (!defaultAssignee || !activeUserExists.get(defaultAssignee)) return res.status(400).json({ error: 'A valid default assignee is required' });
+
+  const items = (Array.isArray(req.body.items) ? req.body.items : []).slice(0, 500);
+  if (!items.length) return res.status(400).json({ error: 'No tasks to import' });
+
+  const users = activeUsersForMatch.all();
+  const matchOwner = (name) => {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return defaultAssignee;
+    const u = users.find((x) => x.name.toLowerCase() === n)
+      || users.find((x) => x.name.toLowerCase().split(' ')[0] === n || x.name.toLowerCase().startsWith(n));
+    return u ? u.id : defaultAssignee;
+  };
+  const today = now().toFormat('yyyy-LL-dd');
+  let schedules = 0; let tasks = 0; const skipped = [];
+
+  const run = db.transaction(() => {
+    for (const it of items) {
+      const title = String(it.title || '').trim().slice(0, 200);
+      if (!title) continue;
+      const freq = String(it.frequency || '').trim().toUpperCase();
+      const priority = PRI.includes(String(it.priority || '').toUpperCase()) ? String(it.priority).toUpperCase() : 'MEDIUM';
+      const assignee = matchOwner(it.owner);
+      const baseDesc = String(it.description || it.details || '').slice(0, 2000);
+      if (RECURRING_FREQ.includes(freq)) {
+        insertRecurringBulk.run({ title, description: baseDesc, client_id: clientId, assignee_id: assignee, priority, frequency: freq, next_due: today, created_by: req.user.id, ts: now().toMillis() });
+        schedules += 1;
+      } else {
+        // Daily / As-needed / blank -> one-time task; keep the cadence label in the description.
+        const label = freq && freq !== 'ONE-TIME' ? `[${cap(freq.toLowerCase())}] ` : '';
+        insertTask.run({ title, description: (label + baseDesc).slice(0, 2000), assignee_id: assignee, assigned_by: req.user.id, priority, due_date: '', client_id: clientId, ts: now().toMillis() });
+        tasks += 1;
+      }
+    }
+  });
+  run();
+  if (schedules) { try { generateDueTasks(); } catch (_e) { /* first instances will still generate on the next scheduler run */ } }
+  res.json({ ok: true, client_id: clientId, schedulesCreated: schedules, tasksCreated: tasks, skipped });
+});
 
 // ADMIN: persist a manual ordering (drag-and-drop within a client group).
 // Body: { ids: [taskId, ...] } in the desired display order.
