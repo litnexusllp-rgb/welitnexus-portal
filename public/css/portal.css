@@ -327,19 +327,18 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .ttable thead th:last-child { border-top-right-radius: var(--radius); }
 .ttable tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius); }
 .ttable tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius); }
-.ttable th:nth-child(1), .ttable td:nth-child(1) { width: 34%; }
-.ttable th:nth-child(2), .ttable td:nth-child(2) { width: 19%; }
-.ttable th:nth-child(3), .ttable td:nth-child(3) { width: 11%; }
-.ttable th:nth-child(4), .ttable td:nth-child(4) { width: 13%; }
-.ttable th:nth-child(5), .ttable td:nth-child(5) { width: 15%; }
-.ttable th:nth-child(6), .ttable td:nth-child(6) { width: 8%; }
-.ttable td:first-child { white-space: normal; overflow-wrap: anywhere; }
+/* Column widths by CLASS (not position) so the optional leading checkbox
+   column on the admin board doesn't shift everything. The Task column takes
+   the remaining width and wraps long titles; the others are fixed and clip. */
+.ttable .c-check { width: 58px; }
+.ttable .c-task { width: auto; white-space: normal; overflow-wrap: anywhere; }
+.ttable .c-assignee { width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.ttable .c-client { width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.ttable .c-pri { width: 96px; }
+.ttable .c-due { width: 118px; overflow: hidden; text-overflow: ellipsis; }
+.ttable .c-status { width: 126px; }
+.ttable .c-act { width: 58px; }
 .ttable .assignee-sel { width: 100%; max-width: 100%; }
-/* Keep the middle columns from spilling into each other on narrow screens
-   (Status + actions columns are left alone so their dropdowns stay visible). */
-.ttable th:nth-child(2), .ttable td:nth-child(2),
-.ttable th:nth-child(3), .ttable td:nth-child(3),
-.ttable th:nth-child(4), .ttable td:nth-child(4) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Inline assignee select in a row */
 .assignee-sel { padding: 5px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; font-size: 0.85rem; font-family: var(--font); color: var(--ink); max-width: 140px; }

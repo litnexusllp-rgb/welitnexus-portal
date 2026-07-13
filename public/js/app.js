@@ -1131,12 +1131,12 @@
       const activeHtml = order.map((g) => `
         <div class="tgroup active-group ${collapsedGroups.has(g) ? 'collapsed' : ''}">
           <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g)}</h2><span class="cnt">(${groups[g].length})</span></div>
-          <table class="ttable"><thead><tr>${admin ? '<th style="width:52px;"></th>' : ''}<th>Task</th><th>Assignee</th><th>Priority</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody data-group="${esc(g)}">
+          <table class="ttable"><thead><tr>${admin ? '<th class="c-check"></th>' : ''}<th class="c-task">Task</th><th class="c-assignee">Assignee</th><th class="c-pri">Priority</th><th class="c-due">Due</th><th class="c-status">Status</th><th class="c-act"></th></tr></thead><tbody data-group="${esc(g)}">
           ${groups[g].map((t) => `<tr data-task-row="${t.id}">
-            ${admin ? `<td style="white-space:nowrap;"><span class="drag-h" data-drag="${t.id}" title="Drag to reorder">⠿</span> <input type="checkbox" class="task-check" data-sel="${t.id}" ${selectedTasks.has(t.id) ? 'checked' : ''}></td>` : ''}
-            <td><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
-            <td>${admin ? assigneeInlineSelect(t) : esc(t.assignee_name)}</td><td>${badge(t.priority)}</td><td>${dueCell(t)}</td><td>${statusPill(t)}</td>
-            <td style="text-align:right;">${admin || t.assignee_id === ME.id ? `<details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
+            ${admin ? `<td class="c-check" style="white-space:nowrap;"><span class="drag-h" data-drag="${t.id}" title="Drag to reorder">⠿</span> <input type="checkbox" class="task-check" data-sel="${t.id}" ${selectedTasks.has(t.id) ? 'checked' : ''}></td>` : ''}
+            <td class="c-task"><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
+            <td class="c-assignee">${admin ? assigneeInlineSelect(t) : esc(t.assignee_name)}</td><td class="c-pri">${badge(t.priority)}</td><td class="c-due">${dueCell(t)}</td><td class="c-status">${statusPill(t)}</td>
+            <td class="c-act" style="text-align:right;">${admin || t.assignee_id === ME.id ? `<details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
               <button data-checklist-task="${t.id}">✓ Checklist</button>
               ${admin ? `<button data-edit-task="${t.id}">✎ Edit</button><button class="danger" data-del-task="${t.id}">🗑 Delete</button>` : ''}
             </div></details>` : ''}</td></tr>`).join('')}
@@ -1146,13 +1146,13 @@
       const archivedHtml = archived.length ? `
         <div class="tgroup archived-group ${archivedCollapsed ? 'collapsed' : ''}">
           <div class="tgroup-head" id="archivedHead"><span class="caret">▾</span><h2>📦 Archived — done</h2><span class="cnt">(${archived.length})</span></div>
-          <table class="ttable"><thead><tr><th>Task</th><th>Client</th><th>Assignee</th><th>Completed</th><th></th></tr></thead><tbody>
+          <table class="ttable"><thead><tr><th class="c-task">Task</th><th class="c-client">Client</th><th class="c-assignee">Assignee</th><th class="c-due">Completed</th><th class="c-act"></th></tr></thead><tbody>
           ${archived.map((t) => `<tr>
-            <td><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
-            <td>${t.client_name ? esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name) : '<span class="muted-empty">—</span>'}</td>
-            <td>${esc(t.assignee_name)}</td>
-            <td>${new Date(t.updated_ts).toLocaleDateString()}</td>
-            <td style="text-align:right;white-space:nowrap;">${admin || t.assignee_id === ME.id ? `<button class="btn btn-ghost btn-sm" data-reopen="${t.id}">↩ Reopen</button>` : ''}${admin ? ` <button class="btn btn-danger btn-sm" data-del-task="${t.id}" title="Delete permanently">🗑</button>` : ''}</td>
+            <td class="c-task"><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
+            <td class="c-client">${t.client_name ? esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name) : '<span class="muted-empty">—</span>'}</td>
+            <td class="c-assignee">${esc(t.assignee_name)}</td>
+            <td class="c-due">${new Date(t.updated_ts).toLocaleDateString()}</td>
+            <td class="c-act" style="text-align:right;white-space:nowrap;">${admin || t.assignee_id === ME.id ? `<button class="btn btn-ghost btn-sm" data-reopen="${t.id}">↩ Reopen</button>` : ''}${admin ? ` <button class="btn btn-danger btn-sm" data-del-task="${t.id}" title="Delete permanently">🗑</button>` : ''}</td>
           </tr>`).join('')}
           </tbody></table></div>` : '';
       const activeEmptyHtml = activeHtml ? '' : `<div class="empty">${filtered ? 'No active tasks match these filters.' : 'No active tasks — all clear. 🎉'}</div>`;
