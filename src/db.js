@@ -264,6 +264,7 @@ for (const stmt of [
   `ALTER TABLE clients ADD COLUMN email TEXT DEFAULT ''`,
   `ALTER TABLE tasks ADD COLUMN sort_order INTEGER`,
   `ALTER TABLE users ADD COLUMN shift_start TEXT DEFAULT ''`, // HH:mm expected clock-in (per employee); blank = firm default
+  `ALTER TABLE users ADD COLUMN join_date TEXT DEFAULT ''`, // yyyy-mm-dd actual date of joining (for the seniority directory)
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

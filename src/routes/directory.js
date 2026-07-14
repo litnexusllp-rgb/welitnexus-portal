@@ -7,22 +7,24 @@ const { now } = require('../time');
 
 const router = express.Router();
 
-const PUBLIC_COLS = `id, name, email, emp_code, role, department, title, phone, shift_start, active`;
+const PUBLIC_COLS = `id, name, email, emp_code, role, department, title, phone, shift_start, join_date, created_ts, active`;
 const listAll = db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE active = 1 ORDER BY name`);
 const listAllIncInactive = db.prepare(`SELECT ${PUBLIC_COLS}, leave_balance FROM users ORDER BY active DESC, name`);
 const getOne = db.prepare(`SELECT ${PUBLIC_COLS}, leave_balance FROM users WHERE id = ?`);
 const findByEmail = db.prepare(`SELECT id FROM users WHERE email = ?`);
 const findByCode = db.prepare(`SELECT id FROM users WHERE emp_code = ? AND emp_code != ''`);
 const insertUser = db.prepare(
-  `INSERT INTO users (name, email, password_hash, emp_code, role, department, title, phone, shift_start, leave_balance, active, created_ts)
-   VALUES (@name, @email, @password_hash, @emp_code, @role, @department, @title, @phone, @shift_start, @leave_balance, 1, @created_ts)`
+  `INSERT INTO users (name, email, password_hash, emp_code, role, department, title, phone, shift_start, join_date, leave_balance, active, created_ts)
+   VALUES (@name, @email, @password_hash, @emp_code, @role, @department, @title, @phone, @shift_start, @join_date, @leave_balance, 1, @created_ts)`
 );
 const updateUser = db.prepare(
   `UPDATE users SET name=@name, email=@email, emp_code=@emp_code, role=@role, department=@department,
-   title=@title, phone=@phone, shift_start=@shift_start, leave_balance=@leave_balance WHERE id=@id`
+   title=@title, phone=@phone, shift_start=@shift_start, join_date=@join_date, leave_balance=@leave_balance WHERE id=@id`
 );
 // Accept "HH:mm" (24h) or empty; anything else is stored as blank (firm default).
 const cleanShift = (v) => (/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(v || '')) ? String(v).padStart(5, '0') : '');
+// Accept "yyyy-mm-dd" or empty.
+const cleanDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
 const setActive = db.prepare(`UPDATE users SET active = ? WHERE id = ?`);
 const setPassword = db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`);
 // Count active admins OTHER than the given user — used to prevent locking the
@@ -57,6 +59,7 @@ router.post('/', requireAdmin, (req, res) => {
     title: String(req.body.title || ''),
     phone: String(req.body.phone || ''),
     shift_start: cleanShift(req.body.shift_start),
+    join_date: cleanDate(req.body.join_date),
     leave_balance: Number(req.body.leave_balance) >= 0 ? Number(req.body.leave_balance) : 18,
     created_ts: now().toMillis(),
   });
@@ -94,6 +97,7 @@ router.put('/:id', requireAdmin, (req, res) => {
     title: String(req.body.title ?? existing.title),
     phone: String(req.body.phone ?? existing.phone),
     shift_start: cleanShift(req.body.shift_start ?? existing.shift_start),
+    join_date: cleanDate(req.body.join_date ?? existing.join_date),
     leave_balance: Number(req.body.leave_balance ?? existing.leave_balance),
   });
   res.json({ user: getOne.get(existing.id) });

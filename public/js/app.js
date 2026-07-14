@@ -2227,16 +2227,50 @@
   }
 
   // ---------- Directory ----------
+  // The date a person joined: their set join_date, else the record-creation
+  // date as an approximation (flagged with ≈).
+  function joinInfo(u) {
+    if (u.join_date && /^\d{4}-\d{2}-\d{2}$/.test(u.join_date)) return { date: new Date(u.join_date + 'T00:00:00'), approx: false };
+    return { date: new Date(u.created_ts || Date.now()), approx: true };
+  }
+  // "3 yr 2 mo", "5 mo", or "new" for the current month.
+  function tenure(from) {
+    const now = new Date();
+    let months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth());
+    if (now.getDate() < from.getDate()) months -= 1;
+    if (months < 1) return 'joined this month';
+    const y = Math.floor(months / 12), m = months % 12;
+    return [y ? `${y} yr` : '', m ? `${m} mo` : ''].filter(Boolean).join(' ');
+  }
+
   VIEWS.directory = async () => {
-    setMain('Employee Directory', 'Everyone at LIT Nexus.', `<div class="people-grid" id="people"></div>`);
+    setMain('Employee Directory', 'The team, oldest to newest by joining date.', `<div id="people"></div>`);
     try {
       const { users } = await api.get('/users');
-      $('#people').innerHTML = users.map((u) => `<div class="person">
-        <div class="avatar">${esc(initials(u.name))}</div>
-        <div><div class="nm">${esc(u.name)}${u.role === 'ADMIN' ? ' <span class="badge b-company" style="font-size:.66rem">Admin</span>' : ''}</div>
-          <div class="tt">${esc(u.title || '—')}${u.department ? ' · ' + esc(u.department) : ''}</div>
-          ${u.emp_code ? `<div class="tt" style="font-size:.78rem;">Code: <strong>${esc(u.emp_code)}</strong></div>` : ''}
-          <div class="ct">${esc(u.email)}</div>${u.phone ? `<div class="ct">${esc(u.phone)}</div>` : ''}</div></div>`).join('');
+      const withJoin = users.map((u) => ({ ...u, _join: joinInfo(u) }))
+        .sort((a, b) => a._join.date - b._join.date); // most senior first
+      // Group by joining year.
+      const byYear = {};
+      withJoin.forEach((u) => { const y = u._join.date.getFullYear(); (byYear[y] = byYear[y] || []).push(u); });
+      const years = Object.keys(byYear).sort((a, b) => a - b);
+      const fmtJoin = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+      const el = $('#people');
+      el.innerHTML = users.length ? `<div class="tree">${years.map((y) => `
+        <div class="tree-year">${y} <span class="tree-year-cnt">${byYear[y].length}</span></div>
+        ${byYear[y].map((u) => `<div class="tree-emp">
+          <div class="avatar">${esc(initials(u.name))}</div>
+          <div class="tree-emp-main">
+            <div class="nm">${esc(u.name)}${u.role === 'ADMIN' ? ' <span class="badge b-company" style="font-size:.64rem">Admin</span>' : ''}</div>
+            <div class="tt">${esc(u.title || '—')}${u.department ? ' · ' + esc(u.department) : ''}</div>
+            <div class="ct">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}${u.emp_code ? ' · Code ' + esc(u.emp_code) : ''}</div>
+          </div>
+          <div class="tree-emp-join">
+            <div class="join-date">${u._join.approx ? '≈ ' : ''}${fmtJoin(u._join.date)}</div>
+            <div class="join-tenure">${tenure(u._join.date)}</div>
+          </div>
+        </div>`).join('')}`).join('')}</div>
+        <p class="page-sub" style="margin-top:14px;">Ordered by joining date, most senior first. “≈” means the joining date isn’t set yet, so the date they were added to the portal is shown — set it on the employee’s profile in Admin.</p>`
+        : `<div class="empty">No employees yet.</div>`;
     } catch (e) { toast(e.message, true); }
   };
 
@@ -2362,12 +2396,14 @@
         <div class="field"><label>Title</label><input id="eTitle" value="${esc(u?.title || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Phone</label><input id="ePhone" value="${esc(u?.phone || '')}"></div>
         <div class="field"><label>Role</label><select id="eRole"><option value="EMPLOYEE" ${u?.role !== 'ADMIN' ? 'selected' : ''}>Employee</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Admin</option></select></div></div>
+      <div class="form-row"><div class="field"><label>Date of joining</label><input type="date" id="eJoin" value="${esc(u?.join_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Used for the seniority directory.</div></div>
+        <div class="field"></div></div>
       <div class="form-row"><div class="field"><label>Leave balance</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 18}"></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }
