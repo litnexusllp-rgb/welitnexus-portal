@@ -218,6 +218,7 @@
       $('#dashCards').innerHTML = `
         ${statCard('Today', `${badge(status.state)}`, 'value small')}
         ${statCard('Worked today', fmtMins(status.workedMinutes), 'value small')}
+        ${statCard('Break today', fmtMins(status.breakMinutes), 'value small')}
         ${statCard('Leave balance', `${mine.balance} days`, 'value small')}
         ${statCard('Open tasks', openTasks, 'value')}
         ${statCard('Pending leave requests', pending, 'value')}`;
@@ -269,14 +270,14 @@
         <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
           <div class="section" style="margin-bottom:0;">
             <h2>🟢 Currently in (${working.length})${onBreak.length ? '' : ' <span class="ratio-ind">· no one on break</span>'}</h2>
-            ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th></tr></thead><tbody>
-              ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td></tr>`).join('')}
+            ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th><th>Break</th></tr></thead><tbody>
+              ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
             </tbody></table>` : `<div class="empty">No one is clocked in right now.</div>`}
           </div>
           ${onBreak.length ? `<div class="section" style="margin-bottom:0;">
             <h2>☕ On break (${onBreak.length})</h2>
-            <table><thead><tr><th>Name</th><th>Dept</th><th>Worked</th></tr></thead><tbody>
-              ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td>${fmtMins(p.workedMinutes)}</td></tr>`).join('')}
+            <table><thead><tr><th>Name</th><th>Dept</th><th>Total break</th></tr></thead><tbody>
+              ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="color:#9a6b00;">${fmtMins(p.breakMinutes)}</strong></td></tr>`).join('')}
             </tbody></table>
           </div>` : ''}
         </div>
@@ -375,7 +376,7 @@
     card.innerHTML = `
       <span class="state-badge b-${status.state.toLowerCase()}">${labels[status.state] || status.state}</span>
       <div class="now" id="liveClock">--:--:--</div>
-      <div class="meta">Worked today: <strong>${fmtMins(status.workedMinutes)}</strong> · Breaks: ${fmtMins(status.breakMinutes)}</div>
+      <div class="meta">Total break today: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
       <div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
     card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
