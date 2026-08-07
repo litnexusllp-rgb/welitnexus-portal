@@ -2297,7 +2297,7 @@
       else if (r.status === 'WEEKEND') { cls = 'pcal-weekend'; tag = 'Weekend'; }
       else if (r.status === 'HOLIDAY') { cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday'; }
       else if (r.status === 'LEAVE') { cls = 'pcal-leave'; tag = 'Leave'; }
-      else if (r.status === 'HALF') { cls = 'pcal-leave'; tag = 'Half day'; }
+      else if (r.status === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
       else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
@@ -2334,6 +2334,7 @@
         <span><i style="background:#eafaf3;border-color:#b7e6d4;"></i>On time</span>
         <span><i style="background:#fdece9;border-color:#f3c6bf;"></i>Late clock-in</span>
         <span><i style="background:#fdf1d8;border-color:#f0dcae;"></i>Short day</span>
+        <span><i style="background:#eaf6f1;border-color:#b9dcd0;"></i>Half day</span>
         <span><i style="background:#e3eefb;border-color:#c3dbf5;"></i>Leave</span>
         <span><i style="background:#f7e9e7;border-color:#e8c6c1;"></i>Absent</span>
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>

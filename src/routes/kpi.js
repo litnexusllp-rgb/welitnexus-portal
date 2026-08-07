@@ -75,6 +75,12 @@ function buildKpi(req) {
     const k = `${e.user_id}|${e.day}`;
     (byUserDay[k] = byUserDay[k] || []).push(e);
   }
+  // Approved half days are exempt from punctuality — arriving later (or leaving
+  // early) is exactly what was approved, so they count neither for nor against.
+  const halfDays = new Set();
+  for (const l of approvedLeaves.all(end, start)) {
+    if (l.kind === 'HALF') halfDays.add(`${l.user_id}|${l.start_date}`);
+  }
   const attendance = {}; // user_id -> { days, minutes, present, onTime }
   for (const k of Object.keys(byUserDay)) {
     const [uid, day] = k.split('|');
@@ -83,7 +89,7 @@ function buildKpi(req) {
     a.days += 1;
     a.minutes += s.workedMinutes;
     // Punctuality: was the first clock-in by THIS employee's shift start (+ grace)?
-    if (s.firstIn != null) {
+    if (s.firstIn != null && !halfDays.has(k)) {
       a.present += 1;
       const sh = userShift[uid] || { h: SHIFT_START_HOUR, m: 0 };
       const cutoff = DateTime.fromISO(day, { zone: ZONE })

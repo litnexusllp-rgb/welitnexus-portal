@@ -54,8 +54,10 @@ function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverrid
   const weekday = DateTime.fromISO(day, { zone: ZONE }).weekday; // 1=Mon..7=Sun
   const clockedIn = summary && summary.firstIn != null; // showed up = clocked in at all
   if (isFuture) return 'FUTURE';
-  if (clockedIn) return 'PRESENT';         // presence counts even on a holiday/weekend
+  // A half day is worked AND partly off, so it must win over plain PRESENT —
+  // otherwise clocking in (which they always do) would hide it.
   if (leaveKind === 'HALF') return 'HALF';
+  if (clockedIn) return 'PRESENT';         // presence counts even on a holiday/weekend
   if (leaveKind === 'FULL') return 'LEAVE';
   if (isHoliday) return 'HOLIDAY';
   if (weekday >= 6 && !isWorkingOverride) return 'WEEKEND'; // a marked working weekend (1st Sat) falls through to ABSENT
@@ -97,9 +99,10 @@ function buildAttendanceReport(user, req) {
     else if (status === 'ABSENT') totals.absent += 1;
     else if (status === 'HOLIDAY') totals.holiday += 1;
     else if (status === 'WEEKEND') totals.weekend += 1;
-    // Punctuality / short-day flags for the calendar view.
+    // Punctuality / short-day flags for the calendar view. An approved half day
+    // is exempt — coming in later (or leaving early) is the point of it.
     let late = false; let minutesLate = 0;
-    if (s && s.firstIn != null) {
+    if (s && s.firstIn != null && status !== 'HALF') {
       const cutoff = DateTime.fromISO(day, { zone: ZONE })
         .set({ hour: shift.h, minute: shift.m, second: 0, millisecond: 0 })
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();

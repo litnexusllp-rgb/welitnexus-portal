@@ -167,6 +167,10 @@ tbody tr:hover { background: #eef5fb; }
 .pcal-short .tag, .pcal-short .mins { color: #9a6b00; }
 .pcal-leave   { background: #e3eefb; border-color: #c3dbf5; }
 .pcal-leave .tag { color: var(--info); }
+/* Half day — worked part of the day, so it reads between "present" and "leave" */
+.pcal-half    { background: #eaf6f1; border-color: #b9dcd0; border-left: 4px solid var(--info); }
+.pcal-half .tag { color: var(--info); }
+.pcal-half .mins { color: var(--teal-dark); }
 .pcal-absent  { background: #f7e9e7; border-color: #e8c6c1; }
 .pcal-absent .tag { color: var(--danger); }
 .pcal-holiday { background: #f1ecfb; border-color: #ddd2f3; }
