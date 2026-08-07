@@ -329,10 +329,10 @@
 
   const PUNCH_LABEL = { IN: 'Clock in', OUT: 'Clock out', BREAK_START: 'Break start', BREAK_END: 'Break end' };
   const REQ_BADGE = { PENDING: 'b-pending', APPROVED: 'b-approved', REJECTED: 'b-high' };
-  function openPunchRequestModal() {
+  function openPunchRequestModal(presetDay) {
     modal(`<h3>Request an attendance correction</h3>
       <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Forgot to clock in/out or punched the wrong time? Send it to an admin to add for you.</p>
-      <div class="form-row"><div class="field"><label>Day</label><input type="date" id="prDay" value="${todayISO()}"></div>
+      <div class="form-row"><div class="field"><label>Day</label><input type="date" id="prDay" value="${esc(presetDay || todayISO())}"></div>
         <div class="field"><label>What to add</label><select id="prType">${Object.entries(PUNCH_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>
       <div class="form-row"><div class="field"><label>Time (24h)</label><input type="time" id="prTime"></div><div class="field"></div></div>
       <div class="form-row one"><div class="field"><label>Reason</label><textarea id="prReason" placeholder="e.g. Forgot to clock out, left at 6:30pm"></textarea></div></div>
@@ -2032,12 +2032,14 @@
   }
 
   // Admin modal to add/edit/delete an employee's punches for one day.
-  async function openAttendanceEditor(userId, day) {
+  // onDone: what to refresh after editing (defaults to the Reports page views,
+  // but the calendar passes its own reloader).
+  async function openAttendanceEditor(userId, day, onDone) {
     modal(`<h3>Fix attendance</h3><div id="fixBody">Loading…</div>`);
-    renderAttendanceEditor(userId, day);
+    renderAttendanceEditor(userId, day, onDone);
   }
 
-  async function renderAttendanceEditor(userId, day) {
+  async function renderAttendanceEditor(userId, day, onDone) {
     let data;
     try { data = await api.get(`/attendance/admin/day?user_id=${userId}&day=${day}`); }
     catch (e) { return toast(e.message, true); }
@@ -2064,20 +2066,20 @@
       const id = b.dataset.esave;
       try {
         await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
-        toast('Saved ✓'); renderAttendanceEditor(userId, day);
+        toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone);
       } catch (e) { toast(e.message, true); }
     }));
     body.querySelectorAll('[data-edel]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day); }
+      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day, onDone); }
       catch (e) { toast(e.message, true); }
     }));
     $('#addPunch').addEventListener('click', async () => {
       const time = $('#newTime').value;
       if (!time) return toast('Pick a time', true);
-      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time }); toast('Added ✓'); renderAttendanceEditor(userId, day); }
+      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone); }
       catch (e) { toast(e.message, true); }
     });
-    $('#fixDone').addEventListener('click', () => { closeModal(); loadEmpReport(); loadRegister(); });
+    $('#fixDone').addEventListener('click', () => { closeModal(); if (onDone) onDone(); else { loadEmpReport(); loadRegister(); } });
   }
 
   function exportEmpCsv() {
@@ -2290,6 +2292,9 @@
     const todayISOv = todayISO();
     const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
+    // Clicking a past/today cell opens the fix editor (admins) or a correction
+    // request (employees) for that exact date — no need to visit Reports.
+    const clickable = (r) => r && r.status !== 'FUTURE';
     const cellFor = (r, dayNum, iso) => {
       if (!r) return `<div class="pcal-cell"><span class="dn">${dayNum}</span></div>`;
       let cls = 'pcal-ok'; let tag = '';
@@ -2302,8 +2307,10 @@
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
       const inTime = r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.late ? `late by ${r.minutesLate} min` : ''].filter(Boolean).join(' · ');
-      return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}" title="${esc(title)}">
+      const can = clickable(r);
+      const action = isAdmin() ? 'click to fix punches' : 'click to request a correction';
+      const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.late ? `late by ${r.minutesLate} min` : '', can ? `— ${action}` : ''].filter(Boolean).join(' · ');
+      return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}${can ? ' pcal-clickable' : ''}" title="${esc(title)}"${can ? ` data-fixday="${iso}" role="button" tabindex="0"` : ''}>
         <span class="dn">${dayNum}</span>
         ${inTime && r.status !== 'WEEKEND' ? `<span class="mins">${inTime}</span>` : ''}
         ${r.workedMinutes ? `<span class="mins">${fmtMins(r.workedMinutes)}</span>` : ''}
@@ -2340,7 +2347,7 @@
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows red. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows red. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Click any day to fix its punches.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -2348,6 +2355,15 @@
     };
     $('#calPrev').addEventListener('click', () => shiftMonth(-1));
     $('#calNext').addEventListener('click', () => shiftMonth(1));
+    // Fix a day straight from the calendar.
+    const openDay = (iso) => {
+      if (isAdmin()) openAttendanceEditor(att.user.id, iso, loadMyPerf);
+      else openPunchRequestModal(iso);
+    };
+    el.querySelectorAll('[data-fixday]').forEach((c) => {
+      c.addEventListener('click', () => openDay(c.dataset.fixday));
+      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDay(c.dataset.fixday); } });
+    });
   }
 
   // The date a person joined: their set join_date, else the record-creation

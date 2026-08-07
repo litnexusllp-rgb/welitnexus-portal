@@ -178,6 +178,10 @@ tbody tr:hover { background: #eef5fb; }
 .pcal-weekend { background: var(--mist); border-color: var(--line); color: #b6c2cf; }
 .pcal-future  { background: #fbfdfe; border-style: dashed; color: #c3ced8; }
 .pcal-today   { box-shadow: 0 0 0 2px var(--teal); }
+/* Days you can act on (fix punches / request a correction) */
+.pcal-clickable { cursor: pointer; transition: box-shadow .12s, transform .08s; }
+.pcal-clickable:hover { box-shadow: 0 0 0 2px var(--navy); transform: translateY(-1px); }
+.pcal-clickable:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .pcal-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; font-size: 0.78rem; color: var(--slate); }
 .pcal-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .pcal-legend i { width: 13px; height: 13px; border-radius: 4px; display: inline-block; border: 1px solid rgba(0,0,0,.06); }
