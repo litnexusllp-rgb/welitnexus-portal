@@ -2228,6 +2228,111 @@
   }
 
   // ---------- Directory ----------
+  // ---------- My performance (own KPIs + attendance calendar) ----------
+  let myPerfMonth = null; // yyyy-mm being viewed
+  VIEWS.myperf = async () => {
+    if (!myPerfMonth) myPerfMonth = thisMonthISO();
+    setMain('My performance', 'Your attendance, punctuality and KPIs — visible only to you and the partners.',
+      `<div class="cards" id="myKpiCards"></div>
+       <div class="pcal" id="myCal" style="margin-top:6px;"><div class="empty">Loading…</div></div>`);
+    await loadMyPerf();
+  };
+
+  async function loadMyPerf() {
+    const start = `${myPerfMonth}-01`;
+    const endDt = new Date(Number(myPerfMonth.slice(0, 4)), Number(myPerfMonth.slice(5, 7)), 0);
+    const end = `${myPerfMonth}-${String(endDt.getDate()).padStart(2, '0')}`;
+    try {
+      const [kpi, att] = await Promise.all([
+        api.get(`/kpi/me?month=${myPerfMonth}`),
+        api.get(`/reports/my-attendance?start=${start}&end=${end}`),
+      ]);
+      const r = kpi.rows[0];
+      const cards = $('#myKpiCards');
+      if (cards) {
+        cards.innerHTML = r ? `
+          ${statCard('Days present', r.daysPresent, 'value')}
+          ${statCard('Hours worked', r.hoursWorked, 'value')}
+          ${statCard('Punctuality', r.punctualPct === null ? '—' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}">${r.punctualPct}%</span>`, 'value')}
+          ${statCard('Late days', r.lateDays, 'value')}
+          ${statCard('Tasks done', r.tasksDone, 'value')}
+          ${statCard('Points', r.points, 'value')}` : `<div class="empty">No KPI data for this month.</div>`;
+      }
+      renderMyCalendar(att);
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // Month grid: each day coloured by what happened — red for a late clock-in,
+  // amber for a short day, plus leave / absent / holiday / weekend.
+  function renderMyCalendar(att) {
+    const el = $('#myCal'); if (!el) return;
+    const byDay = {}; att.rows.forEach((r) => { byDay[r.day] = r; });
+    const [y, m] = myPerfMonth.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const lead = (first.getDay() + 6) % 7; // Monday-first grid
+    const todayISOv = todayISO();
+    const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    const cellFor = (r, dayNum, iso) => {
+      if (!r) return `<div class="pcal-cell"><span class="dn">${dayNum}</span></div>`;
+      let cls = 'pcal-ok'; let tag = '';
+      if (r.status === 'FUTURE') { cls = 'pcal-future'; }
+      else if (r.status === 'WEEKEND') { cls = 'pcal-weekend'; tag = 'Weekend'; }
+      else if (r.status === 'HOLIDAY') { cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday'; }
+      else if (r.status === 'LEAVE') { cls = 'pcal-leave'; tag = 'Leave'; }
+      else if (r.status === 'HALF') { cls = 'pcal-leave'; tag = 'Half day'; }
+      else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }
+      else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
+      else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
+      const inTime = r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.late ? `late by ${r.minutesLate} min` : ''].filter(Boolean).join(' · ');
+      return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}" title="${esc(title)}">
+        <span class="dn">${dayNum}</span>
+        ${inTime && r.status !== 'WEEKEND' ? `<span class="mins">${inTime}</span>` : ''}
+        ${r.workedMinutes ? `<span class="mins">${fmtMins(r.workedMinutes)}</span>` : ''}
+        ${tag ? `<span class="tag">${esc(tag)}</span>` : ''}
+      </div>`;
+    };
+
+    let cells = '';
+    for (let i = 0; i < lead; i++) cells += `<div class="pcal-cell blank"></div>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${myPerfMonth}-${String(d).padStart(2, '0')}`;
+      cells += cellFor(byDay[iso], d, iso);
+    }
+    const t = att.totals;
+    el.innerHTML = `
+      <div class="pcal-head">
+        <h3>${esc(monthLabel)}</h3>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" id="calPrev">← Prev</button>
+          <button class="btn btn-ghost btn-sm" id="calNext">Next →</button>
+        </div>
+      </div>
+      <div class="pcal-grid">
+        ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div class="pcal-dow">${d}</div>`).join('')}
+        ${cells}
+      </div>
+      <div class="pcal-legend">
+        <span><i style="background:#eafaf3;border-color:#b7e6d4;"></i>On time</span>
+        <span><i style="background:#fdece9;border-color:#f3c6bf;"></i>Late clock-in</span>
+        <span><i style="background:#fdf1d8;border-color:#f0dcae;"></i>Short day</span>
+        <span><i style="background:#e3eefb;border-color:#c3dbf5;"></i>Leave</span>
+        <span><i style="background:#f7e9e7;border-color:#e8c6c1;"></i>Absent</span>
+        <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
+        <span><i style="background:var(--mist);"></i>Weekend</span>
+      </div>
+      <p class="page-sub" style="margin-top:12px;">Your shift starts at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows red. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+    const shiftMonth = (delta) => {
+      const d = new Date(y, m - 1 + delta, 1);
+      myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      loadMyPerf();
+    };
+    $('#calPrev').addEventListener('click', () => shiftMonth(-1));
+    $('#calNext').addEventListener('click', () => shiftMonth(1));
+  }
+
   // The date a person joined: their set join_date, else the record-creation
   // date as an approximation (flagged with ≈).
   function joinInfo(u) {

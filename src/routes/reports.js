@@ -8,13 +8,25 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAdmin } = require('../auth');
+const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 
 const router = express.Router();
 
-const getUser = db.prepare(`SELECT id, name, department, title FROM users WHERE id = ?`);
+// Punctuality thresholds (mirror the KPI page): a clock-in counts as late past
+// the employee's own shift start + grace; a present day under FULL_DAY_MIN
+// worked minutes is flagged "short".
+const SHIFT_START_HOUR = Math.min(23, Math.max(0, Number(process.env.SHIFT_START_HOUR ?? 16)));
+const SHIFT_GRACE_MIN = Math.max(0, Number(process.env.SHIFT_GRACE_MIN ?? 15));
+const FULL_DAY_MIN = Math.max(60, Number(process.env.FULL_DAY_MINUTES ?? 480)); // 8h default
+function shiftStartOf(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+  return m ? { h: Number(m[1]), m: Number(m[2]) } : { h: SHIFT_START_HOUR, m: 0 };
+}
+const fmtShift = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
+
+const getUser = db.prepare(`SELECT id, name, department, title, shift_start FROM users WHERE id = ?`);
 const activeUsers = db.prepare(`SELECT id, name, department, title FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`);
 const eventsForUserBetween = db.prepare(
   `SELECT type, ts, day FROM events WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts, id`
@@ -51,15 +63,16 @@ function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverrid
 }
 
 // ---- Per-employee, day-by-day ----
-router.get('/attendance', requireAdmin, (req, res) => {
-  const user = getUser.get(Number(req.query.user_id));
-  if (!user) return res.status(404).json({ error: 'Employee not found' });
+// Build one employee's day-by-day attendance for a range. Shared by the admin
+// report and the employee's own calendar (which passes their own id).
+function buildAttendanceReport(user, req) {
   const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end)) ? String(req.query.end) : attendanceToday();
   const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.start)) ? String(req.query.start)
     : DateTime.fromISO(end, { zone: ZONE }).startOf('month').toFormat('yyyy-LL-dd');
-  if (start > end) return res.status(400).json({ error: 'Start must be before end' });
+  if (start > end) return { error: 'Start must be before end' };
 
   const today = attendanceToday();
+  const shift = shiftStartOf(user.shift_start); // this employee's own expected clock-in
   const byDay = {};
   for (const e of eventsForUserBetween.all(user.id, start, end)) (byDay[e.day] = byDay[e.day] || []).push(e);
   const holidaySet = {};
@@ -84,6 +97,15 @@ router.get('/attendance', requireAdmin, (req, res) => {
     else if (status === 'ABSENT') totals.absent += 1;
     else if (status === 'HOLIDAY') totals.holiday += 1;
     else if (status === 'WEEKEND') totals.weekend += 1;
+    // Punctuality / short-day flags for the calendar view.
+    let late = false; let minutesLate = 0;
+    if (s && s.firstIn != null) {
+      const cutoff = DateTime.fromISO(day, { zone: ZONE })
+        .set({ hour: shift.h, minute: shift.m, second: 0, millisecond: 0 })
+        .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
+      if (s.firstIn > cutoff) { late = true; minutesLate = Math.round((s.firstIn - cutoff) / 60000); }
+    }
+    const short = status === 'PRESENT' && s && day < today && s.workedMinutes > 0 && s.workedMinutes < FULL_DAY_MIN;
     return {
       day,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
@@ -93,9 +115,30 @@ router.get('/attendance', requireAdmin, (req, res) => {
       lastOut: s ? s.lastOut : null,
       workedMinutes: s ? s.workedMinutes : 0,
       breakMinutes: s ? s.breakMinutes : 0,
+      late,
+      minutesLate,
+      short,
     };
   });
-  res.json({ user, start, end, rows, totals });
+  return { user, start, end, rows, totals, shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
+}
+
+// ADMIN: any employee's day-by-day report.
+router.get('/attendance', requireAdmin, (req, res) => {
+  const user = getUser.get(Number(req.query.user_id));
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  const data = buildAttendanceReport(user, req);
+  if (data.error) return res.status(400).json(data);
+  res.json(data);
+});
+
+// ANY USER: their OWN day-by-day attendance (for the personal calendar).
+router.get('/my-attendance', requireAuth, (req, res) => {
+  const user = getUser.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  const data = buildAttendanceReport(user, req);
+  if (data.error) return res.status(400).json(data);
+  res.json(data);
 });
 
 // ---- Whole-team monthly register grid ----

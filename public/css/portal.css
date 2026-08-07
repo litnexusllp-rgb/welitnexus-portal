@@ -147,6 +147,37 @@ tbody tr:hover { background: #eef5fb; }
 .person .tt { font-size: 0.84rem; color: var(--slate); }
 .person .ct { font-size: 0.82rem; color: var(--teal-dark); margin-top: 3px; }
 
+/* ---------- My performance: attendance calendar ---------- */
+.pcal { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+.pcal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.pcal-head h3 { margin: 0; color: var(--navy); font-size: 1.02rem; }
+.pcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.pcal-dow { text-align: center; font-size: 0.72rem; font-weight: 700; color: var(--slate); text-transform: uppercase; letter-spacing: .4px; padding-bottom: 4px; }
+.pcal-cell { min-height: 68px; border: 1px solid var(--line); border-radius: 9px; padding: 6px 7px; font-size: 0.78rem; background: var(--white); }
+.pcal-cell.blank { border: none; background: transparent; }
+.pcal-cell .dn { font-weight: 700; color: var(--ink); font-size: 0.8rem; }
+.pcal-cell .mins { display: block; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.pcal-cell .tag { display: block; margin-top: 2px; font-size: 0.68rem; font-weight: 700; }
+/* day states */
+.pcal-ok      { background: #eafaf3; border-color: #b7e6d4; }
+.pcal-ok .mins { color: var(--teal-dark); }
+.pcal-late    { background: #fdece9; border-color: #f3c6bf; }
+.pcal-late .dn, .pcal-late .tag, .pcal-late .mins { color: var(--danger); }
+.pcal-short   { background: #fdf1d8; border-color: #f0dcae; }
+.pcal-short .tag, .pcal-short .mins { color: #9a6b00; }
+.pcal-leave   { background: #e3eefb; border-color: #c3dbf5; }
+.pcal-leave .tag { color: var(--info); }
+.pcal-absent  { background: #f7e9e7; border-color: #e8c6c1; }
+.pcal-absent .tag { color: var(--danger); }
+.pcal-holiday { background: #f1ecfb; border-color: #ddd2f3; }
+.pcal-holiday .tag { color: #6b46c1; }
+.pcal-weekend { background: var(--mist); border-color: var(--line); color: #b6c2cf; }
+.pcal-future  { background: #fbfdfe; border-style: dashed; color: #c3ced8; }
+.pcal-today   { box-shadow: 0 0 0 2px var(--teal); }
+.pcal-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; font-size: 0.78rem; color: var(--slate); }
+.pcal-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pcal-legend i { width: 13px; height: 13px; border-radius: 4px; display: inline-block; border: 1px solid rgba(0,0,0,.06); }
+
 /* Seniority directory — a timeline tree grouped by joining year */
 .tree { position: relative; padding-left: 30px; max-width: 760px; }
 .tree::before { content: ''; position: absolute; left: 9px; top: 8px; bottom: 8px; width: 2px; background: var(--line); }

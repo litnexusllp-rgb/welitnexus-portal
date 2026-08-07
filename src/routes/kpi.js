@@ -6,7 +6,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAdmin } = require('../auth');
+const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 
@@ -54,7 +54,9 @@ function overlapDays(aStart, aEnd, bStart, bEnd) {
   return Math.round(DateTime.fromISO(e, { zone: ZONE }).diff(DateTime.fromISO(s, { zone: ZONE }), 'days').days) + 1;
 }
 
-router.get('/', requireAdmin, (req, res) => {
+// Build the KPI payload for a month. Shared by the admin worksheet and the
+// employee's own "My performance" view (which filters to just their row).
+function buildKpi(req) {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
@@ -145,7 +147,16 @@ router.get('/', requireAdmin, (req, res) => {
     };
   });
 
-  res.json({ month, start, end, rows, shiftStart: SHIFT_START_HOUR, graceMin: SHIFT_GRACE_MIN });
+  return { month, start, end, rows, shiftStart: SHIFT_START_HOUR, graceMin: SHIFT_GRACE_MIN };
+}
+
+// ADMIN: the whole-team bonus worksheet.
+router.get('/', requireAdmin, (req, res) => res.json(buildKpi(req)));
+
+// ANY USER: only their own KPI row — never anyone else's.
+router.get('/me', requireAuth, (req, res) => {
+  const data = buildKpi(req);
+  res.json({ ...data, rows: data.rows.filter((r) => r.id === req.user.id) });
 });
 
 module.exports = router;
