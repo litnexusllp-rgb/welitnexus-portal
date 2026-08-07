@@ -132,10 +132,13 @@ router.get('/attendance', requireAdmin, (req, res) => {
   res.json(data);
 });
 
-// ANY USER: their OWN day-by-day attendance (for the personal calendar).
+// Day-by-day attendance for the personal calendar. Employees always get their
+// own; admins may pass ?user_id= to review any employee.
 router.get('/my-attendance', requireAuth, (req, res) => {
-  const user = getUser.get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'Not found' });
+  const asked = Number(req.query.user_id);
+  const targetId = (req.user.role === 'ADMIN' && asked) ? asked : req.user.id;
+  const user = getUser.get(targetId);
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
   const data = buildAttendanceReport(user, req);
   if (data.error) return res.status(400).json(data);
   res.json(data);

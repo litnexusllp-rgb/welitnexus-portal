@@ -2230,11 +2230,26 @@
   // ---------- Directory ----------
   // ---------- My performance (own KPIs + attendance calendar) ----------
   let myPerfMonth = null; // yyyy-mm being viewed
+  let myPerfUserId = ''; // admins only: whose performance to show ('' = own)
   VIEWS.myperf = async () => {
     if (!myPerfMonth) myPerfMonth = thisMonthISO();
-    setMain('My performance', 'Your attendance, punctuality and KPIs — visible only to you and the partners.',
-      `<div class="cards" id="myKpiCards"></div>
+    const admin = isAdmin();
+    setMain(admin ? 'Performance' : 'My performance',
+      admin ? 'Attendance, punctuality and KPIs — pick any employee to review their month.'
+        : 'Your attendance, punctuality and KPIs — visible only to you and the partners.',
+      `${admin ? `<div class="toolbar"><div style="display:flex;gap:10px;align-items:center;">
+           <label for="perfUser" style="font-size:.85rem;color:var(--slate);font-weight:600;">Employee</label>
+           <select id="perfUser" class="tf-sel"></select>
+         </div><span></span></div>` : ''}
+       <div class="cards" id="myKpiCards"></div>
        <div class="pcal" id="myCal" style="margin-top:6px;"><div class="empty">Loading…</div></div>`);
+    if (admin) {
+      await loadLookups();
+      $('#perfUser').innerHTML = `<option value="">Me (${esc(ME.name)})</option>`
+        + USERS.filter((u) => u.id !== ME.id).map((u) => `<option value="${u.id}" ${myPerfUserId == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+      $('#perfUser').value = myPerfUserId;
+      $('#perfUser').addEventListener('change', (e) => { myPerfUserId = e.target.value; loadMyPerf(); });
+    }
     await loadMyPerf();
   };
 
@@ -2242,10 +2257,11 @@
     const start = `${myPerfMonth}-01`;
     const endDt = new Date(Number(myPerfMonth.slice(0, 4)), Number(myPerfMonth.slice(5, 7)), 0);
     const end = `${myPerfMonth}-${String(endDt.getDate()).padStart(2, '0')}`;
+    const who = isAdmin() && myPerfUserId ? `&user_id=${myPerfUserId}` : '';
     try {
       const [kpi, att] = await Promise.all([
-        api.get(`/kpi/me?month=${myPerfMonth}`),
-        api.get(`/reports/my-attendance?start=${start}&end=${end}`),
+        api.get(`/kpi/me?month=${myPerfMonth}${who}`),
+        api.get(`/reports/my-attendance?start=${start}&end=${end}${who}`),
       ]);
       const r = kpi.rows[0];
       const cards = $('#myKpiCards');
@@ -2304,7 +2320,7 @@
     const t = att.totals;
     el.innerHTML = `
       <div class="pcal-head">
-        <h3>${esc(monthLabel)}</h3>
+        <h3>${esc(monthLabel)}${isAdmin() && myPerfUserId ? ` — ${esc(att.user.name)}` : ''}</h3>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" id="calPrev">← Prev</button>
           <button class="btn btn-ghost btn-sm" id="calNext">Next →</button>
@@ -2323,7 +2339,7 @@
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">Your shift starts at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows red. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows red. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

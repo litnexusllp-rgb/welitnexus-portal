@@ -153,10 +153,13 @@ function buildKpi(req) {
 // ADMIN: the whole-team bonus worksheet.
 router.get('/', requireAdmin, (req, res) => res.json(buildKpi(req)));
 
-// ANY USER: only their own KPI row — never anyone else's.
+// One person's KPI row. Employees always get their own; admins may pass
+// ?user_id= to review any employee.
 router.get('/me', requireAuth, (req, res) => {
+  const asked = Number(req.query.user_id);
+  const targetId = (req.user.role === 'ADMIN' && asked) ? asked : req.user.id;
   const data = buildKpi(req);
-  res.json({ ...data, rows: data.rows.filter((r) => r.id === req.user.id) });
+  res.json({ ...data, rows: data.rows.filter((r) => r.id === targetId), viewingUserId: targetId });
 });
 
 module.exports = router;
