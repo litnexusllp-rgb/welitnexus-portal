@@ -37,9 +37,9 @@ const dt = (ts) => (ts ? DateTime.fromMillis(ts).setZone(ZONE).toFormat('yyyy-LL
 function buildCsvAttachments() {
   const out = [];
   out.push({ filename: 'employees.csv', content: rowsToCsv(
-    ['Code', 'Name', 'Email', 'Role', 'Department', 'Title', 'Phone', 'Shift start', 'Leave balance', 'Active'],
-    db.prepare(`SELECT emp_code, name, email, role, department, title, phone, shift_start, leave_balance, active FROM users ORDER BY active DESC, name COLLATE NOCASE`).all()
-      .map((u) => [u.emp_code, u.name, u.email, u.role, u.department, u.title, u.phone, u.shift_start, u.leave_balance, u.active ? 'Yes' : 'No'])) });
+    ['Code', 'Name', 'Email', 'Role', 'Department', 'Title', 'Phone', 'Shift start', 'Joined', 'Last working day', 'Leave balance', 'Active'],
+    db.prepare(`SELECT emp_code, name, email, role, department, title, phone, shift_start, join_date, exit_date, leave_balance, active FROM users ORDER BY active DESC, name COLLATE NOCASE`).all()
+      .map((u) => [u.emp_code, u.name, u.email, u.role, u.department, u.title, u.phone, u.shift_start, u.join_date, u.exit_date, u.leave_balance, u.active ? 'Yes' : 'No'])) });
 
   out.push({ filename: 'attendance.csv', content: rowsToCsv(
     ['Employee', 'Type', 'Time', 'Attendance day', 'Device'],

@@ -2434,9 +2434,10 @@
     if (u.join_date && /^\d{4}-\d{2}-\d{2}$/.test(u.join_date)) return { date: new Date(u.join_date + 'T00:00:00'), approx: false };
     return { date: new Date(u.created_ts || Date.now()), approx: true };
   }
-  // "3 yr 2 mo", "5 mo", or "new" for the current month.
-  function tenure(from) {
-    const now = new Date();
+  // "3 yr 2 mo", "5 mo", or "new" for the current month. Counts to the last
+  // working day for anyone who has left, so tenure stops when they do.
+  function tenure(from, until) {
+    const now = until || new Date();
     let months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth());
     if (now.getDate() < from.getDate()) months -= 1;
     if (months < 1) return 'joined this month';
@@ -2467,7 +2468,8 @@
           </div>
           <div class="tree-emp-join">
             <div class="join-date">${u._join.approx ? '≈ ' : ''}${fmtJoin(u._join.date)}</div>
-            <div class="join-tenure">${tenure(u._join.date)}</div>
+            <div class="join-tenure">${tenure(u._join.date, u.exit_date ? new Date(u.exit_date + 'T00:00:00') : null)}</div>
+            ${u.exit_date ? `<div class="join-tenure" style="background:#fdece9;color:var(--danger);margin-top:3px;">${u.exit_date < todayISO() ? 'Left' : 'Leaving'} ${esc(fmtDate(u.exit_date))}</div>` : ''}
           </div>
         </div>`).join('')}`).join('')}</div>
         <p class="page-sub" style="margin-top:14px;">Ordered by joining date, most senior first. “≈” means the joining date isn’t set yet, so the date they were added to the portal is shown — set it on the employee’s profile in Admin.</p>`
@@ -2568,7 +2570,7 @@
       $('#empTable').innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Dept / Title</th><th>Leaves</th><th>Status</th><th></th></tr></thead><tbody>
         ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}">
           <td>${u.emp_code ? `<strong>${esc(u.emp_code)}</strong>` : '—'}</td>
-          <td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${badge(u.role)}</td>
+          <td>${esc(u.name)}${exitTag(u)}</td><td>${esc(u.email)}</td><td>${badge(u.role)}</td>
           <td>${esc(u.department || '—')}${u.title ? ' · ' + esc(u.title) : ''}</td><td>${u.leave_balance}</td>
           <td>${u.active ? badge('approved') : badge('rejected')}</td>
           <td class="row-actions">
@@ -2586,6 +2588,14 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  // "Leaving 30 Sep" while they're still working out notice, "Left 30 Sep" after.
+  function exitTag(u) {
+    if (!u.exit_date) return '';
+    const past = u.exit_date < todayISO();
+    const when = fmtDate(u.exit_date);
+    return ` <span class="badge ${past ? 'b-rejected' : 'b-pending'}" style="font-size:.66rem" title="Last working day ${esc(u.exit_date)}">${past ? 'Left' : 'Leaving'} ${esc(when)}</span>`;
+  }
+
   function openEmployeeModal(u) {
     const editing = !!u;
     modal(`<h3>${editing ? 'Edit employee' : 'Add employee'}</h3>
@@ -2598,13 +2608,13 @@
       <div class="form-row"><div class="field"><label>Phone</label><input id="ePhone" value="${esc(u?.phone || '')}"></div>
         <div class="field"><label>Role</label><select id="eRole"><option value="EMPLOYEE" ${u?.role !== 'ADMIN' ? 'selected' : ''}>Employee</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Admin</option></select></div></div>
       <div class="form-row"><div class="field"><label>Date of joining</label><input type="date" id="eJoin" value="${esc(u?.join_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Used for the seniority directory.</div></div>
-        <div class="field"></div></div>
+        <div class="field"><label>Last working day</label><input type="date" id="eExit" value="${esc(u?.exit_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank if still employed.</div></div></div>
       <div class="form-row"><div class="field"><label>Leave balance</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 18}"></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, exit_date: $('#eExit').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }
