@@ -243,6 +243,20 @@ CREATE TABLE IF NOT EXISTS announcements (
   FOREIGN KEY (created_by) REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_announcements_ts ON announcements(created_ts);
+
+-- "I've done it" ticks for recurring reminders (e.g. the Friday checklist), so
+-- the popup stops for the rest of that day — per user, per day, across devices.
+CREATE TABLE IF NOT EXISTS reminder_acks (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id  INTEGER NOT NULL,
+  kind     TEXT    NOT NULL,          -- FRIDAY
+  day      TEXT    NOT NULL,          -- attendance day, yyyy-LL-dd
+  item     TEXT    NOT NULL DEFAULT '', -- '' = whole checklist, else an item key
+  acked_ts INTEGER NOT NULL,
+  UNIQUE(user_id, kind, day, item),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_reminder_acks_user ON reminder_acks(user_id, day);
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.

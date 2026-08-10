@@ -147,6 +147,15 @@ tbody tr:hover { background: #eef5fb; }
 .person .tt { font-size: 0.84rem; color: var(--slate); }
 .person .ct { font-size: 0.82rem; color: var(--teal-dark); margin-top: 3px; }
 
+/* ---------- Friday checklist popup ---------- */
+.fri-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; background: var(--white); }
+.fri-num { width: 26px; height: 26px; border-radius: 50%; background: var(--navy); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 0.82rem; flex-shrink: 0; }
+.fri-body { flex: 1; min-width: 0; }
+.fri-t { font-weight: 700; color: var(--navy); font-size: 0.92rem; }
+.fri-s { color: var(--slate); font-size: 0.82rem; margin-top: 2px; }
+.fri-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--slate); font-weight: 600; cursor: pointer; flex-shrink: 0; }
+.fri-check input { width: 16px; height: 16px; accent-color: var(--teal); cursor: pointer; }
+
 /* ---------- My performance: attendance calendar ---------- */
 .pcal { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
 .pcal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }

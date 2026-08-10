@@ -76,6 +76,7 @@ app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/slack', require('./routes/slack'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/punch-requests', require('./routes/punchRequests'));
 app.use('/api/analytics', require('./routes/analytics'));

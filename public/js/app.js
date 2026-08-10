@@ -71,6 +71,67 @@
     }
   });
 
+  // ---------- Friday checklist popup ----------
+  // Shows all day on the reminder weekday until the person ticks it off, then
+  // stops for that day (recorded server-side, so it won't reappear elsewhere).
+  let fridayPopupOpen = false;
+  let fridayTimer = null;
+  async function checkFridayReminder() {
+    if (!ME || fridayPopupOpen) return;
+    if ($('#modalBg').classList.contains('show')) return; // don't interrupt another dialog
+    try {
+      const r = await api.get('/reminders/friday');
+      if (r.due) openFridayReminder(r);
+      // Re-check every 15 min so someone who logs in before the shift still
+      // gets it, and so it reappears if they dismissed without ticking.
+      clearInterval(fridayTimer);
+      fridayTimer = setInterval(checkFridayReminder, 15 * 60 * 1000);
+    } catch (_e) { /* not signed in / offline — ignore */ }
+  }
+  function stopFridayReminder() { clearInterval(fridayTimer); fridayTimer = null; }
+
+  function openFridayReminder(r) {
+    fridayPopupOpen = true;
+    const done = r.achievementLoggedThisWeek;
+    modal(`<h3>🗓️ Friday checklist</h3>
+      <p style="color:var(--slate);margin:0 0 16px;font-size:.9rem;line-height:1.55;">Two things before you wrap up the week.</p>
+      <div class="fri-item">
+        <span class="fri-num">1</span>
+        <div class="fri-body">
+          <div class="fri-t">Send the status update to all clients</div>
+          <div class="fri-s">Make sure every client has this week's update.</div>
+        </div>
+        <label class="fri-check"><input type="checkbox" id="friClients"> <span>Done</span></label>
+      </div>
+      <div class="fri-item">
+        <span class="fri-num">2</span>
+        <div class="fri-body">
+          <div class="fri-t">Update your achievements</div>
+          <div class="fri-s">${done ? '<span style="color:var(--teal-dark);font-weight:600;">✓ You already logged one this week</span>' : 'Log what you got done — it feeds your KPIs.'}</div>
+        </div>
+        ${done ? '<label class="fri-check"><input type="checkbox" id="friAch" checked> <span>Done</span></label>'
+    : '<button class="btn btn-ghost btn-sm" id="friLogAch">Log now</button>'}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="friLater">Remind me later</button>
+        <button class="btn btn-primary" id="friDone">Mark done for today</button>
+      </div>`);
+    const close = () => { fridayPopupOpen = false; closeModal(); };
+    $('#friLater').addEventListener('click', close);
+    // "Log now" opens the achievement form; the checklist reopens after.
+    $('#friLogAch')?.addEventListener('click', () => {
+      fridayPopupOpen = false; closeModal();
+      openAchievementModal();
+    });
+    $('#friDone').addEventListener('click', async () => {
+      try {
+        await api.post('/reminders/friday/ack');
+        close(); stopFridayReminder();
+        toast('Friday checklist done ✓ — see you next week');
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
   // ---------- Notifications (bell) ----------
   let notifTimer = null;
   // Relative "time ago" for notification timestamps.
@@ -144,6 +205,7 @@
     $('#meRole').textContent = `${ME.title || ME.role} · ${ME.department || '—'}`;
     startNotifications();
     navigate('dashboard');
+    checkFridayReminder();
   }
 
   $('#loginForm').addEventListener('submit', async (e) => {
@@ -157,7 +219,7 @@
 
   $('#logoutBtn').addEventListener('click', async () => {
     try { await api.post('/auth/logout'); } catch (_e) {}
-    ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); showLogin();
+    ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
   });
 
   $('#changePwBtn').addEventListener('click', openChangePassword);
