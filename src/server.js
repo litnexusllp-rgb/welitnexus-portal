@@ -10,7 +10,6 @@ const { db } = require('./db');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
 const { startRecurringScheduler } = require('./recurring');
-const { startSlackScheduler } = require('./slack');
 const { startAbsenceScheduler } = require('./autoAbsence');
 const { startBackupScheduler } = require('./backupMailer');
 
@@ -74,7 +73,6 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/workingdays', require('./routes/workingdays'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/backup', require('./routes/backup'));
-app.use('/api/slack', require('./routes/slack'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/announcements', require('./routes/announcements'));
@@ -112,7 +110,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`WeLitNexus portal running on http://localhost:${PORT}`);
   startRecurringScheduler(); // generate recurring tasks on boot + every 6h
-  startSlackScheduler();     // daily attendance summary to Slack (if configured)
   startAbsenceScheduler();   // daily: flag no-shows as pending leave for approval
   startBackupScheduler();    // weekly + monthly data backup by email (if SMTP set)
 });
