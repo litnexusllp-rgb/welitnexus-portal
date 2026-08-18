@@ -108,7 +108,10 @@ function buildAttendanceReport(user, req) {
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
       if (s.firstIn > cutoff) { late = true; minutesLate = Math.round((s.firstIn - cutoff) / 60000); }
     }
-    const short = status === 'PRESENT' && s && day < today && s.workedMinutes > 0 && s.workedMinutes < FULL_DAY_MIN;
+    // Forgot to clock out: a finished day that still ends IN or on BREAK. The
+    // recorded hours are incomplete, so flag that rather than calling it short.
+    const noClockOut = !!(s && s.firstIn != null && day < today && s.state !== 'OUT');
+    const short = !noClockOut && status === 'PRESENT' && s && day < today && s.workedMinutes > 0 && s.workedMinutes < FULL_DAY_MIN;
     return {
       day,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
@@ -121,6 +124,7 @@ function buildAttendanceReport(user, req) {
       late,
       minutesLate,
       short,
+      noClockOut,
     };
   });
   return { user, start, end, rows, totals, shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
@@ -145,6 +149,36 @@ router.get('/my-attendance', requireAuth, (req, res) => {
   const data = buildAttendanceReport(user, req);
   if (data.error) return res.status(400).json(data);
   res.json(data);
+});
+
+// ---- ADMIN: who forgot to clock out recently (team-wide) ----
+// A finished attendance day that still ends IN or on BREAK means the clock-out
+// is missing, so that day's hours are understated until it's corrected.
+router.get('/missing-clockouts', requireAdmin, (req, res) => {
+  const days = Math.min(60, Math.max(1, Number(req.query.days) || 7));
+  const today = attendanceToday();
+  const start = DateTime.fromISO(today, { zone: ZONE }).minus({ days }).toFormat('yyyy-LL-dd');
+  const byUserDay = {};
+  for (const e of allEventsBetween.all(start, today)) {
+    const k = `${e.user_id}|${e.day}`;
+    (byUserDay[k] = byUserDay[k] || []).push(e);
+  }
+  const names = {};
+  for (const u of activeUsers.all()) names[u.id] = u.name;
+  const rows = [];
+  for (const k of Object.keys(byUserDay)) {
+    const [uid, day] = k.split('|');
+    if (day >= today) continue;              // today is still in progress
+    if (!names[uid]) continue;               // inactive employee
+    const s = summarize(byUserDay[k], null); // no live tail: past day
+    if (s.firstIn == null || s.state === 'OUT') continue;
+    rows.push({
+      user_id: Number(uid), name: names[uid], day,
+      firstIn: s.firstIn, state: s.state, workedMinutes: s.workedMinutes,
+    });
+  }
+  rows.sort((a, b) => (b.day.localeCompare(a.day)) || a.name.localeCompare(b.name));
+  res.json({ start, end: today, days, rows });
 });
 
 // ---- Whole-team monthly register grid ----

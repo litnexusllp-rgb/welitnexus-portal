@@ -172,6 +172,10 @@ tbody tr:hover { background: #eef5fb; }
 .pcal-ok .mins { color: var(--teal-dark); }
 .pcal-late    { background: #fdece9; border-color: #f3c6bf; }
 .pcal-late .dn, .pcal-late .tag, .pcal-late .mins { color: var(--danger); }
+/* Forgot to clock out — hours are incomplete until it's corrected */
+.pcal-noout   { background: #f1ecfb; border-color: #cdbdf0; border-left: 4px solid #7c5cc4; }
+.pcal-noout .dn, .pcal-noout .tag { color: #6b46c1; }
+.pcal-noout .tag { font-weight: 800; }
 .pcal-short   { background: #fdf1d8; border-color: #f0dcae; }
 .pcal-short .tag, .pcal-short .mins { color: #9a6b00; }
 .pcal-leave   { background: #e3eefb; border-color: #c3dbf5; }

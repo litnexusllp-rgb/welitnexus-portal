@@ -312,8 +312,8 @@
     const host = $('#' + hostId); if (!host) return; // navigated away
     try {
       const reqs = [api.get('/attendance/today')];
-      if (withApprovals) { reqs.push(api.get('/leaves/pending')); reqs.push(api.get('/punch-requests/pending')); }
-      const [today, pend, punchPend] = await Promise.all(reqs);
+      if (withApprovals) { reqs.push(api.get('/leaves/pending')); reqs.push(api.get('/punch-requests/pending')); reqs.push(api.get('/reports/missing-clockouts?days=7')); }
+      const [today, pend, punchPend, missing] = await Promise.all(reqs);
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
@@ -351,6 +351,14 @@
               <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
           </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
         </div>
+        ${withApprovals && missing.rows.length ? `<div class="section">
+          <h2>⚠️ Missing clock-outs (${missing.rows.length})<span class="ratio-ind">· last 7 days — hours are understated until fixed</span></h2>
+          <table><thead><tr><th>Employee</th><th>Day</th><th>Clocked in</th><th>Left as</th><th></th></tr></thead><tbody>
+            ${missing.rows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.day)}</td>
+              <td>${fmtTime(m.firstIn)}</td><td><span class="badge b-pending">${cap(m.state)}</span></td>
+              <td style="text-align:right;"><button class="btn-fix" data-fixmiss="${m.user_id}:${m.day}">Fix</button></td></tr>`).join('')}
+          </tbody></table>
+        </div>` : ''}
         ${withApprovals ? `<div class="section">
           <h2>Pending leave approvals (${pend.leaves.length})</h2>
           ${pend.leaves.length ? leaveApprovalTable(pend.leaves) : `<div class="empty">Nothing waiting for approval. 🎉</div>`}
@@ -359,7 +367,14 @@
           <h2>Attendance correction requests (${punchPend.requests.length})</h2>
           ${punchPend.requests.length ? punchApprovalTable(punchPend.requests) : `<div class="empty">No correction requests. 🎉</div>`}
         </div>` : ''}`;
-      if (withApprovals) { wireLeaveApprovals(); wirePunchApprovals(); }
+      if (withApprovals) {
+        wireLeaveApprovals(); wirePunchApprovals();
+        // Fix a missing clock-out right from the dashboard.
+        host.querySelectorAll('[data-fixmiss]').forEach((b) => b.addEventListener('click', () => {
+          const [uid, day] = b.dataset.fixmiss.split(':');
+          openAttendanceEditor(Number(uid), day, () => renderLiveAttendance(hostId, withApprovals));
+        }));
+      }
       tickDashTimers(); // paint the first tick immediately
     } catch (e) { toast(e.message, true); }
   }
@@ -2366,6 +2381,7 @@
       else if (r.status === 'LEAVE') { cls = 'pcal-leave'; tag = 'Leave'; }
       else if (r.status === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
       else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }
+      else if (r.noClockOut) { cls = 'pcal-noout'; tag = 'No clock-out'; }
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
       const inTime = r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -2402,6 +2418,7 @@
       <div class="pcal-legend">
         <span><i style="background:#eafaf3;border-color:#b7e6d4;"></i>On time</span>
         <span><i style="background:#fdece9;border-color:#f3c6bf;"></i>Late clock-in</span>
+        <span><i style="background:#f1ecfb;border-color:#cdbdf0;"></i>No clock-out</span>
         <span><i style="background:#fdf1d8;border-color:#f0dcae;"></i>Short day</span>
         <span><i style="background:#eaf6f1;border-color:#b9dcd0;"></i>Half day</span>
         <span><i style="background:#e3eefb;border-color:#c3dbf5;"></i>Leave</span>
