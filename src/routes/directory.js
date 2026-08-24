@@ -68,6 +68,28 @@ router.post('/', requireAdmin, (req, res) => {
   res.json({ user: getOne.get(info.lastInsertRowid) });
 });
 
+// Self-service: update your OWN basic personal details.
+// Deliberately narrow — only name, phone and birthday. Everything else
+// (email/login, role, employee code, department, title, shift start, joining
+// and last working day, leave balance, active) stays admin-controlled, because
+// it affects identity, pay, permissions or the punctuality KPI.
+const updateOwnProfile = db.prepare(
+  `UPDATE users SET name = @name, phone = @phone, birthday = @birthday WHERE id = @id`
+);
+router.put('/me', requireAuth, (req, res) => {
+  const me = getOne.get(req.user.id);
+  if (!me) return res.status(404).json({ error: 'Not found' });
+  const name = String(req.body.name ?? me.name).trim();
+  if (!name) return res.status(400).json({ error: 'Name cannot be empty' });
+  updateOwnProfile.run({
+    id: me.id,
+    name: name.slice(0, 120),
+    phone: String(req.body.phone ?? me.phone).slice(0, 40),
+    birthday: cleanDate(req.body.birthday ?? me.birthday),
+  });
+  res.json({ user: getOne.get(me.id) });
+});
+
 // ADMIN: update employee profile.
 router.put('/:id', requireAdmin, (req, res) => {
   const existing = getOne.get(Number(req.params.id));

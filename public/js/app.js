@@ -247,7 +247,39 @@
     ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
   });
 
+  $('#myProfileBtn').addEventListener('click', openMyProfile);
   $('#changePwBtn').addEventListener('click', openChangePassword);
+
+  // Employees can update their own personal details. Work details (employee
+  // code, department, title, shift, dates, leave balance) are shown read-only
+  // so they can see them and know to ask an admin.
+  function openMyProfile() {
+    const ro = (label, value) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.85rem;">
+      <span style="color:var(--slate);">${esc(label)}</span><span style="font-weight:600;">${esc(value || '—')}</span></div>`;
+    modal(`<h3>My profile</h3>
+      <div class="form-row one"><div class="field"><label>Full name</label><input id="myName" value="${esc(ME.name || '')}"></div></div>
+      <div class="form-row"><div class="field"><label>Phone</label><input id="myPhone" value="${esc(ME.phone || '')}" placeholder="e.g. +91 90000 11111"></div>
+        <div class="field"><label>Birthday</label><input type="date" id="myBday" value="${esc(ME.birthday || '')}"><div style="color:var(--slate);font-size:.74rem;margin-top:4px;">Only day &amp; month are shown to the team.</div></div></div>
+      <div style="margin:16px 0 4px;font-size:.8rem;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px;">Work details — ask an admin to change these</div>
+      ${ro('Email (login)', ME.email)}
+      ${ro('Employee code', ME.emp_code)}
+      ${ro('Department', ME.department)}
+      ${ro('Title', ME.title)}
+      ${ro('Shift start', ME.shift_start)}
+      ${ro('Date of joining', ME.join_date)}
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Save</button></div>`);
+    $('#mCancel').addEventListener('click', closeModal);
+    $('#mSave').addEventListener('click', async () => {
+      const name = $('#myName').value.trim();
+      if (!name) return toast('Name cannot be empty', true);
+      try {
+        const r = await api.put('/users/me', { name, phone: $('#myPhone').value, birthday: $('#myBday').value });
+        ME = { ...ME, ...r.user };
+        $('#meName').textContent = ME.name; // reflect a rename in the sidebar
+        closeModal(); toast('Profile updated ✓');
+      } catch (e) { toast(e.message, true); }
+    });
+  }
 
   function openChangePassword() {
     modal(`<h3>Change your password</h3>
