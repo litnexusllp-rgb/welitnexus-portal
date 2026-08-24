@@ -280,6 +280,7 @@ for (const stmt of [
   `ALTER TABLE users ADD COLUMN shift_start TEXT DEFAULT ''`, // HH:mm expected clock-in (per employee); blank = firm default
   `ALTER TABLE users ADD COLUMN join_date TEXT DEFAULT ''`, // yyyy-mm-dd actual date of joining (for the seniority directory)
   `ALTER TABLE users ADD COLUMN exit_date TEXT DEFAULT ''`, // yyyy-mm-dd last working day (blank = still employed)
+  `ALTER TABLE users ADD COLUMN birthday TEXT DEFAULT ''`, // yyyy-mm-dd; only day+month are ever shown
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }

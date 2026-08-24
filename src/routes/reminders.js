@@ -9,8 +9,9 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth } = require('../auth');
+const { requireAuth, requireAdmin } = require('../auth');
 const { now, attendanceToday, DateTime, ZONE } = require('../time');
+const { upcoming, isBirthdayToday } = require('../birthdays');
 
 const router = express.Router();
 
@@ -54,6 +55,37 @@ router.post('/friday/ack', requireAuth, (req, res) => {
   const { day } = reminderDay();
   insertAck.run(req.user.id, 'FRIDAY', day, now().toMillis());
   res.json({ ok: true, day });
+});
+
+// ---- Birthdays ----
+const getUserBirthday = db.prepare(`SELECT name, birthday FROM users WHERE id = ?`);
+const getBdayAck = db.prepare(`SELECT 1 FROM reminder_acks WHERE user_id = ? AND kind = 'BIRTHDAY' AND day = ? AND item = ''`);
+const insertBdayAck = db.prepare(
+  `INSERT OR IGNORE INTO reminder_acks (user_id, kind, day, item, acked_ts) VALUES (?, 'BIRTHDAY', ?, '', ?)`
+);
+
+// Is it my birthday today, and have I already seen the popup?
+router.get('/birthday', requireAuth, (req, res) => {
+  const u = getUserBirthday.get(req.user.id);
+  const today = now().toFormat('yyyy-LL-dd');
+  const mine = !!u && isBirthdayToday(u.birthday);
+  res.json({
+    isBirthday: mine && !getBdayAck.get(req.user.id, today),
+    name: u ? u.name : '',
+    day: today,
+  });
+});
+
+// Dismiss the birthday popup for today.
+router.post('/birthday/ack', requireAuth, (req, res) => {
+  insertBdayAck.run(req.user.id, now().toFormat('yyyy-LL-dd'), now().toMillis());
+  res.json({ ok: true });
+});
+
+// ADMIN: birthdays coming up (default next 30 days) — day and month only.
+router.get('/birthdays/upcoming', requireAdmin, (req, res) => {
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  res.json({ days, rows: upcoming(days) });
 });
 
 module.exports = router;

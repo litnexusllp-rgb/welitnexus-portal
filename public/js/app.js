@@ -71,6 +71,30 @@
     }
   });
 
+  // ---------- Birthday popup ----------
+  // Shown once on the person's birthday; dismissing records it server-side so
+  // it doesn't reappear on another device the same day.
+  async function checkBirthday() {
+    if (!ME) return;
+    try {
+      const r = await api.get('/reminders/birthday');
+      if (!r.isBirthday) return false;
+      const first = esc(String(r.name || '').split(' ')[0] || 'there');
+      modal(`<div class="bday-wrap">
+          <div class="bday-emoji">🎂</div>
+          <h3 style="margin:0 0 6px;">Happy Birthday, ${first}!</h3>
+          <p style="color:var(--slate);margin:0 0 20px;font-size:.95rem;line-height:1.6;">Everyone at LIT Nexus wishes you a brilliant year ahead. Have a great day! 🎉</p>
+          <button class="btn btn-primary" id="bdayThanks">Thank you 🙌</button>
+        </div>`);
+      $('#bdayThanks').addEventListener('click', async () => {
+        try { await api.post('/reminders/birthday/ack'); } catch (_e) {}
+        closeModal();
+        checkFridayReminder(); // let any other popup take its turn
+      });
+      return true;
+    } catch (_e) { return false; }
+  }
+
   // ---------- Friday checklist popup ----------
   // Shows all day on the reminder weekday until the person ticks it off, then
   // stops for that day (recorded server-side, so it won't reappear elsewhere).
@@ -205,7 +229,8 @@
     $('#meRole').textContent = `${ME.title || ME.role} · ${ME.department || '—'}`;
     startNotifications();
     navigate('dashboard');
-    checkFridayReminder();
+    // Birthday first (it's a one-off moment); the Friday checklist follows.
+    checkBirthday().then((shown) => { if (!shown) checkFridayReminder(); });
   }
 
   $('#loginForm').addEventListener('submit', async (e) => {
@@ -2445,6 +2470,17 @@
     });
   }
 
+  // Birthday shown as day + month only — the birth year stays private.
+  // Highlights when it's today.
+  function birthdayLine(u) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(u.birthday || ''));
+    if (!m) return '';
+    const label = new Date(2000, Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const t = new Date();
+    const isToday = (t.getMonth() + 1) === Number(m[2]) && t.getDate() === Number(m[3]);
+    return `<div class="tt" style="font-size:.78rem;${isToday ? 'color:#b8860b;font-weight:700;' : ''}">🎂 ${esc(label)}${isToday ? ' — today!' : ''}</div>`;
+  }
+
   // The date a person joined: their set join_date, else the record-creation
   // date as an approximation (flagged with ≈).
   function joinInfo(u) {
@@ -2482,6 +2518,7 @@
             <div class="nm">${esc(u.name)}${u.role === 'ADMIN' ? ' <span class="badge b-company" style="font-size:.64rem">Admin</span>' : ''}</div>
             <div class="tt">${esc(u.title || '—')}${u.department ? ' · ' + esc(u.department) : ''}</div>
             <div class="ct">${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}${u.emp_code ? ' · Code ' + esc(u.emp_code) : ''}</div>
+            ${birthdayLine(u)}
           </div>
           <div class="tree-emp-join">
             <div class="join-date">${u._join.approx ? '≈ ' : ''}${fmtJoin(u._join.date)}</div>
@@ -2583,12 +2620,14 @@
         <div class="field"><label>Role</label><select id="eRole"><option value="EMPLOYEE" ${u?.role !== 'ADMIN' ? 'selected' : ''}>Employee</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Admin</option></select></div></div>
       <div class="form-row"><div class="field"><label>Date of joining</label><input type="date" id="eJoin" value="${esc(u?.join_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Used for the seniority directory.</div></div>
         <div class="field"><label>Last working day</label><input type="date" id="eExit" value="${esc(u?.exit_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank if still employed.</div></div></div>
+      <div class="form-row"><div class="field"><label>Birthday</label><input type="date" id="eBday" value="${esc(u?.birthday || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only the day and month are shown to the team.</div></div>
+        <div class="field"></div></div>
       <div class="form-row"><div class="field"><label>Leave balance</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 18}"></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, exit_date: $('#eExit').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }
