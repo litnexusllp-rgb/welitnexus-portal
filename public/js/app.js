@@ -892,7 +892,8 @@
   let asanaScope = null; // 'MINE' | 'TEAM' (admins can see the whole team)
   async function renderAsanaTasks() {
     const admin = isAdmin();
-    if (asanaScope === null) asanaScope = 'MINE';
+    // Admins usually aren't assignees, so open on the team view; staff see theirs.
+    if (asanaScope === null) asanaScope = admin ? 'TEAM' : 'MINE';
     if (!admin) asanaScope = 'MINE';
     setMain(admin ? 'Tasks' : 'My tasks',
       admin ? 'Live from Asana — your work, or everything still pending across the team.'
@@ -934,7 +935,20 @@
           return;
         }
         const { tasks } = await api.get('/asana/my-tasks');
-        if (!tasks.length) { el.innerHTML = `<div class="empty">Nothing open in Asana for you. 🎉</div>`; return; }
+        if (!tasks.length) {
+          // Distinguish "you're all clear" from "Asana doesn't know who you are",
+          // which is the usual cause when someone sees an unexpected empty list.
+          let hint = '';
+          if (admin) {
+            try {
+              const t = await api.get('/asana/team-tasks');
+              if (t.totalPending) hint = `<div style="margin-top:8px;font-size:.88rem;">The team has <strong>${t.totalPending}</strong> pending — switch to <strong>Team pending</strong> to see it.</div>`;
+            } catch (_e) { /* ignore */ }
+          }
+          if (!hint) hint = `<div style="margin-top:8px;font-size:.85rem;color:var(--slate);">If you expected tasks here, your Asana account may not be linked — an admin can set your Asana email on your profile.</div>`;
+          el.innerHTML = `<div class="empty">Nothing open in Asana assigned to you. 🎉${hint}</div>`;
+          return;
+        }
         const overdue = tasks.filter((t) => t.overdue).length;
         el.innerHTML = `${overdue ? `<p class="page-sub" style="margin:0 0 10px;"><strong class="due-overdue">${overdue} overdue</strong> of ${tasks.length} open task(s).</p>` : `<p class="page-sub" style="margin:0 0 10px;">${tasks.length} open task(s).</p>`}
           ${taskRows(tasks)}`;
