@@ -889,30 +889,63 @@
   // ---------- Tasks: read-only Asana view ----------
   // Work is created and updated in Asana; the portal just shows each person
   // their own open items so they don't have to keep two systems in sync.
+  let asanaScope = null; // 'MINE' | 'TEAM' (admins can see the whole team)
   async function renderAsanaTasks() {
-    setMain('My tasks', 'Your open work from Asana — add and update tasks in Asana.',
-      `<div class="toolbar"><span></span>
+    const admin = isAdmin();
+    if (asanaScope === null) asanaScope = 'MINE';
+    if (!admin) asanaScope = 'MINE';
+    setMain(admin ? 'Tasks' : 'My tasks',
+      admin ? 'Live from Asana — your work, or everything still pending across the team.'
+        : 'Your open work from Asana — add and update tasks in Asana.',
+      `<div class="toolbar">
+         ${admin ? `<div class="seg" id="asanaSeg">
+             <button data-ascope="MINE" class="${asanaScope === 'MINE' ? 'on' : ''}">My tasks</button>
+             <button data-ascope="TEAM" class="${asanaScope === 'TEAM' ? 'on' : ''}">Team pending</button>
+           </div>` : '<span></span>'}
          <div class="row-actions">
            <button class="btn btn-ghost" id="asanaRefresh">↻ Refresh</button>
            <a class="btn btn-primary" id="asanaOpen" href="https://app.asana.com/" target="_blank" rel="noopener">Open Asana ↗</a>
          </div></div>
-       <div id="asanaTasks"><div class="empty">Loading your tasks…</div></div>`);
+       <div id="asanaTasks"><div class="empty">Loading…</div></div>`);
+
+    const taskRows = (tasks) => `<table class="ttable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
+      ${tasks.map((t) => `<tr>
+        <td class="c-task"><strong>${esc(t.name)}</strong></td>
+        <td class="c-due">${t.due_on ? `<span class="${t.overdue ? 'due-overdue' : ''}">${fmtDate(t.due_on)}</span>` : '<span class="muted-empty">Not set</span>'}</td>
+        <td class="c-act" style="text-align:right;"><a class="btn-fix" href="${esc(t.url)}" target="_blank" rel="noopener">Open ↗</a></td>
+      </tr>`).join('')}
+      </tbody></table>`;
+
     const load = async () => {
       const el = $('#asanaTasks');
+      el.innerHTML = `<div class="empty">Loading…</div>`;
       try {
+        if (asanaScope === 'TEAM') {
+          const d = await api.get('/asana/team-tasks');
+          if (!d.groups.length) { el.innerHTML = `<div class="empty">Nothing pending in Asana. 🎉</div>`; return; }
+          el.innerHTML = `<p class="page-sub" style="margin:0 0 12px;"><strong>${d.totalPending}</strong> pending across ${d.groups.length} ${d.groups.length === 1 ? 'person' : 'people'}${d.totalOverdue ? ` · <strong class="due-overdue">${d.totalOverdue} overdue</strong>` : ''}.</p>
+            ${d.groups.map((g) => `<div class="tgroup active-group">
+              <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g.name)}</h2>
+                <span class="cnt">(${g.total})</span>${g.overdue ? `<span class="ratio-ind due-overdue">· ${g.overdue} overdue</span>` : ''}</div>
+              ${taskRows(g.tasks)}
+            </div>`).join('')}`;
+          // Collapse a person's list by clicking their name.
+          el.querySelectorAll('.tgroup-head').forEach((h) => h.addEventListener('click', () => h.closest('.tgroup').classList.toggle('collapsed')));
+          return;
+        }
         const { tasks } = await api.get('/asana/my-tasks');
         if (!tasks.length) { el.innerHTML = `<div class="empty">Nothing open in Asana for you. 🎉</div>`; return; }
         const overdue = tasks.filter((t) => t.overdue).length;
         el.innerHTML = `${overdue ? `<p class="page-sub" style="margin:0 0 10px;"><strong class="due-overdue">${overdue} overdue</strong> of ${tasks.length} open task(s).</p>` : `<p class="page-sub" style="margin:0 0 10px;">${tasks.length} open task(s).</p>`}
-          <table class="ttable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
-          ${tasks.map((t) => `<tr>
-            <td class="c-task"><strong>${esc(t.name)}</strong></td>
-            <td class="c-due">${t.due_on ? `<span class="${t.overdue ? 'due-overdue' : ''}">${fmtDate(t.due_on)}</span>` : '<span class="muted-empty">Not set</span>'}</td>
-            <td class="c-act" style="text-align:right;"><a class="btn-fix" href="${esc(t.url)}" target="_blank" rel="noopener">Open ↗</a></td>
-          </tr>`).join('')}
-          </tbody></table>`;
+          ${taskRows(tasks)}`;
       } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
     };
+    if (admin) $('#asanaSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-ascope]'); if (!b) return;
+      asanaScope = b.dataset.ascope;
+      $('#asanaSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      load();
+    });
     $('#asanaRefresh').addEventListener('click', load);
     load();
   }

@@ -95,6 +95,50 @@ async function myTasks(userId) {
     }));
 }
 
+// ADMIN: everyone's pending (incomplete) tasks, grouped by person. Asana people
+// who don't match an employee still appear, so nothing is hidden — as does an
+// "Unassigned" group, which is usually what needs attention first.
+async function teamTasks() {
+  const tasks = await allTasks();
+  const users = activeUsers.all();
+  const byEmail = new Map(); const byName = new Map();
+  for (const u of users) {
+    if (u.asana_email) byEmail.set(String(u.asana_email).toLowerCase(), u);
+    if (u.email) byEmail.set(String(u.email).toLowerCase(), u);
+    if (u.name) byName.set(String(u.name).trim().toLowerCase(), u);
+  }
+  const today = new Date().toLocaleDateString('en-CA');
+  const groups = new Map(); // key -> { name, matched, tasks[] }
+  for (const t of tasks) {
+    if (t.completed) continue; // pending only
+    const a = t.assignee;
+    let key; let name; let matched = false;
+    if (!a) { key = '__unassigned'; name = 'Unassigned'; }
+    else {
+      const u = byEmail.get(String(a.email || '').toLowerCase()) || byName.get(String(a.name || '').trim().toLowerCase());
+      if (u) { key = `u${u.id}`; name = u.name; matched = true; }
+      else { key = `x${a.gid}`; name = `${a.name || 'Unknown'} (not linked to an employee)`; }
+    }
+    if (!groups.has(key)) groups.set(key, { key, name, matched, tasks: [] });
+    groups.get(key).tasks.push({
+      gid: t.gid, name: t.name || '(untitled)', due_on: t.due_on || '',
+      url: t.permalink_url || '', overdue: !!(t.due_on && t.due_on < today),
+    });
+  }
+  const out = [...groups.values()].map((g) => {
+    g.tasks.sort((a, b) => (a.due_on ? 0 : 1) - (b.due_on ? 0 : 1) || String(a.due_on).localeCompare(String(b.due_on)));
+    return { ...g, total: g.tasks.length, overdue: g.tasks.filter((t) => t.overdue).length };
+  });
+  // Most overdue first, then most loaded; unassigned/unlinked to the bottom.
+  out.sort((a, b) => (a.key.startsWith('u') ? 0 : 1) - (b.key.startsWith('u') ? 0 : 1)
+    || b.overdue - a.overdue || b.total - a.total || a.name.localeCompare(b.name));
+  return {
+    groups: out,
+    totalPending: out.reduce((n, g) => n + g.total, 0),
+    totalOverdue: out.reduce((n, g) => n + g.overdue, 0),
+  };
+}
+
 // Task numbers for the KPI worksheet, for the month [start, end] (yyyy-mm-dd).
 // Returns { [portalUserId]: { done, onTime, open } }.
 async function kpiTaskStats(start, end) {
@@ -143,4 +187,4 @@ async function diagnose() {
   }
 }
 
-module.exports = { enabled, myTasks, kpiTaskStats, diagnose, allTasks };
+module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks };

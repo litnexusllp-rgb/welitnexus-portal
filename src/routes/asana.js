@@ -5,7 +5,7 @@
 
 const express = require('express');
 const { requireAuth, requireAdmin } = require('../auth');
-const { enabled, myTasks, diagnose } = require('../asana');
+const { enabled, myTasks, teamTasks, diagnose } = require('../asana');
 
 const router = express.Router();
 
@@ -18,6 +18,16 @@ router.get('/my-tasks', requireAuth, async (req, res) => {
   if (!enabled()) return res.json({ enabled: false, tasks: [] });
   try {
     res.json({ enabled: true, tasks: await myTasks(req.user.id) });
+  } catch (e) {
+    res.status(502).json({ error: `Could not reach Asana: ${e.message}` });
+  }
+});
+
+// ADMIN: the whole team's pending tasks, grouped by person.
+router.get('/team-tasks', requireAdmin, async (_req, res) => {
+  if (!enabled()) return res.json({ enabled: false, groups: [], totalPending: 0, totalOverdue: 0 });
+  try {
+    res.json({ enabled: true, ...(await teamTasks()) });
   } catch (e) {
     res.status(502).json({ error: `Could not reach Asana: ${e.message}` });
   }
