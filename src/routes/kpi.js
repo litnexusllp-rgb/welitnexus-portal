@@ -9,6 +9,7 @@ const { db } = require('../db');
 const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
+const asana = require('../asana');
 
 const router = express.Router();
 
@@ -56,7 +57,7 @@ function overlapDays(aStart, aEnd, bStart, bEnd) {
 
 // Build the KPI payload for a month. Shared by the admin worksheet and the
 // employee's own "My performance" view (which filters to just their row).
-function buildKpi(req) {
+async function buildKpi(req) {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
@@ -100,14 +101,31 @@ function buildKpi(req) {
   }
 
   // --- tasks completed in the month ---
+  // Asana is the team's real task system, so read from there when it's
+  // configured; otherwise fall back to the portal's own task table.
   const tasks = {}; // user_id -> { done, onTime }
-  for (const t of doneTasksBetween.all(startMs, endMs)) {
-    const r = (tasks[t.assignee_id] = tasks[t.assignee_id] || { done: 0, onTime: 0 });
-    r.done += 1;
-    if (!t.due_date || dayFromTs(t.updated_ts) <= t.due_date) r.onTime += 1;
-  }
   const openNow = {};
-  for (const r of openTasksNow.all()) openNow[r.assignee_id] = r.c;
+  let taskSource = 'portal';
+  if (asana.enabled()) {
+    try {
+      const stats = await asana.kpiTaskStats(start, end);
+      for (const [uid, s2] of Object.entries(stats)) {
+        tasks[uid] = { done: s2.done, onTime: s2.onTime };
+        openNow[uid] = s2.open;
+      }
+      taskSource = 'asana';
+    } catch (e) {
+      console.error('KPI: Asana unavailable, using portal tasks —', e.message);
+    }
+  }
+  if (taskSource === 'portal') {
+    for (const t of doneTasksBetween.all(startMs, endMs)) {
+      const r = (tasks[t.assignee_id] = tasks[t.assignee_id] || { done: 0, onTime: 0 });
+      r.done += 1;
+      if (!t.due_date || dayFromTs(t.updated_ts) <= t.due_date) r.onTime += 1;
+    }
+    for (const r of openTasksNow.all()) openNow[r.assignee_id] = r.c;
+  }
 
   // --- approved leave days falling inside the month ---
   const leaveDays = {}; // user_id -> days
@@ -153,18 +171,18 @@ function buildKpi(req) {
     };
   });
 
-  return { month, start, end, rows, shiftStart: SHIFT_START_HOUR, graceMin: SHIFT_GRACE_MIN };
+  return { month, start, end, rows, shiftStart: SHIFT_START_HOUR, graceMin: SHIFT_GRACE_MIN, taskSource };
 }
 
 // ADMIN: the whole-team bonus worksheet.
-router.get('/', requireAdmin, (req, res) => res.json(buildKpi(req)));
+router.get('/', requireAdmin, async (req, res) => res.json(await buildKpi(req)));
 
 // One person's KPI row. Employees always get their own; admins may pass
 // ?user_id= to review any employee.
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, async (req, res) => {
   const asked = Number(req.query.user_id);
   const targetId = (req.user.role === 'ADMIN' && asked) ? asked : req.user.id;
-  const data = buildKpi(req);
+  const data = await buildKpi(req);
   res.json({ ...data, rows: data.rows.filter((r) => r.id === targetId), viewingUserId: targetId });
 });
 

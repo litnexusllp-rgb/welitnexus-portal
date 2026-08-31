@@ -886,6 +886,37 @@
   }
   const clientLabel = (t) => t.client_name ? `<span class="badge b-public" style="font-size:.68rem">${esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name)}</span>` : '';
 
+  // ---------- Tasks: read-only Asana view ----------
+  // Work is created and updated in Asana; the portal just shows each person
+  // their own open items so they don't have to keep two systems in sync.
+  async function renderAsanaTasks() {
+    setMain('My tasks', 'Your open work from Asana — add and update tasks in Asana.',
+      `<div class="toolbar"><span></span>
+         <div class="row-actions">
+           <button class="btn btn-ghost" id="asanaRefresh">↻ Refresh</button>
+           <a class="btn btn-primary" id="asanaOpen" href="https://app.asana.com/" target="_blank" rel="noopener">Open Asana ↗</a>
+         </div></div>
+       <div id="asanaTasks"><div class="empty">Loading your tasks…</div></div>`);
+    const load = async () => {
+      const el = $('#asanaTasks');
+      try {
+        const { tasks } = await api.get('/asana/my-tasks');
+        if (!tasks.length) { el.innerHTML = `<div class="empty">Nothing open in Asana for you. 🎉</div>`; return; }
+        const overdue = tasks.filter((t) => t.overdue).length;
+        el.innerHTML = `${overdue ? `<p class="page-sub" style="margin:0 0 10px;"><strong class="due-overdue">${overdue} overdue</strong> of ${tasks.length} open task(s).</p>` : `<p class="page-sub" style="margin:0 0 10px;">${tasks.length} open task(s).</p>`}
+          <table class="ttable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
+          ${tasks.map((t) => `<tr>
+            <td class="c-task"><strong>${esc(t.name)}</strong></td>
+            <td class="c-due">${t.due_on ? `<span class="${t.overdue ? 'due-overdue' : ''}">${fmtDate(t.due_on)}</span>` : '<span class="muted-empty">Not set</span>'}</td>
+            <td class="c-act" style="text-align:right;"><a class="btn-fix" href="${esc(t.url)}" target="_blank" rel="noopener">Open ↗</a></td>
+          </tr>`).join('')}
+          </tbody></table>`;
+      } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    };
+    $('#asanaRefresh').addEventListener('click', load);
+    load();
+  }
+
   // ---------- Tasks ----------
   let taskClientFilter = '';
   let taskSearch = '';
@@ -905,6 +936,13 @@
     document.querySelectorAll('details.rowmenu[open], details.pillmenu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
   });
   VIEWS.tasks = async () => {
+    // Asana is the team's task system. When it's connected, this page is a
+    // read-only view of your Asana work; the old in-portal board only appears
+    // if Asana isn't configured yet.
+    let asanaOn = false;
+    try { asanaOn = (await api.get('/asana/status')).enabled; } catch (_e) {}
+    if (asanaOn) return renderAsanaTasks();
+
     const emp = !isAdmin();
     if (taskScope === null) taskScope = emp ? 'MINE' : 'ALL'; // staff default to their own work
     selectedTasks.clear();
@@ -2579,6 +2617,14 @@
            <p style="margin:12px 0 0;color:var(--slate);font-size:.82rem;">Automated weekly + monthly backups arrive by email once SMTP is configured on the server.</p>
          </div>
        </div>
+       <div class="section" style="margin-top:30px;">
+         <h2 style="color:var(--navy);">Asana (tasks)</h2>
+         <div class="card" style="max-width:640px;">
+           <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Tasks live in Asana. The portal reads them so each person sees their own work, and so “Tasks done / on-time” on the KPI page reflects real Asana activity.</p>
+           <button class="btn btn-primary" id="asanaTestBtn">Test Asana connection</button>
+           <div id="asanaTestResult" style="display:none;margin-top:12px;border-radius:8px;padding:12px;font-size:.88rem;line-height:1.5;"></div>
+         </div>
+       </div>
        `);
     $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
     $('#backupBtn').addEventListener('click', () => {
@@ -2598,6 +2644,28 @@
         } else {
           box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
           box.innerHTML = `⚠️ <strong>Not sent.</strong> ${esc(r.message || r.error || '')}`;
+        }
+      } catch (e) {
+        box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+        box.textContent = e.message;
+      } finally { btn.disabled = false; }
+    });
+    $('#asanaTestBtn').addEventListener('click', async () => {
+      const box = $('#asanaTestResult'); const btn = $('#asanaTestBtn');
+      btn.disabled = true; box.style.display = 'block';
+      box.style.background = 'var(--mist)'; box.style.border = '1px solid var(--line)'; box.style.color = 'var(--slate)';
+      box.textContent = 'Testing…';
+      try {
+        const r = await api.post('/asana/test');
+        if (r.ok) {
+          box.style.background = '#eafaf3'; box.style.border = '1px solid #b7e6d4'; box.style.color = 'var(--teal-dark)';
+          const gaps = (r.unmatched || []).length
+            ? `<div style="margin-top:8px;color:#9a6b00;">⚠️ Not matched to an employee: ${r.unmatched.map((u) => `${esc(u.name)} (${u.count})`).join(', ')}. Set their Asana email on the employee's profile.</div>`
+            : '<div style="margin-top:6px;color:var(--slate);">Everyone in Asana matched an employee.</div>';
+          box.innerHTML = `✅ <strong>Connected.</strong> ${esc(r.message)}${gaps}`;
+        } else {
+          box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+          box.innerHTML = `⚠️ <strong>Not working${r.step ? ` (${esc(r.step)})` : ''}.</strong><br>${esc(r.message || '')}`;
         }
       } catch (e) {
         box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
@@ -2653,13 +2721,13 @@
       <div class="form-row"><div class="field"><label>Date of joining</label><input type="date" id="eJoin" value="${esc(u?.join_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Used for the seniority directory.</div></div>
         <div class="field"><label>Last working day</label><input type="date" id="eExit" value="${esc(u?.exit_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank if still employed.</div></div></div>
       <div class="form-row"><div class="field"><label>Birthday</label><input type="date" id="eBday" value="${esc(u?.birthday || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only the day and month are shown to the team.</div></div>
-        <div class="field"></div></div>
+        <div class="field"><label>Asana email (optional)</label><input id="eAsana" value="${esc(u?.asana_email || '')}" placeholder="if different from their login email"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only needed if Asana doesn't match by name or login email.</div></div></div>
       <div class="form-row"><div class="field"><label>Leave balance</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 18}"></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, asana_email: $('#eAsana').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }

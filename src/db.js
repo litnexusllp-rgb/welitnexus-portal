@@ -281,6 +281,7 @@ for (const stmt of [
   `ALTER TABLE users ADD COLUMN join_date TEXT DEFAULT ''`, // yyyy-mm-dd actual date of joining (for the seniority directory)
   `ALTER TABLE users ADD COLUMN exit_date TEXT DEFAULT ''`, // yyyy-mm-dd last working day (blank = still employed)
   `ALTER TABLE users ADD COLUMN birthday TEXT DEFAULT ''`, // yyyy-mm-dd; only day+month are ever shown
+  `ALTER TABLE users ADD COLUMN asana_email TEXT DEFAULT ''`, // override for matching this person in Asana
 ]) {
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }
