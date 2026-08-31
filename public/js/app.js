@@ -909,7 +909,7 @@
          </div></div>
        <div id="asanaTasks"><div class="empty">Loading…</div></div>`);
 
-    const taskRows = (tasks) => `<table class="ttable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
+    const taskRows = (tasks) => `<table class="atable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
       ${tasks.map((t) => `<tr>
         <td class="c-task"><strong>${esc(t.name)}</strong></td>
         <td class="c-due">${t.due_on ? `<span class="${t.overdue ? 'due-overdue' : ''}">${fmtDate(t.due_on)}</span>` : '<span class="muted-empty">Not set</span>'}</td>

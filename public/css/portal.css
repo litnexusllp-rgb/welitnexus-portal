@@ -339,6 +339,23 @@ tr.kpi-hot:hover td { background: #e9f6f0; }
 table.dense th, table.dense td { padding: 6px 12px; font-size: 0.85rem; }
 table.dense .badge { padding: 2px 8px; font-size: 0.72rem; }
 
+/* Asana task tables — three columns only, so they get their own widths rather
+   than the main board's (whose narrow action column clipped the Open button
+   and pushed the table past the page edge). */
+.atable { table-layout: fixed; width: 100%; }
+.atable .c-task { width: auto; white-space: normal; overflow-wrap: anywhere; }
+.atable .c-due { width: 132px; white-space: nowrap; }
+.atable .c-act { width: 104px; white-space: nowrap; text-align: right; }
+.atable .btn-fix { display: inline-block; white-space: nowrap; }
+@media (max-width: 620px) {
+  .atable .c-due { width: 104px; font-size: 0.8rem; }
+  /* Tighten the action column's padding and the button so "Open ↗" still fits
+     inside the cell on a phone. */
+  .atable .c-act { width: 92px; }
+  .atable td.c-act, .atable th.c-act { padding-left: 4px; padding-right: 8px; }
+  .atable .btn-fix { padding: 5px 9px; font-size: 0.76rem; }
+}
+
 /* Segmented My/All scope toggle */
 .seg { display: inline-flex; background: var(--mist); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
 .seg button { border: none; background: none; padding: 7px 16px; border-radius: 8px; font-size: 0.88rem; font-weight: 600; color: var(--slate); font-family: var(--font); }
