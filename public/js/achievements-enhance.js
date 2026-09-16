@@ -39,14 +39,27 @@
       ${categories.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}
     </select>`;
 
+    const date = document.getElementById('aDate');
+    const title = document.getElementById('aTitle');
+    const desc = document.getElementById('aDesc');
+    if (date) date.required = true;
+    if (title) title.required = true;
+    if (desc) {
+      desc.required = true;
+      const descLabel = desc.closest('.field')?.querySelector('label');
+      if (descLabel) descLabel.textContent = 'Details';
+    }
+
     const save = document.getElementById('mSave');
     if (save) {
       save.addEventListener('click', (event) => {
-        const select = document.getElementById('aCategory');
-        if (select && !select.value) {
+        const required = [date, document.getElementById('aCategory'), title, desc];
+        const missing = required.find((field) => field && !String(field.value || '').trim());
+        if (missing) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          select.reportValidity();
+          missing.reportValidity();
+          missing.focus();
         }
       }, true);
     }
@@ -78,15 +91,15 @@
   }
 
   function enhanceTables() {
-    insertCategoryCells('myAch', mineCache, 0);       // Date, Category, Achievement...
-    insertCategoryCells('reviewAch', reviewCache, 1); // Date, Employee, Category, Achievement...
+    insertCategoryCells('myAch', mineCache, 0);
+    insertCategoryCells('reviewAch', reviewCache, 1);
   }
 
   const originalPost = api.post.bind(api);
   api.post = function (path, body) {
     if (path === '/achievements') {
       const select = document.getElementById('aCategory');
-      body = { ...(body || {}), category: select?.value || 'OTHER' };
+      body = { ...(body || {}), category: select?.value || '' };
     }
     return originalPost(path, body);
   };
