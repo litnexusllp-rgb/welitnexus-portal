@@ -48,14 +48,15 @@ const deleteAch = db.prepare(`DELETE FROM achievements WHERE id = ?`);
 router.post('/', requireAuth, (req, res) => {
   const title = String(req.body.title || '').trim().slice(0, 200);
   const date = String(req.body.date || '');
+  const description = String(req.body.description || '').trim().slice(0, 1000);
   const rawCategory = String(req.body.category || 'OTHER').trim().toUpperCase();
   const category = ACHIEVEMENT_CATEGORIES.has(rawCategory) ? rawCategory : 'OTHER';
-  if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return res.status(400).json({ error: 'Title and a valid date are required' });
+  if (!title || !description || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'Date, achievement and details are all required' });
   }
   const info = insertAch.run(
     req.user.id, date, category, title,
-    String(req.body.description || '').slice(0, 1000),
+    description,
     now().toMillis()
   );
   res.json({ achievement: getAch.get(info.lastInsertRowid) });
