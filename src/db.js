@@ -167,37 +167,6 @@ CREATE TABLE IF NOT EXISTS task_checklist (
 );
 CREATE INDEX IF NOT EXISTS idx_checklist_task ON task_checklist(task_id);
 
--- Client invoices (admin-only). Amounts roll up to income per client.
-CREATE TABLE IF NOT EXISTS invoices (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id    INTEGER NOT NULL,
-  number       TEXT    DEFAULT '',       -- optional invoice number/reference
-  amount       REAL    NOT NULL DEFAULT 0, -- total (sum of line items)
-  invoice_date TEXT    DEFAULT '',        -- yyyy-LL-dd
-  due_date     TEXT    DEFAULT '',
-  currency     TEXT    NOT NULL DEFAULT 'USD',
-  bill_to      TEXT    DEFAULT '',        -- snapshot of the client's billing address
-  status       TEXT    NOT NULL DEFAULT 'UNPAID', -- UNPAID | PAID
-  note         TEXT    DEFAULT '',
-  created_by   INTEGER,
-  created_ts   INTEGER NOT NULL,
-  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
-
--- Line items on an invoice (item, qty, rate; amount = qty * rate).
-CREATE TABLE IF NOT EXISTS invoice_items (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id  INTEGER NOT NULL,
-  item        TEXT    DEFAULT '',
-  description TEXT    DEFAULT '',
-  quantity    REAL    NOT NULL DEFAULT 1,
-  rate        REAL    NOT NULL DEFAULT 0,
-  position    INTEGER NOT NULL DEFAULT 0,
-  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_invoice_items_inv ON invoice_items(invoice_id);
-
 -- In-app notifications: one row per user per event (leave decided, task
 -- assigned, punch-request decided, new announcement, etc.).
 CREATE TABLE IF NOT EXISTS notifications (
@@ -271,9 +240,6 @@ for (const stmt of [
   `ALTER TABLE clients ADD COLUMN created_by INTEGER`,
   `ALTER TABLE clients ADD COLUMN parent_id INTEGER`,
   `ALTER TABLE clients ADD COLUMN billing_address TEXT DEFAULT ''`,
-  `ALTER TABLE invoices ADD COLUMN due_date TEXT DEFAULT ''`,
-  `ALTER TABLE invoices ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'`,
-  `ALTER TABLE invoices ADD COLUMN bill_to TEXT DEFAULT ''`,
   `ALTER TABLE events ADD COLUMN device TEXT DEFAULT ''`,
   `ALTER TABLE clients ADD COLUMN email TEXT DEFAULT ''`,
   `ALTER TABLE tasks ADD COLUMN sort_order INTEGER`,
