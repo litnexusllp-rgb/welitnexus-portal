@@ -74,6 +74,16 @@ then delete the sample employees (Disable).
 
 The whole database is the single file at `DB_PATH`; back it up by copying that file.
 
+### Removed invoicing feature
+
+The portal no longer provides invoice creation, editing, payment status, PDFs,
+income totals, or invoice API endpoints. Client management and recurring tasks
+remain available. Email backups contain five CSVs plus a full database snapshot.
+
+New databases do not create invoice tables. Existing invoice tables and records
+are retained for historical recovery and remain in full database backups; this
+update does not delete financial records. Invoice CSV exports are no longer sent.
+
 ---
 
 ## Project layout

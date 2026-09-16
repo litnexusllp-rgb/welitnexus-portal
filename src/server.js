@@ -72,7 +72,6 @@ app.use('/api/achievements', require('./routes/achievements'));
 app.use('/api/kpi', require('./routes/kpi'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/workingdays', require('./routes/workingdays'));
-app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/reminders', require('./routes/reminders'));

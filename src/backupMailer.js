@@ -2,7 +2,7 @@
 
 // Emails a data backup on a schedule (weekly + monthly). Completely off unless
 // SMTP is configured, so the portal runs unchanged without it. The email carries
-// Excel-openable CSVs (employees, attendance, leaves, tasks, clients, invoices)
+// Excel-openable CSVs (employees, attendance, leaves, tasks, clients)
 // plus the raw .db file for a full-fidelity restore.
 //
 // SMTP env (Gmail app-password friendly):
@@ -66,12 +66,6 @@ function buildCsvAttachments() {
                 FROM clients c LEFT JOIN clients p ON p.id = c.parent_id ORDER BY c.name COLLATE NOCASE`).all()
       .map((c) => [c.name, c.code, c.business_type, c.stage, c.email, c.parent || '', c.active ? 'Yes' : 'No'])) });
 
-  out.push({ filename: 'invoices.csv', content: rowsToCsv(
-    ['Number', 'Client', 'Amount', 'Currency', 'Invoice date', 'Due date', 'Status'],
-    db.prepare(`SELECT i.number, c.name AS client, i.amount, i.currency, i.invoice_date, i.due_date, i.status
-                FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.invoice_date DESC, i.id DESC`).all()
-      .map((i) => [i.number, i.client, i.amount, i.currency, i.invoice_date, i.due_date, i.status])) });
-
   return out;
 }
 
@@ -94,7 +88,7 @@ async function sendBackup(kind = 'Manual', toOverride) {
       from: c.from, to,
       subject: `LIT Nexus portal backup — ${kind} (${stamp})`,
       text: `Attached is your ${kind.toLowerCase()} LIT Nexus data backup for ${stamp}.\n\n`
-        + `CSV files (open in Excel): employees, attendance, leaves, tasks, clients, invoices.\n`
+        + `CSV files (open in Excel): employees, attendance, leaves, tasks, clients.\n`
         + `The .db file is the full database for a complete restore if ever needed.`,
       attachments,
     });

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads a dated backup of the LIT Nexus portal database to a local folder.
 # Schedule this (cron on Mac/Linux, Task Scheduler on Windows via WSL/git-bash)
-# to keep off-cloud copies of all your data — including invoices.
+# to keep off-cloud copies of all your data — including historical records.
 #
 # Setup:
 #   1. In Railway, set a BACKUP_TOKEN variable (a long random string).
