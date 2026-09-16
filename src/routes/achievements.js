@@ -7,9 +7,27 @@ const { now } = require('../time');
 
 const router = express.Router();
 
+const ACHIEVEMENT_CATEGORIES = new Set([
+  'CLIENT_DELIVERY',
+  'QUALITY',
+  'INITIATIVE',
+  'PROCESS_IMPROVEMENT',
+  'CLIENT_APPRECIATION',
+  'TEAM_SUPPORT',
+  'LEARNING',
+  'OTHER',
+]);
+
+// Backward-compatible migration kept next to the feature that uses it. Existing
+// rows become OTHER; no achievement, review status, or points are changed.
+const achievementColumns = db.prepare(`PRAGMA table_info(achievements)`).all();
+if (!achievementColumns.some((c) => c.name === 'category')) {
+  db.exec(`ALTER TABLE achievements ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'`);
+}
+
 const insertAch = db.prepare(
-  `INSERT INTO achievements (user_id, date, title, description, created_ts)
-   VALUES (?, ?, ?, ?, ?)`
+  `INSERT INTO achievements (user_id, date, category, title, description, created_ts)
+   VALUES (?, ?, ?, ?, ?, ?)`
 );
 const getAch = db.prepare(
   `SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id WHERE a.id = ?`
@@ -30,11 +48,13 @@ const deleteAch = db.prepare(`DELETE FROM achievements WHERE id = ?`);
 router.post('/', requireAuth, (req, res) => {
   const title = String(req.body.title || '').trim().slice(0, 200);
   const date = String(req.body.date || '');
+  const rawCategory = String(req.body.category || 'OTHER').trim().toUpperCase();
+  const category = ACHIEVEMENT_CATEGORIES.has(rawCategory) ? rawCategory : 'OTHER';
   if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res.status(400).json({ error: 'Title and a valid date are required' });
   }
   const info = insertAch.run(
-    req.user.id, date, title,
+    req.user.id, date, category, title,
     String(req.body.description || '').slice(0, 1000),
     now().toMillis()
   );
