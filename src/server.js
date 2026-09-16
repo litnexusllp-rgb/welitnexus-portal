@@ -78,7 +78,6 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/punch-requests', require('./routes/punchRequests'));
-app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/asana', require('./routes/asana'));
 
 // Health check for uptime monitors: confirms the server AND the database
