@@ -6,7 +6,7 @@
     ['CLIENT_DELIVERY', 'Client Delivery'],
     ['QUALITY', 'Quality'],
     ['INITIATIVE', 'Initiative'],
-    ['PROCESS_IMROVEMENT', 'Process Improvement'],
+    ['PROCESS_IMPROVEMENT', 'Process Improvement'],
     ['CLIENT_APPRECIATION', 'Client Appreciation'],
     ['TEAM_SUPPORT', 'Team Support'],
     ['LEARNING', 'Learning'],
