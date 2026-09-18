@@ -13,6 +13,7 @@ const { startRecurringScheduler } = require('./recurring');
 const { startAbsenceScheduler } = require('./autoAbsence');
 const { startBackupScheduler } = require('./backupMailer');
 const { startBirthdayScheduler } = require('./birthdays');
+const { getScheduler } = require('./eodScheduler');
 
 bootstrapAdmin(); // create first admin on a fresh database
 
@@ -78,6 +79,7 @@ app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/punch-requests', require('./routes/punchRequests'));
 app.use('/api/asana', require('./routes/asana'));
+app.use('/api/eod', require('./routes/eod'));
 
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.
@@ -113,4 +115,5 @@ app.listen(PORT, () => {
   startAbsenceScheduler();   // daily: flag no-shows as pending leave for approval
   startBackupScheduler();    // weekly + monthly data backup by email (if SMTP set)
   startBirthdayScheduler();  // daily: admin heads-up for upcoming birthdays
+  getScheduler().start();    // cloud EOD capture at 03:00 IST, Slack at 03:15
 });
