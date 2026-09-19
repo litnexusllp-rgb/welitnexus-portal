@@ -16,7 +16,10 @@
   const fmtDate = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? new Date(s + 'T00:00').toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : (s || '—'));
   const todayISO = () => new Date().toLocaleDateString('en-CA'); // yyyy-mm-dd local
   const cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1).toLowerCase();
-  const badge = (v) => `<span class="badge b-${String(v).toLowerCase()}">${esc(cap(String(v).replace('_', ' ')))}</span>`;
+  const badge = (v) => {
+    const labels = { HALF_HOLIDAY_PRESENT: '½ holiday · ½ present', HALF_HOLIDAY_ABSENT: '½ holiday · ½ absent', HALF_HOLIDAY_LEAVE: '½ holiday · ½ leave', HALF_HOLIDAY_WEEKEND: '½ holiday · ½ weekend' };
+    return `<span class="badge b-${String(v).toLowerCase()}">${esc(labels[v] || cap(String(v).replace(/_/g, ' ')))}</span>`;
+  };
   const initials = (n) => String(n).trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
   function toast(msg, isErr) {
@@ -1970,6 +1973,7 @@
 
   // ---------- Reports (admin) ----------
   const STATUS_CODE = { PRESENT: 'P', ABSENT: 'A', LEAVE: 'L', HALF: '½', HOLIDAY: 'H', WEEKEND: 'W', FUTURE: '·' };
+  Object.assign(STATUS_CODE, { HALF_HOLIDAY_PRESENT: '½H/P', HALF_HOLIDAY_ABSENT: '½H/A', HALF_HOLIDAY_LEAVE: '½H/L', HALF_HOLIDAY_WEEKEND: '½H/W' });
   const startOfMonthISO = () => todayISO().slice(0, 8) + '01';
 
   VIEWS.reports = async () => {
@@ -2000,7 +2004,7 @@
            <button class="btn btn-ghost btn-sm" id="wdAdd">Mark as working day</button>
            <span id="wdList" style="display:flex;gap:6px;flex-wrap:wrap;"></span>
          </div>
-         <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half day · H = holiday · W = weekend · A = absent · · = upcoming</p>
+         <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half-day leave · H = holiday · ½H/P, A, L or W = half-day holiday + remaining half · W = weekend · A = absent · · = upcoming</p>
          <div id="regGrid" style="overflow-x:auto;"></div>
        </div>`);
     $('#repRun').addEventListener('click', loadEmpReport);
@@ -2142,6 +2146,7 @@
   }
 
   function regCellStyle(status) {
+    if (status.startsWith('HALF_HOLIDAY_')) return 'background:#e3eefb;color:var(--info);';
     const map = {
       PRESENT: 'background:#dff5ee;color:var(--teal-dark);font-weight:700;',
       ABSENT: 'background:#fdecea;color:var(--danger);font-weight:700;',
@@ -2182,7 +2187,7 @@
       `<div class="admin-only toolbar"><div></div><button class="btn btn-primary" id="addHolidayBtn">+ Add holiday</button></div>
        <div id="calBox"></div>
        <div class="section" style="margin-top:24px;"><h2>All holidays</h2><div id="holidayList"></div></div>`);
-    if (isAdmin()) $('#addHolidayBtn').addEventListener('click', openHolidayModal);
+    if (isAdmin()) $('#addHolidayBtn').addEventListener('click', () => openHolidayModal());
     await loadHolidays();
   };
 
@@ -2191,10 +2196,11 @@
     try { HOLIDAYS = (await api.get('/holidays')).holidays; } catch (e) { return toast(e.message, true); }
     renderCalendar();
     const el = $('#holidayList');
-    el.innerHTML = HOLIDAYS.length ? `<table><thead><tr><th>Date</th><th>Holiday</th><th>Type</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+    el.innerHTML = HOLIDAYS.length ? `<table><thead><tr><th>Date</th><th>Holiday</th><th>Type</th><th>Duration</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
       ${HOLIDAYS.map((h) => `<tr><td>${fmtDate(h.date)} <span style="color:var(--slate)">(${new Date(h.date + 'T00:00').toLocaleDateString(undefined, { weekday: 'short' })})</span></td>
-        <td>${esc(h.name)}</td><td>${badge(h.type)}</td>${isAdmin() ? `<td><button class="btn btn-danger btn-sm" data-del-hol="${h.id}">✕</button></td>` : ''}</tr>`).join('')}
+        <td>${esc(h.name)}</td><td>${badge(h.type)}</td><td>${h.duration === 'HALF' ? 'Half day' : 'Full day'}</td>${isAdmin() ? `<td><button class="btn btn-ghost btn-sm" data-edit-hol="${h.id}">Edit</button> <button class="btn btn-danger btn-sm" data-del-hol="${h.id}" aria-label="Delete holiday">✕</button></td>` : ''}</tr>`).join('')}
     </tbody></table>` : `<div class="empty">No holidays published yet.</div>`;
+    el.querySelectorAll('[data-edit-hol]').forEach(b => b.addEventListener('click', () => openHolidayModal(HOLIDAYS.find(h => h.id === Number(b.dataset.editHol)))));
     el.querySelectorAll('[data-del-hol]').forEach((b) => b.addEventListener('click', async () => {
       try { await api.del(`/holidays/${b.dataset.delHol}`); toast('Removed'); loadHolidays(); } catch (e) { toast(e.message, true); }
     }));
@@ -2212,7 +2218,7 @@
     for (let d = 1; d <= daysInMonth; d++) {
       const iso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const h = map[iso];
-      cells += `<div class="cal-cell ${iso === today ? 'today' : ''} ${h ? 'holiday' : ''}"><div class="dn">${d}</div>${h ? `<div class="hn">${esc(h.name)}</div>` : ''}</div>`;
+      cells += `<div class="cal-cell ${iso === today ? 'today' : ''} ${h ? 'holiday' : ''}"><div class="dn">${d}</div>${h ? `<div class="hn">${esc(h.name)}${h.duration === 'HALF' ? ' · Half day' : ''}</div>` : ''}</div>`;
     }
     $('#calBox').innerHTML = `<div class="cal"><div class="cal-head">
       <button class="btn btn-ghost btn-sm" id="calPrev">‹</button><strong style="color:var(--navy)">${monthName}</strong><button class="btn btn-ghost btn-sm" id="calNext">›</button></div>
@@ -2221,15 +2227,17 @@
     $('#calNext').addEventListener('click', () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); });
   }
 
-  function openHolidayModal() {
-    modal(`<h3>Add holiday</h3>
-      <div class="form-row"><div class="field"><label>Date</label><input type="date" id="hDate" value="${todayISO()}"></div>
+  function openHolidayModal(holiday = null) {
+    modal(`<h3>${holiday ? 'Edit' : 'Add'} holiday</h3>
+      <div class="form-row"><div class="field"><label for="hDate">Date</label><input type="date" id="hDate" value="${esc(holiday ? holiday.date : todayISO())}" ${holiday ? 'disabled' : ''}></div>
         <div class="field"><label>Type</label><select id="hType"><option>PUBLIC</option><option>OPTIONAL</option><option>COMPANY</option></select></div></div>
       <div class="form-row one"><div class="field"><label>Name</label><input id="hName" placeholder="e.g. Diwali"></div></div>
+      <div class="form-row one"><div class="field"><label for="hDuration">Duration</label><select id="hDuration"><option value="FULL">Full day</option><option value="HALF">Half day</option></select><p class="page-sub">A half-day holiday leaves half the day as working time.</p></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Publish</button></div>`);
+    if (holiday) { $('#hName').value = holiday.name; $('#hType').value = holiday.type; $('#hDuration').value = holiday.duration || 'FULL'; }
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      try { await api.post('/holidays', { date: $('#hDate').value, name: $('#hName').value, type: $('#hType').value }); closeModal(); toast('Published ✓'); loadHolidays(); }
+      try { await api.post('/holidays', { date: $('#hDate').value, name: $('#hName').value, type: $('#hType').value, duration: $('#hDuration').value }); closeModal(); toast('Published ✓'); loadHolidays(); }
       catch (e) { toast(e.message, true); }
     });
   }
@@ -2306,6 +2314,11 @@
       if (r.status === 'FUTURE') { cls = 'pcal-future'; }
       else if (r.status === 'WEEKEND') { cls = 'pcal-weekend'; tag = 'Weekend'; }
       else if (r.status === 'HOLIDAY') { cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday'; }
+      else if (r.status.startsWith('HALF_HOLIDAY_')) {
+        cls = r.status === 'HALF_HOLIDAY_ABSENT' ? 'pcal-absent' : 'pcal-half';
+        const rest = { HALF_HOLIDAY_PRESENT: 'worked', HALF_HOLIDAY_ABSENT: 'absent', HALF_HOLIDAY_LEAVE: 'leave', HALF_HOLIDAY_WEEKEND: 'weekend' }[r.status];
+        tag = `½ holiday · ½ ${rest}${r.short ? ' · short' : ''}${r.noClockOut ? ' · no clock-out' : ''}`;
+      }
       else if (r.status === 'LEAVE') { cls = 'pcal-leave'; tag = 'Leave'; }
       else if (r.status === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
       else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }

@@ -23,14 +23,14 @@ const HABIT_DAYS = 14;
 const activeEmployees = db.prepare(`SELECT id, name FROM users WHERE active = 1 AND role = 'EMPLOYEE'`);
 const inOnDay = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day = ? LIMIT 1`);
 const inWithinWindow = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day >= ? AND day <= ? LIMIT 1`);
-const isHolidayOn = db.prepare(`SELECT 1 FROM holidays WHERE date = ? LIMIT 1`);
+const isHolidayOn = db.prepare(`SELECT duration FROM holidays WHERE date = ? LIMIT 1`);
 const isWorkingOverride = db.prepare(`SELECT 1 FROM working_days WHERE date = ? LIMIT 1`);
 const leaveCoveringDay = db.prepare(
   `SELECT 1 FROM leaves WHERE user_id = ? AND status IN ('PENDING','APPROVED') AND start_date <= ? AND end_date >= ? LIMIT 1`
 );
 const insertPendingLeave = db.prepare(
   `INSERT INTO leaves (user_id, start_date, end_date, kind, reason, status, days, created_ts)
-   VALUES (?, ?, ?, 'FULL', ?, 'PENDING', 1, ?)`
+   VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`
 );
 
 // The most recently completed attendance day (yesterday's shift), when run
@@ -47,7 +47,8 @@ function flagAbsences(dayStr) {
   // Weekend / holiday days are never working days (unless overridden).
   const weekday = DateTime.fromISO(day, { zone: ZONE }).weekday; // 1=Mon .. 7=Sun
   const override = !!isWorkingOverride.get(day);
-  if (isHolidayOn.get(day)) return 0;
+  const holiday = isHolidayOn.get(day);
+  if (holiday && holiday.duration !== 'HALF') return 0;
   if (weekday >= 6 && !override) return 0;
 
   const windowStart = DateTime.fromISO(day, { zone: ZONE }).minus({ days: HABIT_DAYS }).toFormat('yyyy-LL-dd');
@@ -59,7 +60,7 @@ function flagAbsences(dayStr) {
       if (inOnDay.get(u.id, day)) continue;                                   // they were present
       if (!inWithinWindow.get(u.id, windowStart, day)) continue;             // no clock-in habit
       if (leaveCoveringDay.get(u.id, day, day)) continue;                    // already on/awaiting leave
-      insertPendingLeave.run(u.id, day, day, reason, now().toMillis());
+      insertPendingLeave.run(u.id, day, day, holiday ? 'HALF' : 'FULL', reason, holiday ? 0.5 : 1, now().toMillis());
       created.push(u.name);
     }
   });

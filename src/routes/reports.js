@@ -11,6 +11,7 @@ const { db } = require('../db');
 const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
+const { halfHolidayStatus, addAttendanceTotals } = require('../holidayAttendance');
 
 const router = express.Router();
 
@@ -38,7 +39,7 @@ const approvedLeavesOverlapping = db.prepare(
   `SELECT user_id, start_date, end_date, kind FROM leaves
    WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
 );
-const holidaysBetween = db.prepare(`SELECT date, name FROM holidays WHERE date >= ? AND date <= ?`);
+const holidaysBetween = db.prepare(`SELECT date, name, duration FROM holidays WHERE date >= ? AND date <= ?`);
 const workingDaysBetween = db.prepare(`SELECT id, date FROM working_days WHERE date >= ? AND date <= ?`);
 
 function eachDay(start, end) {
@@ -54,6 +55,7 @@ function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverrid
   const weekday = DateTime.fromISO(day, { zone: ZONE }).weekday; // 1=Mon..7=Sun
   const clockedIn = summary && summary.firstIn != null; // showed up = clocked in at all
   if (isFuture) return 'FUTURE';
+  if (isHoliday && isHoliday.duration === 'HALF') return halfHolidayStatus({ clockedIn, leaveKind, weekend: weekday >= 6 && !isWorkingOverride });
   // A half day is worked AND partly off, so it must win over plain PRESENT —
   // otherwise clocking in (which they always do) would hide it.
   if (leaveKind === 'HALF') return 'HALF';
@@ -78,7 +80,7 @@ function buildAttendanceReport(user, req) {
   const byDay = {};
   for (const e of eventsForUserBetween.all(user.id, start, end)) (byDay[e.day] = byDay[e.day] || []).push(e);
   const holidaySet = {};
-  for (const h of holidaysBetween.all(start, end)) holidaySet[h.date] = h.name;
+  for (const h of holidaysBetween.all(start, end)) holidaySet[h.date] = h;
   const workingSet = {};
   for (const w of workingDaysBetween.all(start, end)) workingSet[w.date] = true;
   const leaveByDay = {};
@@ -92,17 +94,13 @@ function buildAttendanceReport(user, req) {
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
     const s = byDay[day] ? summarize(byDay[day], day === today ? now().toMillis() : null) : null;
-    const status = classify(day, s, leaveByDay[day], !!holidaySet[day], day > today, !!workingSet[day]);
-    if (status === 'PRESENT') { totals.present += 1; totals.workedMinutes += s.workedMinutes; }
-    else if (status === 'LEAVE') totals.leave += 1;
-    else if (status === 'HALF') { totals.leave += 0.5; totals.present += 0.5; totals.workedMinutes += s ? s.workedMinutes : 0; }
-    else if (status === 'ABSENT') totals.absent += 1;
-    else if (status === 'HOLIDAY') totals.holiday += 1;
-    else if (status === 'WEEKEND') totals.weekend += 1;
+    const status = classify(day, s, leaveByDay[day], holidaySet[day], day > today, !!workingSet[day]);
+    addAttendanceTotals(totals, status, s ? s.workedMinutes : 0);
+    const halfHoliday = holidaySet[day]?.duration === 'HALF';
     // Punctuality / short-day flags for the calendar view. An approved half day
     // is exempt — coming in later (or leaving early) is the point of it.
     let late = false; let minutesLate = 0;
-    if (s && s.firstIn != null && status !== 'HALF') {
+    if (s && s.firstIn != null && status !== 'HALF' && !halfHoliday) {
       const cutoff = DateTime.fromISO(day, { zone: ZONE })
         .set({ hour: shift.h, minute: shift.m, second: 0, millisecond: 0 })
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
@@ -111,12 +109,13 @@ function buildAttendanceReport(user, req) {
     // Forgot to clock out: a finished day that still ends IN or on BREAK. The
     // recorded hours are incomplete, so flag that rather than calling it short.
     const noClockOut = !!(s && s.firstIn != null && day < today && s.state !== 'OUT');
-    const short = !noClockOut && status === 'PRESENT' && s && day < today && s.workedMinutes > 0 && s.workedMinutes < FULL_DAY_MIN;
+    const short = !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && day < today && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
     return {
       day,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
       status,
-      holidayName: holidaySet[day] || '',
+      holidayName: holidaySet[day]?.name || '',
+      holidayDuration: holidaySet[day]?.duration || null,
       firstIn: s ? s.firstIn : null,
       lastOut: s ? s.lastOut : null,
       workedMinutes: s ? s.workedMinutes : 0,
@@ -190,7 +189,7 @@ router.get('/register', requireAdmin, (req, res) => {
   const days = eachDay(start, end);
 
   const holidaySet = {};
-  for (const h of holidaysBetween.all(start, end)) holidaySet[h.date] = h.name;
+  for (const h of holidaysBetween.all(start, end)) holidaySet[h.date] = h;
   const workingSet = {};
   const workingDays = workingDaysBetween.all(start, end);
   for (const w of workingDays) workingSet[w.date] = true;
@@ -213,17 +212,14 @@ router.get('/register', requireAdmin, (req, res) => {
     for (const day of days) {
       const ev = eventsByUserDay[`${u.id}|${day}`];
       const s = ev ? summarize(ev, day === today ? now().toMillis() : null) : null;
-      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], !!holidaySet[day], day > today, !!workingSet[day]);
+      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], holidaySet[day], day > today, !!workingSet[day]);
       cells[day] = status;
-      if (status === 'PRESENT') totals.present += 1;
-      else if (status === 'HALF') { totals.present += 0.5; totals.leave += 0.5; }
-      else if (status === 'LEAVE') totals.leave += 1;
-      else if (status === 'ABSENT') totals.absent += 1;
+      addAttendanceTotals(totals, status);
     }
     return { id: u.id, name: u.name, department: u.department, cells, totals };
   });
 
-  res.json({ month, days, holidays: holidaySet, workingDays, users });
+  res.json({ month, days, holidays: Object.fromEntries(Object.entries(holidaySet).map(([d, h]) => [d, h.name + (h.duration === 'HALF' ? ' (Half day)' : '')])), workingDays, users });
 });
 
 module.exports = router;
