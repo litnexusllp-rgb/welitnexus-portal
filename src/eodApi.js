@@ -33,9 +33,15 @@ function createApi(config, fetchImpl = fetch, wait = sleep) {
     }
   }
   const asana = path => request('https://app.asana.com/api/1.0' + path, { headers: { Authorization: `Bearer ${config.asanaToken}` } });
-  const slack = (method, args = {}, posting = false) => request('https://slack.com/api/' + method, {
-    method: 'POST', headers: { Authorization: `Bearer ${config.slackToken}`, 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(args),
-  }, posting);
+  const slack = (method, args = {}, posting = false) => {
+    const url = 'https://slack.com/api/' + method;
+    const headers = { Authorization: `Bearer ${config.slackToken}` };
+    // Read methods use query parameters; Slack can ignore their JSON POST body.
+    if (!posting) return request(url + '?' + new URLSearchParams(args), { method: 'GET', headers });
+    return request(url, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(args),
+    }, true);
+  };
 
   async function pages(path, params) {
     const out = []; const seen = new Set();

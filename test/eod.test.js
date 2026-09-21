@@ -13,6 +13,32 @@ const observations = { startedAt: cutoff, finishedAt: cutoff + 2000, projects: [
 const config = { enabled: true, channel: 'C123', projects: ['123'], userMap: { '10': 'U123' }, asanaToken: 'test', slackToken: 'test' };
 const quiet = { info() {}, error() {} };
 
+test('Slack read endpoints receive channel and pagination arguments in the URL', async () => {
+  const api = createApi(config, async (url, options) => {
+    const u = new URL(url);
+    let body = { ok: true };
+    if (u.hostname === 'slack.com') {
+      assert.equal(options.method, 'GET');
+      assert.equal(options.body, undefined);
+      if (u.pathname.endsWith('/conversations.info')) {
+        assert.equal(u.searchParams.get('channel'), config.channel);
+        body.channel = { is_member: true, name: 'eod-reports' };
+      }
+      if (u.pathname.endsWith('/users.list')) {
+        assert.equal(u.searchParams.get('limit'), '200');
+        body = u.searchParams.has('cursor')
+          ? { ok: true, members: [{ id: 'U456', profile: { email: 'new@example.test' } }] }
+          : { ok: true, members: [], response_metadata: { next_cursor: 'page+2=' } };
+        if (u.searchParams.has('cursor')) assert.equal(u.searchParams.get('cursor'), 'page+2=');
+      }
+    }
+    return new Response(JSON.stringify(body));
+  });
+  assert.deepEqual(await api.check(), { ok: true, channel: 'eod-reports' });
+  const result = await api.resolveUsers([{ assignee: { gid: '20', email: 'new@example.test' } }]);
+  assert.equal(result.map['20'], 'U456');
+});
+
 test('03:00 IST workday boundary includes overnight work and excludes exact cutoff', () => {
   assert.equal(reportWindow(cutoff - 1).day, '2026-09-16');
   assert.equal(window.day, '2026-09-17');
