@@ -10,6 +10,7 @@ const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const asana = require('../asana');
+const { employmentStatus, overlapsEmployment } = require('../employment');
 
 const router = express.Router();
 
@@ -28,7 +29,7 @@ function shiftStartOf(hhmm) {
 const fmtHHmm = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
 
 const activeUsers = db.prepare(
-  `SELECT id, name, department, title, shift_start, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
+  `SELECT id, name, department, title, shift_start, leave_balance, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`
 );
 const eventsBetween = db.prepare(
   `SELECT user_id, type, ts, day FROM events WHERE day >= ? AND day <= ? ORDER BY user_id, ts, id`
@@ -66,7 +67,9 @@ async function buildKpi(req) {
   const endMs = DateTime.fromISO(end, { zone: ZONE }).endOf('day').toMillis();
 
   // Each active user's shift start (parsed once) for the punctuality check.
-  const users = activeUsers.all();
+  const users = activeUsers.all().filter(u => overlapsEmployment(u, start, end));
+  const userById = new Map(users.map(u => [String(u.id), u]));
+  const invalidDays = {};
   const userShift = {};
   for (const u of users) userShift[u.id] = shiftStartOf(u.shift_start);
 
@@ -86,7 +89,10 @@ async function buildKpi(req) {
   const attendance = {}; // user_id -> { days, minutes, present, onTime }
   for (const k of Object.keys(byUserDay)) {
     const [uid, day] = k.split('|');
+    const employee = userById.get(uid);
+    if (!employee || employmentStatus(employee, day) === 'NOT_EMPLOYED') continue;
     const s = summarize(byUserDay[k], day === today ? now().toMillis() : null);
+    if (s.valid === false) { invalidDays[uid] = (invalidDays[uid] || 0) + 1; continue; }
     const a = (attendance[uid] = attendance[uid] || { days: 0, minutes: 0, present: 0, onTime: 0 });
     a.days += halfHolidays.has(day) ? 0.5 : 1;
     a.minutes += s.workedMinutes;
@@ -131,7 +137,11 @@ async function buildKpi(req) {
   // --- approved leave days falling inside the month ---
   const leaveDays = {}; // user_id -> days
   for (const l of approvedLeaves.all(end, start)) {
-    const d = overlapDays(l.start_date, l.end_date, start, end);
+    const employee = userById.get(String(l.user_id));
+    if (!employee) continue;
+    const from = employee.join_date && employee.join_date > start ? employee.join_date : start;
+    const to = employee.exit_date && employee.exit_date < end ? employee.exit_date : end;
+    const d = overlapDays(l.start_date, l.end_date, from, to);
     if (!d) continue;
     leaveDays[l.user_id] = (leaveDays[l.user_id] || 0) + (l.kind === 'HALF' ? 0.5 : d);
   }
@@ -152,6 +162,8 @@ async function buildKpi(req) {
     return {
       id: u.id,
       name: u.name,
+      invalidAttendanceDays: invalidDays[u.id] || 0,
+      employmentWarning: !u.join_date || (!u.active && !u.exit_date) ? 'Employment dates need review.' : null,
       department: u.department,
       title: u.title,
       shiftStart: fmtHHmm(userShift[u.id]),

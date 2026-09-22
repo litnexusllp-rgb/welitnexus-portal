@@ -514,7 +514,7 @@
       <span class="state-badge b-${status.state.toLowerCase()}">${labels[status.state] || status.state}</span>
       <div class="now" id="liveClock">--:--:--</div>
       <div class="meta">Total break today: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
-      <div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
+      ${status.valid === false ? `<p style="color:var(--danger);">${esc(status.error)} Ask an administrator to correct today’s punches.</p>` : ''}<div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
     card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
       punch(b.dataset.punch);
@@ -1939,7 +1939,7 @@
     const th = (k, label) => `<th class="th-sort ${kpiSort.key === k ? 'on' : ''}" data-sortk="${k}" title="Sort by ${label}">${label}<span class="si">${kpiSort.key === k ? (kpiSort.dir === 1 ? '▲' : '▼') : '↕'}</span></th>`;
     const pctCell = (v, naTitle) => v === null ? `<span class="muted-empty" title="${naTitle}">N/A</span>` : v + '%';
     el.innerHTML = rows.length ? `<table><thead><tr>${COLS.map(([k, l]) => th(k, l)).join('')}</tr></thead><tbody>
-      ${rows.map((r) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong><div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
+      ${rows.map((r) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong>${r.invalidAttendanceDays || r.employmentWarning ? `<div style="color:var(--danger);">Attendance needs review${r.invalidAttendanceDays ? `: ${r.invalidAttendanceDays} invalid day(s) excluded` : ''}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
         <td>${r.daysPresent}</td><td>${r.hoursWorked}</td>
         <td>${r.punctualPct === null ? '<span class="muted-empty" title="No clock-ins this month">N/A</span>' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}" title="Shift start ${esc(r.shiftStart || '')} · ${r.lateDays} late day${r.lateDays === 1 ? '' : 's'}">${r.punctualPct}%</span>`}</td>
         <td>${r.tasksDone}</td>
@@ -1957,12 +1957,12 @@
   function exportKpiCsv() {
     if (!KPI_ROWS.length) return toast('Nothing to export', true);
     const m = $('#kpiMonth').value || thisMonthISO();
-    const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Punctuality %', 'Late Days', 'Tasks Done', 'Tasks On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points'];
+    const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Punctuality %', 'Late Days', 'Tasks Done', 'Tasks On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points', 'Invalid Attendance Days', 'Employment Warning'];
     const lines = [head.join(',')].concat(KPI_ROWS.map((r) => [
       csvCell(r.name), csvCell(r.department || ''),
       r.daysPresent, r.hoursWorked, r.punctualPct === null ? '' : r.punctualPct, r.lateDays,
       r.tasksDone, r.onTimePct === null ? '' : r.onTimePct,
-      r.openTasks, r.leaveDays, r.achievementsAcknowledged, r.achievementsPending, r.points,
+      r.openTasks, r.leaveDays, r.achievementsAcknowledged, r.achievementsPending, r.points, r.invalidAttendanceDays || 0, csvCell(r.employmentWarning || ''),
     ].join(',')));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
@@ -1972,19 +1972,20 @@
   }
 
   // ---------- Reports (admin) ----------
-  const STATUS_CODE = { PRESENT: 'P', ABSENT: 'A', LEAVE: 'L', HALF: '½', HOLIDAY: 'H', WEEKEND: 'W', FUTURE: '·' };
+  const STATUS_CODE = { NOT_EMPLOYED: '—', EMPLOYMENT_UNKNOWN: '?', INVALID: '!', PRESENT: 'P', ABSENT: 'A', LEAVE: 'L', HALF: '½', HOLIDAY: 'H', WEEKEND: 'W', FUTURE: '·' };
   Object.assign(STATUS_CODE, { HALF_HOLIDAY_PRESENT: '½H/P', HALF_HOLIDAY_ABSENT: '½H/A', HALF_HOLIDAY_LEAVE: '½H/L', HALF_HOLIDAY_WEEKEND: '½H/W' });
   const startOfMonthISO = () => todayISO().slice(0, 8) + '01';
 
   VIEWS.reports = async () => {
     if (!isAdmin()) return navigate('dashboard');
     await loadLookups();
+    const reportPeople = (await api.get('/users/manage')).users;
     setMain('Reports', 'Attendance reports for the team. Pick a person and dates, or view the whole-month register.',
       `<div class="section">
          <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Attendance — by employee</h2>
            <button class="btn btn-ghost btn-sm" id="empCsvBtn">Export CSV</button></div>
          <div class="form-row" style="max-width:680px;">
-           <div class="field"><label>Employee</label><select id="repUser">${userOptions(USERS[0] && USERS[0].id)}</select></div>
+           <div class="field"><label>Employee</label><select id="repUser">${reportPeople.map(u => `<option value="${u.id}">${esc(u.name)}${u.active ? '' : ' (inactive)'}</option>`).join('')}</select></div>
            <div class="field"><label>From</label><input type="date" id="repStart" value="${startOfMonthISO()}"></div>
          </div>
          <div class="form-row" style="max-width:680px;">
@@ -2004,7 +2005,7 @@
            <button class="btn btn-ghost btn-sm" id="wdAdd">Mark as working day</button>
            <span id="wdList" style="display:flex;gap:6px;flex-wrap:wrap;"></span>
          </div>
-         <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half-day leave · H = holiday · ½H/P, A, L or W = half-day holiday + remaining half · W = weekend · A = absent · · = upcoming</p>
+         <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half-day leave · H = holiday · ½H/P, A, L or W = half-day holiday + remaining half · W = weekend · A = absent · — = outside employment · ? = employment dates need review · ! = invalid punches · · = upcoming</p>
          <div id="regGrid" style="overflow-x:auto;"></div>
        </div>`);
     $('#repRun').addEventListener('click', loadEmpReport);
@@ -2024,16 +2025,16 @@
       EMP_REPORT = data;
       const t = data.totals;
       $('#repTotals').innerHTML = `<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));">
-        ${statCard('Present', t.present, 'value small')}${statCard('Leave', t.leave, 'value small')}
+        ${data.needsReview ? '<p style="color:var(--danger);">Review flagged dates before using these totals.</p>' : ''}${statCard('Present', t.present, 'value small')}${statCard('Leave', t.leave, 'value small')}
         ${statCard('Absent', t.absent, 'value small')}${statCard('Holidays', t.holiday, 'value small')}
         ${statCard('Hours worked', fmtMins(t.workedMinutes), 'value small')}</div>`;
       $('#repTable').innerHTML = `<table class="dense"><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
         ${data.rows.map((r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
-          <td>${badge(r.status)}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
+          <td>${badge(r.status)}${r.attendanceError || r.employmentWarning ? `<div style="color:var(--danger);">${esc(r.attendanceError || r.employmentWarning)}</div>` : ''}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
           <td>${r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
           <td>${r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
           <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td>
-          <td>${r.status === 'FUTURE' ? '' : `<button class="btn-fix" data-fix-day="${r.day}" title="Correct this day's punches">Fix</button>`}</td></tr>`).join('')}
+          <td>${['FUTURE', 'NOT_EMPLOYED'].includes(r.status) ? '' : `<button class="btn-fix" data-fix-day="${r.day}" title="Correct this day's punches">Fix</button>`}</td></tr>`).join('')}
       </tbody></table>`;
       $('#repTable').querySelectorAll('[data-fix-day]').forEach((b) =>
         b.addEventListener('click', () => openAttendanceEditor(data.user.id, b.dataset.fixDay)));
@@ -2056,8 +2057,8 @@
       .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`).join('');
     const body = $('#fixBody'); if (!body) return;
     body.innerHTML = `
-      <p style="color:var(--slate);margin:0 0 14px;"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · Worked ${fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
-      ${data.events.length ? `<table style="margin-bottom:14px;"><thead><tr><th>Punch</th><th>Time</th><th></th></tr></thead><tbody>
+      <p style="color:var(--slate);margin:0 0 14px;"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
+      ${data.error ? `<p style="color:var(--danger);">${esc(data.error)}</p>` : ''}${data.events.length ? `<table style="margin-bottom:14px;"><thead><tr><th>Punch</th><th>Time</th><th></th></tr></thead><tbody>
         ${data.events.map((e) => `<tr>
           <td><select data-etype="${e.id}">${typeOpts(e.type)}</select></td>
           <td><input type="time" data-etime="${e.id}" value="${esc(e.time)}" style="padding:6px;border:1px solid var(--line);border-radius:6px;"></td>
@@ -2093,12 +2094,12 @@
 
   function exportEmpCsv() {
     if (!EMP_REPORT) return toast('Run a report first', true);
-    const head = ['Date', 'Day', 'Status', 'First In', 'Last Out', 'Worked (min)', 'Break (min)'];
+    const head = ['Date', 'Day', 'Status', 'First In', 'Last Out', 'Worked (min)', 'Break (min)', 'Review Warning'];
     const lines = [head.join(',')].concat(EMP_REPORT.rows.map((r) => [
       r.day, r.weekday, r.status,
       r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      r.workedMinutes, r.breakMinutes,
+      r.workedMinutes, r.breakMinutes, csvCell(r.attendanceError || r.employmentWarning || ''),
     ].join(',')));
     downloadCsv(lines.join('\n'), `attendance-${EMP_REPORT.user.name.replace(/\s+/g, '_')}-${EMP_REPORT.start}_to_${EMP_REPORT.end}.csv`);
   }
@@ -2282,6 +2283,7 @@
       const cards = $('#myKpiCards');
       if (cards) {
         cards.innerHTML = r ? `
+          ${r.invalidAttendanceDays || r.employmentWarning ? '<p style="color:var(--danger);">Attendance needs review; totals may be incomplete.</p>' : ''}
           ${statCard('Days present', r.daysPresent, 'value')}
           ${statCard('Hours worked', r.hoursWorked, 'value')}
           ${statCard('Punctuality', r.punctualPct === null ? '—' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}">${r.punctualPct}%</span>`, 'value')}
@@ -2307,11 +2309,13 @@
 
     // Clicking a past/today cell opens the fix editor (admins) or a correction
     // request (employees) for that exact date — no need to visit Reports.
-    const clickable = (r) => r && r.status !== 'FUTURE';
+    const clickable = (r) => r && !['FUTURE', 'NOT_EMPLOYED'].includes(r.status);
     const cellFor = (r, dayNum, iso) => {
       if (!r) return `<div class="pcal-cell"><span class="dn">${dayNum}</span></div>`;
       let cls = 'pcal-ok'; let tag = '';
       if (r.status === 'FUTURE') { cls = 'pcal-future'; }
+      else if (r.status === 'NOT_EMPLOYED') { cls = 'pcal-future'; tag = 'Not employed'; }
+      else if (r.status === 'EMPLOYMENT_UNKNOWN' || r.status === 'INVALID') { cls = 'pcal-noout'; tag = 'Needs review'; }
       else if (r.status === 'WEEKEND') { cls = 'pcal-weekend'; tag = 'Weekend'; }
       else if (r.status === 'HOLIDAY') { cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday'; }
       else if (r.status.startsWith('HALF_HOLIDAY_')) {
@@ -2564,7 +2568,7 @@
         <div class="field"><label>Title</label><input id="eTitle" value="${esc(u?.title || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Phone</label><input id="ePhone" value="${esc(u?.phone || '')}"></div>
         <div class="field"><label>Role</label><select id="eRole"><option value="EMPLOYEE" ${u?.role !== 'ADMIN' ? 'selected' : ''}>Employee</option><option value="ADMIN" ${u?.role === 'ADMIN' ? 'selected' : ''}>Admin</option></select></div></div>
-      <div class="form-row"><div class="field"><label>Date of joining</label><input type="date" id="eJoin" value="${esc(u?.join_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Used for the seniority directory.</div></div>
+      <div class="form-row"><div class="field"><label>Date of joining</label><input type="date" id="eJoin" value="${esc(u?.join_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Used for attendance eligibility and the seniority directory.</div></div>
         <div class="field"><label>Last working day</label><input type="date" id="eExit" value="${esc(u?.exit_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank if still employed.</div></div></div>
       <div class="form-row"><div class="field"><label>Birthday</label><input type="date" id="eBday" value="${esc(u?.birthday || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only the day and month are shown to the team.</div></div>
         <div class="field"><label>Asana email (optional)</label><input id="eAsana" value="${esc(u?.asana_email || '')}" placeholder="if different from their login email"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only needed if Asana doesn't match by name or login email.</div></div></div>

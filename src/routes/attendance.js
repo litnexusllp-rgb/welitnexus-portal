@@ -5,6 +5,7 @@ const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now, DateTime, ZONE, ATT_CUTOVER, attendanceDayFromTs, attendanceToday } = require('../time');
 const { summarize, VALID } = require('../compute');
+const { changeAttendance, attendanceError } = require('../attendanceValidation');
 
 const router = express.Router();
 
@@ -49,7 +50,9 @@ router.post('/punch', requireAuth, (req, res) => {
     return res.status(409).json({ error: `Cannot ${type} while ${state}` });
   }
   const ts = now().toMillis();
-  insertEvent.run(req.user.id, type, ts, attendanceDayFromTs(ts), note, deviceFrom(req)); // file under the shift day
+  try { changeAttendance(req.user.id, [day, attendanceDayFromTs(ts)], () =>
+    insertEvent.run(req.user.id, type, ts, attendanceDayFromTs(ts), note, deviceFrom(req))); }
+  catch (e) { return attendanceError(e, res); }
   const updated = eventsForUserDay.all(req.user.id, day);
   const summary = summarize(updated, now().toMillis());
   res.json({ day, ...summary, allowed: VALID[summary.state], events: updated });
@@ -90,6 +93,7 @@ router.get('/today', requireAdmin, (req, res) => {
     return {
       id: u.id, name: u.name, department: u.department, title: u.title,
       state: events.length ? s.state : 'OFF',
+      attendanceError: s.error || null,
       workedMinutes: s.workedMinutes, breakMinutes: s.breakMinutes,
       firstIn: s.firstIn, lastOut: s.lastOut,
       device: lastWithDevice ? lastWithDevice.device : '',
@@ -145,7 +149,9 @@ router.post('/admin/event', requireAdmin, (req, res) => {
   if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
   const ts = toTs(day, time);
   if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
-  insertEvent.run(user.id, type, ts, attendanceDayFromTs(ts), `edited by ${req.user.name}`, ''); // manual entry — no device
+  try { changeAttendance(user.id, [day, attendanceDayFromTs(ts)], () =>
+    insertEvent.run(user.id, type, ts, attendanceDayFromTs(ts), `edited by ${req.user.name}`, '')); }
+  catch (e) { return attendanceError(e, res); }
   const events = eventsForUserDay.all(user.id, day);
   res.json({ user, day, events: withTimes(events), ...summarize(events, day === attendanceToday() ? now().toMillis() : null) });
 });
@@ -159,7 +165,8 @@ router.put('/admin/event/:id', requireAdmin, (req, res) => {
   const ts = req.body.time ? toTs(ev.day, String(req.body.time)) : ev.ts;
   if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
   const day = attendanceDayFromTs(ts);
-  updateEvent.run(type, ts, day, `edited by ${req.user.name}`, ev.id);
+  try { changeAttendance(ev.user_id, [ev.day, day], () => updateEvent.run(type, ts, day, `edited by ${req.user.name}`, ev.id)); }
+  catch (e) { return attendanceError(e, res); }
   const events = eventsForUserDay.all(ev.user_id, day);
   res.json({ day, events: withTimes(events), ...summarize(events, day === attendanceToday() ? now().toMillis() : null) });
 });
@@ -168,7 +175,8 @@ router.put('/admin/event/:id', requireAdmin, (req, res) => {
 router.delete('/admin/event/:id', requireAdmin, (req, res) => {
   const ev = getEvent.get(Number(req.params.id));
   if (!ev) return res.status(404).json({ error: 'Punch not found' });
-  deleteEvent.run(ev.id);
+  try { changeAttendance(ev.user_id, [ev.day], () => deleteEvent.run(ev.id)); }
+  catch (e) { return attendanceError(e, res); }
   const events = eventsForUserDay.all(ev.user_id, ev.day);
   res.json({ day: ev.day, events: withTimes(events), ...summarize(events, ev.day === attendanceToday() ? now().toMillis() : null) });
 });

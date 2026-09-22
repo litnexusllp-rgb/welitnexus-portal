@@ -10,6 +10,7 @@ const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now, DateTime, ZONE, ATT_CUTOVER, attendanceDayFromTs } = require('../time');
 const { notify, notifyAdmins } = require('../notify');
+const { validateDay, attendanceError } = require('../attendanceValidation');
 
 const router = express.Router();
 
@@ -86,10 +87,12 @@ router.post('/:id/decide', requireAdmin, (req, res) => {
     decideReq.run(decision, req.user.id, now().toMillis(), note, r.id);
     if (decision === 'APPROVED') {
       const ts = toTs(r.day, r.time);
+      if (ts === null) throw Object.assign(new Error('Invalid correction date or time.'), { status: 400, attendanceValidation: true });
       insertEvent.run(r.user_id, r.type, ts, attendanceDayFromTs(ts), `correction approved by ${req.user.name}`);
+      validateDay(r.user_id, attendanceDayFromTs(ts));
     }
   });
-  apply();
+  try { apply(); } catch (e) { return attendanceError(e, res); }
   const who = getUserName.get(r.user_id);
   notify(r.user_id, {
     type: 'PUNCH',
