@@ -12,6 +12,7 @@ const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const { halfHolidayStatus, addAttendanceTotals } = require('../holidayAttendance');
+const { employmentStatus, overlapsEmployment } = require('../employment');
 
 const router = express.Router();
 
@@ -27,8 +28,8 @@ function shiftStartOf(hhmm) {
 }
 const fmtShift = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
 
-const getUser = db.prepare(`SELECT id, name, department, title, shift_start FROM users WHERE id = ?`);
-const activeUsers = db.prepare(`SELECT id, name, department, title FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`);
+const getUser = db.prepare(`SELECT id, name, department, title, shift_start, active, join_date, exit_date FROM users WHERE id = ?`);
+const reportUsers = db.prepare(`SELECT id, name, department, title, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`);
 const eventsForUserBetween = db.prepare(
   `SELECT type, ts, day FROM events WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts, id`
 );
@@ -51,7 +52,13 @@ function eachDay(start, end) {
 }
 
 // Decide a single day's status given precomputed context.
-function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverride) {
+function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverride, user) {
+  const employment = employmentStatus(user, day);
+  if (employment === 'NOT_EMPLOYED') return employment;
+  if (summary?.valid === false) return 'INVALID';
+  // Existing punches/approved leave remain visible, but never infer absence
+  // from an unknown employment interval.
+  if (employment && !summary?.firstIn && !leaveKind) return employment;
   const weekday = DateTime.fromISO(day, { zone: ZONE }).weekday; // 1=Mon..7=Sun
   const clockedIn = summary && summary.firstIn != null; // showed up = clocked in at all
   if (isFuture) return 'FUTURE';
@@ -94,13 +101,14 @@ function buildAttendanceReport(user, req) {
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
     const s = byDay[day] ? summarize(byDay[day], day === today ? now().toMillis() : null) : null;
-    const status = classify(day, s, leaveByDay[day], holidaySet[day], day > today, !!workingSet[day]);
-    addAttendanceTotals(totals, status, s ? s.workedMinutes : 0);
+    const status = classify(day, s, leaveByDay[day], holidaySet[day], day > today, !!workingSet[day], user);
+    const excluded = status === 'NOT_EMPLOYED' || status === 'INVALID' || status === 'EMPLOYMENT_UNKNOWN';
+    addAttendanceTotals(totals, status, !excluded && s ? s.workedMinutes : 0);
     const halfHoliday = holidaySet[day]?.duration === 'HALF';
     // Punctuality / short-day flags for the calendar view. An approved half day
     // is exempt — coming in later (or leaving early) is the point of it.
     let late = false; let minutesLate = 0;
-    if (s && s.firstIn != null && status !== 'HALF' && !halfHoliday) {
+    if (!excluded && s && s.firstIn != null && status !== 'HALF' && !halfHoliday) {
       const cutoff = DateTime.fromISO(day, { zone: ZONE })
         .set({ hour: shift.h, minute: shift.m, second: 0, millisecond: 0 })
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
@@ -108,25 +116,27 @@ function buildAttendanceReport(user, req) {
     }
     // Forgot to clock out: a finished day that still ends IN or on BREAK. The
     // recorded hours are incomplete, so flag that rather than calling it short.
-    const noClockOut = !!(s && s.firstIn != null && day < today && s.state !== 'OUT');
+    const noClockOut = !!(!excluded && s && s.firstIn != null && day < today && s.state !== 'OUT');
     const short = !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && day < today && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
     return {
       day,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
       status,
+      attendanceError: s?.error || null,
+      employmentWarning: employmentStatus(user, day) === 'EMPLOYMENT_UNKNOWN' ? 'Employment dates need review.' : null,
       holidayName: holidaySet[day]?.name || '',
       holidayDuration: holidaySet[day]?.duration || null,
-      firstIn: s ? s.firstIn : null,
-      lastOut: s ? s.lastOut : null,
-      workedMinutes: s ? s.workedMinutes : 0,
-      breakMinutes: s ? s.breakMinutes : 0,
+      firstIn: !excluded && s ? s.firstIn : null,
+      lastOut: !excluded && s ? s.lastOut : null,
+      workedMinutes: status === 'INVALID' ? null : !excluded && s ? s.workedMinutes : 0,
+      breakMinutes: status === 'INVALID' ? null : !excluded && s ? s.breakMinutes : 0,
       late,
       minutesLate,
       short,
       noClockOut,
     };
   });
-  return { user, start, end, rows, totals, shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
+  return { user, start, end, rows, totals, needsReview: rows.some(r => r.attendanceError || r.employmentWarning), shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
 }
 
 // ADMIN: any employee's day-by-day report.
@@ -163,7 +173,7 @@ router.get('/missing-clockouts', requireAdmin, (req, res) => {
     (byUserDay[k] = byUserDay[k] || []).push(e);
   }
   const names = {};
-  for (const u of activeUsers.all()) names[u.id] = u.name;
+  for (const u of reportUsers.all()) if (u.active) names[u.id] = u.name;
   const rows = [];
   for (const k of Object.keys(byUserDay)) {
     const [uid, day] = k.split('|');
@@ -206,17 +216,17 @@ router.get('/register', requireAdmin, (req, res) => {
     }
   }
 
-  const users = activeUsers.all().map((u) => {
+  const users = reportUsers.all().filter(u => overlapsEmployment(u, start, end)).map((u) => {
     const cells = {};
     const totals = { present: 0, leave: 0, absent: 0 };
     for (const day of days) {
       const ev = eventsByUserDay[`${u.id}|${day}`];
       const s = ev ? summarize(ev, day === today ? now().toMillis() : null) : null;
-      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], holidaySet[day], day > today, !!workingSet[day]);
+      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], holidaySet[day], day > today, !!workingSet[day], u);
       cells[day] = status;
       addAttendanceTotals(totals, status);
     }
-    return { id: u.id, name: u.name, department: u.department, cells, totals };
+    return { id: u.id, name: u.name, department: u.department, active: u.active, cells, totals, employmentWarning: !u.join_date || (!u.active && !u.exit_date) ? 'Employment dates need review.' : null };
   });
 
   res.json({ month, days, holidays: Object.fromEntries(Object.entries(holidaySet).map(([d, h]) => [d, h.name + (h.duration === 'HALF' ? ' (Half day)' : '')])), workingDays, users });

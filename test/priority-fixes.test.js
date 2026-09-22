@@ -1,0 +1,114 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+test('session revocation, transactional corrections and employment-aware reports', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ems-priority-'));
+  process.env.DB_PATH = path.join(dir, 'test.db');
+  process.env.NODE_ENV = 'test'; process.env.JWT_SECRET = 'test-only-secret';
+  delete process.env.ASANA_TOKEN;
+  const { db } = require('../src/db');
+  const auth = require('../src/auth');
+  const express = require('express');
+  const app = express(); app.use(express.json(), require('cookie-parser')(), auth.loadUser);
+  for (const [url, file] of [['auth','auth'],['users','directory'],['attendance','attendance'],['punch-requests','punchRequests'],['reports','reports'],['kpi','kpi']]) app.use('/api/'+url, require('../src/routes/'+file));
+  const add = (name, role='EMPLOYEE', join='2026-06-15', exit='', active=1) => db.prepare('INSERT INTO users(name,email,password_hash,role,created_ts,join_date,exit_date,active) VALUES(?,?,?,?,?,?,?,?)').run(name,name+'@example.test',auth.hashPassword('before123'),role,0,join,exit,active).lastInsertRowid;
+  const admin=add('admin','ADMIN','2026-01-01'); const employee=add('employee');
+  const getUser = id=>db.prepare('SELECT * FROM users WHERE id=?').get(id);
+  const cookie = id=>`${auth.COOKIE}=${auth.issueToken(getUser(id))}`;
+  let adminCookie=cookie(admin); let empCookie=cookie(employee);
+  const server=app.listen(0,'127.0.0.1');
+  await new Promise((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
+  t.after(async()=>{await new Promise(r=>server.close(r));db.close();fs.rmSync(dir,{recursive:true,force:true});});
+  const request=async(url,method='GET',body,session=adminCookie)=>{
+    const res=await fetch(`http://127.0.0.1:${server.address().port}/api/`+url,{method,headers:{cookie:session,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+    return {status:res.status,body:await res.json(),cookie:res.headers.get('set-cookie')?.split(';')[0]};
+  };
+  await t.test('admin reset rejects old and legacy cookies; fresh login works',async()=>{
+    const legacy=auth.COOKIE+'='+require('jsonwebtoken').sign({uid:employee,role:'EMPLOYEE'},process.env.JWT_SECRET);
+    assert.equal((await request('auth/me','GET',null,legacy)).status,200);
+    assert.equal((await request(`users/${employee}/password`,'POST',{password:'after123'})).status,200);
+    assert.equal((await request('auth/me','GET',null,empCookie)).status,401);
+    assert.equal((await request('auth/me','GET',null,legacy)).status,401);
+    const login=await request('auth/login','POST',{email:'employee@example.test',password:'after123'},'');
+    assert.equal(login.status,200); empCookie=login.cookie;
+    assert.equal((await request('auth/me','GET',null,empCookie)).status,200);
+  });
+  await t.test('self change revokes other sessions and retains current browser',async()=>{
+    const old=empCookie;
+    const result=await request('auth/change-password','POST',{current_password:'after123',new_password:'latest123'},old);
+    assert.equal(result.status,200);
+    assert.equal((await request('auth/me','GET',null,old)).status,401);
+    empCookie=result.cookie;
+    assert.equal((await request('auth/me','GET',null,empCookie)).status,200);
+    await request(`users/${employee}/active`,'POST',{active:false});
+    await request(`users/${employee}/active`,'POST',{active:true});
+    assert.equal((await request('auth/me','GET',null,empCookie)).status,401);
+    empCookie=cookie(employee);
+    await request(`users/${employee}`,'PUT',{role:'ADMIN'});
+    assert.equal((await request('auth/me','GET',null,empCookie)).status,401);
+    await request(`users/${employee}`,'PUT',{role:'EMPLOYEE'});empCookie=cookie(employee);
+  });
+  const day='2026-06-16';
+  const event = (type,time)=>request('attendance/admin/event','POST',{user_id:employee,day,type,time});
+  await t.test('add, edit and delete reject impossible sequences and roll back',async()=>{
+    assert.equal((await event('OUT','18:00')).status,409);
+    assert.equal((await event('IN','16:00')).status,200);
+    assert.equal((await event('BREAK_START','17:00')).status,200);
+    assert.equal((await event('IN','17:30')).status,409);
+    assert.equal((await event('BREAK_END','17:30')).status,200);
+    assert.equal((await event('OUT','18:00')).status,200);
+    assert.equal((await event('IN','16:00')).status,409);
+    const events=db.prepare('SELECT * FROM events WHERE user_id=? ORDER BY ts').all(employee);
+    assert.equal((await request(`attendance/admin/event/${events[2].id}`,'PUT',{type:'IN'})).status,409);
+    assert.equal((await request(`attendance/admin/event/${events[0].id}`,'DELETE')).status,409);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM events WHERE user_id=?').get(employee).n,4);
+    assert.equal((await request(`attendance/admin/day?user_id=${employee}&day=${day}`)).body.workedMinutes,90);
+    assert.equal((await request('attendance/admin/event','POST',{user_id:employee,day:'2026-06-17',type:'IN',time:'16:00'})).status,200);
+    assert.equal((await request('attendance/admin/event','POST',{user_id:employee,day:'2026-06-17',type:'OUT',time:'02:00'})).body.workedMinutes,600);
+    assert.equal((await request('attendance/admin/event','POST',{user_id:employee,day:'2026-02-30',type:'IN',time:'16:00'})).status,400);
+  });
+  await t.test('approval validation is atomic and successful request cannot be applied twice',async()=>{
+    const pending=await request('punch-requests','POST',{day,type:'IN',time:'17:45',reason:'test'},empCookie);
+    const id=pending.body.request.id;
+    assert.equal((await request(`punch-requests/${id}/decide`,'POST',{decision:'APPROVED'})).status,409);
+    assert.equal(db.prepare('SELECT status FROM punch_requests WHERE id=?').get(id).status,'PENDING');
+    const good=await request('punch-requests','POST',{day:'2026-06-18',type:'IN',time:'16:00',reason:'missed'},empCookie);
+    const gid=good.body.request.id;
+    assert.equal((await request(`punch-requests/${gid}/decide`,'POST',{decision:'APPROVED'})).status,200);
+    assert.equal((await request(`punch-requests/${gid}/decide`,'POST',{decision:'APPROVED'})).status,409);
+  });
+  await t.test('existing corrupt punches are flagged, never inflated in reports or KPIs',async()=>{
+    const put=db.prepare('INSERT INTO events(user_id,type,ts,day) VALUES(?,?,?,?)');
+    const badDay='2026-06-19';
+    for(const [type,time] of [['IN','16:00'],['BREAK_START','17:00'],['IN','17:30'],['OUT','18:00']]) put.run(employee,type,Date.parse(`${badDay}T${time}:00+05:30`),badDay);
+    const result=(await request(`reports/attendance?user_id=${employee}&start=${badDay}&end=${badDay}`)).body;
+    assert.equal(result.rows[0].status,'INVALID');assert.equal(result.rows[0].workedMinutes,null);assert.equal(result.totals.workedMinutes,0);assert.equal(result.needsReview,true);
+    const kpi=(await request('kpi?month=2026-06')).body.rows.find(r=>r.id===employee);
+    assert.equal(kpi.invalidAttendanceDays,1);assert.equal(kpi.hoursWorked,11.5);
+  });
+  await t.test('employment bounds inclusive, inactive people retained and missing dates flagged',async()=>{
+    const former=add('former','EMPLOYEE','2026-06-15','2026-06-17',0);
+    const missing=add('missing','EMPLOYEE','');
+    const r=(await request(`reports/attendance?user_id=${former}&start=2026-06-14&end=2026-06-18`)).body;
+    assert.deepEqual(r.rows.map(r=>r.status),['NOT_EMPLOYED','ABSENT','ABSENT','ABSENT','NOT_EMPLOYED']);assert.equal(r.totals.absent,3);
+    const register=(await request('reports/register?month=2026-06')).body;
+    assert.equal(register.users.find(u=>u.id===former).totals.absent,3);
+    assert.equal(register.users.find(u=>u.id===missing).cells['2026-06-15'],'EMPLOYMENT_UNKNOWN');
+    assert.equal((await request('reports/register?month=2026-07')).body.users.some(u=>u.id===former),false);
+    assert.equal((await request('kpi?month=2026-06')).body.rows.some(u=>u.id===former),true);
+    assert.equal((await request(`users/${employee}`,'PUT',{exit_date:'2026-06-01'})).status,400);
+    assert.equal((await request(`users/${employee}`,'PUT',{join_date:'2026-02-30'})).status,400);
+    const {flagAbsences}=require('../src/autoAbsence');
+    db.prepare("UPDATE users SET exit_date='2026-06-19' WHERE id=?").run(employee);
+    assert.equal(flagAbsences('2026-06-22'),0);
+  });
+  await t.test('migration and revocation version persist across restart',()=>{
+    const version=getUser(employee).session_version;
+    const r=require('node:child_process').spawnSync(process.execPath,['-e',"const {db}=require('./src/db'); console.log(db.prepare('SELECT session_version FROM users WHERE email=?').get('employee@example.test').session_version); db.close()"],{cwd:path.join(__dirname,'..'),env:process.env,encoding:'utf8'});
+    assert.equal(r.status,0,r.stderr);assert.equal(Number(r.stdout.trim()),version);
+  });
+});

@@ -60,6 +60,8 @@ router.post('/change-password', requireAuth, (req, res) => {
     return res.status(401).json({ error: 'Current password is incorrect' });
   }
   setPassword.run(hashPassword(next), user.id);
+  // Keep this browser signed in using the new version; all old cookies fail.
+  setAuthCookie(res, issueToken(user));
   res.json({ ok: true });
 });
 

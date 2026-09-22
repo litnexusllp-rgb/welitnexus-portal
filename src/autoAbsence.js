@@ -17,10 +17,11 @@
 const { db } = require('./db');
 const { now, attendanceToday, DateTime, ZONE } = require('./time');
 const { notifyAdmins } = require('./notify');
+const { employmentStatus } = require('./employment');
 
 const HABIT_DAYS = 14;
 
-const activeEmployees = db.prepare(`SELECT id, name FROM users WHERE active = 1 AND role = 'EMPLOYEE'`);
+const activeEmployees = db.prepare(`SELECT id, name, active, join_date, exit_date FROM users WHERE active = 1 AND role = 'EMPLOYEE'`);
 const inOnDay = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day = ? LIMIT 1`);
 const inWithinWindow = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day >= ? AND day <= ? LIMIT 1`);
 const isHolidayOn = db.prepare(`SELECT duration FROM holidays WHERE date = ? LIMIT 1`);
@@ -57,6 +58,7 @@ function flagAbsences(dayStr) {
 
   const run = db.transaction(() => {
     for (const u of activeEmployees.all()) {
+      if (employmentStatus(u, day)) continue;
       if (inOnDay.get(u.id, day)) continue;                                   // they were present
       if (!inWithinWindow.get(u.id, windowStart, day)) continue;             // no clock-in habit
       if (leaveCoveringDay.get(u.id, day, day)) continue;                    // already on/awaiting leave

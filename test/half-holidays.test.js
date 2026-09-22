@@ -21,6 +21,7 @@ test('half-day holidays persist, can be edited and feed attendance and absence f
   const { db } = require('../src/db'); const { COOKIE, issueToken } = require('../src/auth');
   const admin = db.prepare("SELECT * FROM users WHERE role='ADMIN'").get();
   const empId = db.prepare("INSERT INTO users(name,email,password_hash,role,created_ts) VALUES('Test person','half@example.test','unused','EMPLOYEE',0)").run().lastInsertRowid;
+  db.prepare("UPDATE users SET join_date='2026-01-01' WHERE id=?").run(empId);
   const adminCookie = `${COOKIE}=${issueToken(admin)}`;
   const empCookie = `${COOKIE}=${issueToken({ id: empId, role: 'EMPLOYEE' })}`;
   const server = listen.call(app, 0, '127.0.0.1');

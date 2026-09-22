@@ -253,6 +253,17 @@ for (const stmt of [
   try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
 }
 // Index on the (possibly just-added) client_id column.
+// Security migration: unexpected failures must stop startup, not silently skip revocation.
+if (!db.pragma('table_info(users)').some(c => c.name === 'session_version')) {
+  db.exec('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0');
+}
+db.exec(`CREATE TRIGGER IF NOT EXISTS revoke_user_sessions
+AFTER UPDATE OF password_hash, role, email, active ON users
+WHEN OLD.password_hash IS NOT NEW.password_hash OR OLD.role IS NOT NEW.role
+  OR OLD.email IS NOT NEW.email OR OLD.active IS NOT NEW.active
+BEGIN
+  UPDATE users SET session_version = session_version + 1 WHERE id = NEW.id;
+END;`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`);
 
 // --- One-time re-bucketing of attendance events into "shift days" ---------

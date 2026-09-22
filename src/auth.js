@@ -26,7 +26,9 @@ function verifyPassword(plain, hash) {
 }
 
 function issueToken(user) {
-  return jwt.sign({ uid: user.id, role: user.role }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+  const current = db.prepare('SELECT session_version FROM users WHERE id = ?').get(user.id);
+  if (!current) throw new Error('Cannot issue a session for a missing user');
+  return jwt.sign({ uid: user.id, role: user.role, sv: current.session_version }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
 
 function setAuthCookie(res, token) {
@@ -52,7 +54,10 @@ function loadUser(req, _res, next) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
       const user = getUserById.get(payload.uid);
-      if (user) {
+      // Existing pre-migration cookies are version zero, valid only until the
+      // first password, identity, role or activation change.
+      const version = payload.sv === undefined ? 0 : payload.sv;
+      if (user && Number.isInteger(version) && version === user.session_version) {
         delete user.password_hash;
         req.user = user;
       }

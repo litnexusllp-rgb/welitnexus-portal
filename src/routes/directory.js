@@ -4,6 +4,7 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin, hashPassword } = require('../auth');
 const { now } = require('../time');
+const { employmentError } = require('../employment');
 
 const router = express.Router();
 
@@ -48,6 +49,8 @@ router.post('/', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Name, email, and a 6+ char password are required' });
   }
   if (findByEmail.get(email)) return res.status(409).json({ error: 'Email already in use' });
+  const datesError = employmentError(req.body.join_date, req.body.exit_date);
+  if (datesError) return res.status(400).json({ error: datesError });
   const empCode = String(req.body.emp_code || '').trim();
   if (empCode && findByCode.get(empCode)) return res.status(409).json({ error: 'Employee code already in use' });
   const info = insertUser.run({
@@ -95,6 +98,8 @@ router.put('/me', requireAuth, (req, res) => {
 router.put('/:id', requireAdmin, (req, res) => {
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  const datesError = employmentError(req.body.join_date ?? existing.join_date, req.body.exit_date ?? existing.exit_date);
+  if (datesError) return res.status(400).json({ error: datesError });
   const newEmail = String(req.body.email ?? existing.email).toLowerCase();
   const emailOwner = findByEmail.get(newEmail);
   if (emailOwner && emailOwner.id !== existing.id) {
