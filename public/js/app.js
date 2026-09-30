@@ -2379,7 +2379,7 @@
         <span><i style="background:#fff3b0;border-color:#e1b600;"></i>Late clock-in</span>
         <span><i style="background:#f1ecfb;border-color:#cdbdf0;"></i>No clock-out</span>
         <span><i style="background:#fdf1d8;border-color:#f0dcae;"></i>Short day</span>
-        <span><i style="background:#eaf6f1;border-color:#b9dcd0;"></i>Half day</span>
+        <span><i style="background:#dbeafe;border-color:#93c5fd;"></i>Half day</span>
         <span><i style="background:#7f1d1d;border-color:#651414;"></i>On leave</span>
         <span><i style="background:#f7e9e7;border-color:#e8c6c1;"></i>Absent</span>
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
