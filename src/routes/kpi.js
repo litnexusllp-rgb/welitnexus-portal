@@ -44,6 +44,9 @@ const approvedLeaves = db.prepare(
   `SELECT user_id, start_date, end_date, kind FROM leaves
    WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
 );
+const lateNormalOverridesBetween = db.prepare(
+  `SELECT user_id, day FROM attendance_day_overrides WHERE ignore_late = 1 AND day >= ? AND day <= ?`
+);
 const achievementsBetween = db.prepare(
   `SELECT user_id, status, points FROM achievements WHERE date >= ? AND date <= ?`
 );
@@ -83,6 +86,7 @@ async function buildKpi(req) {
   // early) is exactly what was approved, so they count neither for nor against.
   const halfDays = new Set();
   const halfHolidays = new Set(db.prepare("SELECT date FROM holidays WHERE duration='HALF' AND date>=? AND date<=?").all(start, end).map(h => h.date));
+  const lateNormalDays = new Set(lateNormalOverridesBetween.all(start, end).map((r) => `${r.user_id}|${r.day}`));
   for (const l of approvedLeaves.all(end, start)) {
     if (l.kind === 'HALF') halfDays.add(`${l.user_id}|${l.start_date}`);
   }
@@ -103,7 +107,7 @@ async function buildKpi(req) {
       const cutoff = DateTime.fromISO(day, { zone: ZONE })
         .set({ hour: sh.h, minute: sh.m, second: 0, millisecond: 0 })
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
-      if (s.firstIn <= cutoff) a.onTime += 1;
+      if (s.firstIn <= cutoff || lateNormalDays.has(k)) a.onTime += 1;
     }
   }
 
