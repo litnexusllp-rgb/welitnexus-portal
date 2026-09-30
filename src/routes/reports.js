@@ -42,6 +42,9 @@ const approvedLeavesOverlapping = db.prepare(
 );
 const holidaysBetween = db.prepare(`SELECT date, name, duration FROM holidays WHERE date >= ? AND date <= ?`);
 const workingDaysBetween = db.prepare(`SELECT id, date FROM working_days WHERE date >= ? AND date <= ?`);
+const lateNormalOverridesBetween = db.prepare(
+  `SELECT day FROM attendance_day_overrides WHERE user_id = ? AND ignore_late = 1 AND day >= ? AND day <= ?`
+);
 
 function eachDay(start, end) {
   const out = [];
@@ -97,6 +100,7 @@ function buildAttendanceReport(user, req) {
       leaveByDay[d] = l.kind;
     }
   }
+  const lateNormalDays = new Set(lateNormalOverridesBetween.all(user.id, start, end).map((r) => r.day));
 
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
@@ -108,7 +112,8 @@ function buildAttendanceReport(user, req) {
     // Punctuality / short-day flags for the calendar view. An approved half day
     // is exempt — coming in later (or leaving early) is the point of it.
     let late = false; let minutesLate = 0;
-    if (!excluded && s && s.firstIn != null && status !== 'HALF' && !halfHoliday) {
+    const lateOverride = lateNormalDays.has(day);
+    if (!lateOverride && !excluded && s && s.firstIn != null && status !== 'HALF' && !halfHoliday) {
       const cutoff = DateTime.fromISO(day, { zone: ZONE })
         .set({ hour: shift.h, minute: shift.m, second: 0, millisecond: 0 })
         .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
@@ -132,6 +137,7 @@ function buildAttendanceReport(user, req) {
       breakMinutes: status === 'INVALID' ? null : !excluded && s ? s.breakMinutes : 0,
       late,
       minutesLate,
+      lateOverride,
       short,
       noClockOut,
     };
