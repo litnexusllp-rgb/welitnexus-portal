@@ -2044,12 +2044,12 @@
   // Admin modal to add/edit/delete an employee's punches for one day.
   // onDone: what to refresh after editing (defaults to the Reports page views,
   // but the calendar passes its own reloader).
-  async function openAttendanceEditor(userId, day, onDone) {
+  async function openAttendanceEditor(userId, day, onDone, performanceRow) {
     modal(`<h3>Fix attendance</h3><div id="fixBody">Loading…</div>`);
-    renderAttendanceEditor(userId, day, onDone);
+    renderAttendanceEditor(userId, day, onDone, performanceRow);
   }
 
-  async function renderAttendanceEditor(userId, day, onDone) {
+  async function renderAttendanceEditor(userId, day, onDone, performanceRow) {
     let data;
     try { data = await api.get(`/attendance/admin/day?user_id=${userId}&day=${day}`); }
     catch (e) { return toast(e.message, true); }
@@ -2065,6 +2065,11 @@
           <td class="row-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}">✕</button></td>
         </tr>`).join('')}
       </tbody></table>` : `<div class="empty" style="margin-bottom:14px;">No punches recorded for this day.</div>`}
+      ${performanceRow && (performanceRow.late || performanceRow.lateOverride || data.lateNormal) ? `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;margin-bottom:14px;border:1px solid var(--line);border-radius:9px;background:var(--mist);">
+          <div><strong>Punctuality</strong><div style="font-size:.78rem;color:var(--slate);margin-top:2px;">${data.lateNormal ? 'This day is treated as Normal by admin override.' : 'This clock-in is currently counted as Late.'}</div></div>
+          <button class="btn ${data.lateNormal ? 'btn-ghost' : 'btn-primary'} btn-sm" id="lateNormalBtn">${data.lateNormal ? 'Restore late status' : 'Mark late as normal'}</button>
+        </div>` : ''}
       <div class="field" style="margin-bottom:6px;"><label>Add a punch</label></div>
       <div class="form-row" style="margin-bottom:0;">
         <div class="field"><select id="newType">${typeOpts('IN')}</select></div>
@@ -2072,21 +2077,29 @@
       </div>
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
 
+    $('#lateNormalBtn')?.addEventListener('click', async () => {
+      try {
+        await api.post('/attendance/admin/late-normal', { user_id: userId, day, normal: !data.lateNormal });
+        toast(data.lateNormal ? 'Automatic late status restored' : 'Marked as normal ✓');
+        if (onDone) await onDone();
+        renderAttendanceEditor(userId, day, onDone, performanceRow);
+      } catch (e) { toast(e.message, true); }
+    });
     body.querySelectorAll('[data-esave]').forEach((b) => b.addEventListener('click', async () => {
       const id = b.dataset.esave;
       try {
         await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
-        toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone);
+        toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow);
       } catch (e) { toast(e.message, true); }
     }));
     body.querySelectorAll('[data-edel]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day, onDone); }
+      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day, onDone, performanceRow); }
       catch (e) { toast(e.message, true); }
     }));
     $('#addPunch').addEventListener('click', async () => {
       const time = $('#newTime').value;
       if (!time) return toast('Pick a time', true);
-      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone); }
+      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow); }
       catch (e) { toast(e.message, true); }
     });
     $('#fixDone').addEventListener('click', () => { closeModal(); if (onDone) onDone(); else { loadEmpReport(); loadRegister(); } });
@@ -2295,8 +2308,8 @@
     } catch (e) { toast(e.message, true); }
   }
 
-  // Month grid: each day coloured by what happened — red for a late clock-in,
-  // amber for a short day, plus leave / absent / holiday / weekend.
+  // Month grid: each day coloured by what happened — yellow for a late clock-in,
+  // dark red for leave, amber for a short day, plus absent / holiday / weekend.
   function renderMyCalendar(att) {
     const el = $('#myCal'); if (!el) return;
     const byDay = {}; att.rows.forEach((r) => { byDay[r.day] = r; });
@@ -2327,12 +2340,13 @@
       else if (r.status === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
       else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }
       else if (r.noClockOut) { cls = 'pcal-noout'; tag = 'No clock-out'; }
+      else if (r.lateOverride) { cls = 'pcal-ok'; tag = 'Normal · admin'; }
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
       const inTime = r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       const can = clickable(r);
       const action = isAdmin() ? 'click to fix punches' : 'click to request a correction';
-      const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.late ? `late by ${r.minutesLate} min` : '', can ? `— ${action}` : ''].filter(Boolean).join(' · ');
+      const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
       return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}${can ? ' pcal-clickable' : ''}" title="${esc(title)}"${can ? ` data-fixday="${iso}" role="button" tabindex="0"` : ''}>
         <span class="dn">${dayNum}</span>
         ${inTime && r.status !== 'WEEKEND' ? `<span class="mins">${inTime}</span>` : ''}
@@ -2362,16 +2376,16 @@
       </div>
       <div class="pcal-legend">
         <span><i style="background:#eafaf3;border-color:#b7e6d4;"></i>On time</span>
-        <span><i style="background:#fdece9;border-color:#f3c6bf;"></i>Late clock-in</span>
+        <span><i style="background:#fff3b0;border-color:#e1b600;"></i>Late clock-in</span>
         <span><i style="background:#f1ecfb;border-color:#cdbdf0;"></i>No clock-out</span>
         <span><i style="background:#fdf1d8;border-color:#f0dcae;"></i>Short day</span>
         <span><i style="background:#eaf6f1;border-color:#b9dcd0;"></i>Half day</span>
-        <span><i style="background:#e3eefb;border-color:#c3dbf5;"></i>Leave</span>
+        <span><i style="background:#7f1d1d;border-color:#651414;"></i>On leave</span>
         <span><i style="background:#f7e9e7;border-color:#e8c6c1;"></i>Absent</span>
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows red. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Click any day to fix its punches.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Click any day to fix its punches.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -2381,7 +2395,7 @@
     $('#calNext').addEventListener('click', () => shiftMonth(1));
     // Fix a day straight from the calendar.
     const openDay = (iso) => {
-      if (isAdmin()) openAttendanceEditor(att.user.id, iso, loadMyPerf);
+      if (isAdmin()) openAttendanceEditor(att.user.id, iso, loadMyPerf, byDay[iso]);
       else openPunchRequestModal(iso);
     };
     el.querySelectorAll('[data-fixday]').forEach((c) => {
