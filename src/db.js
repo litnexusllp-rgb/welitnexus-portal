@@ -44,6 +44,20 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_user_day ON events(user_id, day);
 CREATE INDEX IF NOT EXISTS idx_events_day      ON events(day);
 
+-- Admin punctuality exceptions. Punches remain unchanged for auditability; this
+-- only allows an admin to treat a late clock-in as a normal/on-time day.
+CREATE TABLE IF NOT EXISTS attendance_day_overrides (
+  user_id     INTEGER NOT NULL,
+  day         TEXT    NOT NULL,
+  ignore_late INTEGER NOT NULL DEFAULT 0 CHECK(ignore_late IN (0,1)),
+  updated_by  INTEGER,
+  updated_ts  INTEGER NOT NULL,
+  PRIMARY KEY (user_id, day),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (updated_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_attendance_overrides_day ON attendance_day_overrides(day);
+
 CREATE TABLE IF NOT EXISTS leaves (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL,
