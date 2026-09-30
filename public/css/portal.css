@@ -176,16 +176,16 @@ tbody tr:hover { background: #eef5fb; }
 /* day states */
 .pcal-ok      { background: #eafaf3; border-color: #b7e6d4; }
 .pcal-ok .mins { color: var(--teal-dark); }
-.pcal-late    { background: #fdece9; border-color: #f3c6bf; }
-.pcal-late .dn, .pcal-late .tag, .pcal-late .mins { color: var(--danger); }
+.pcal-late    { background: #fff3b0; border-color: #e1b600; }
+.pcal-late .dn, .pcal-late .tag, .pcal-late .mins { color: #7a5a00; }
 /* Forgot to clock out — hours are incomplete until it's corrected */
 .pcal-noout   { background: #f1ecfb; border-color: #cdbdf0; border-left: 4px solid #7c5cc4; }
 .pcal-noout .dn, .pcal-noout .tag { color: #6b46c1; }
 .pcal-noout .tag { font-weight: 800; }
 .pcal-short   { background: #fdf1d8; border-color: #f0dcae; }
 .pcal-short .tag, .pcal-short .mins { color: #9a6b00; }
-.pcal-leave   { background: #e3eefb; border-color: #c3dbf5; }
-.pcal-leave .tag { color: var(--info); }
+.pcal-leave   { background: #7f1d1d; border-color: #651414; }
+.pcal-leave .dn, .pcal-leave .tag, .pcal-leave .mins { color: #fff7f7; }
 /* Half day — worked part of the day, so it reads between "present" and "leave" */
 .pcal-half    { background: #eaf6f1; border-color: #b9dcd0; border-left: 4px solid var(--info); }
 .pcal-half .tag { color: var(--info); }
