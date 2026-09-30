@@ -26,6 +26,17 @@ const eventsForUserDay = db.prepare(
 const eventsForUserBetween = db.prepare(
   `SELECT * FROM events WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts ASC, id ASC`
 );
+const getLateNormalOverride = db.prepare(
+  `SELECT ignore_late FROM attendance_day_overrides WHERE user_id = ? AND day = ?`
+);
+const setLateNormalOverride = db.prepare(`
+  INSERT INTO attendance_day_overrides (user_id, day, ignore_late, updated_by, updated_ts)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(user_id, day) DO UPDATE SET
+    ignore_late = excluded.ignore_late,
+    updated_by = excluded.updated_by,
+    updated_ts = excluded.updated_ts
+`);
 
 // GET the current attendance-day status for the signed-in user. "day" here is
 // the shift day (cutover-adjusted), so an overnight shift stays one day.
@@ -135,7 +146,20 @@ router.get('/admin/day', requireAdmin, (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day (yyyy-mm-dd) required' });
   const events = eventsForUserDay.all(user.id, day);
   const summary = summarize(events, day === attendanceToday() ? now().toMillis() : null);
-  res.json({ user, day, events: withTimes(events), ...summary });
+  const lateNormal = getLateNormalOverride.get(user.id, day)?.ignore_late === 1;
+  res.json({ user, day, events: withTimes(events), lateNormal, ...summary });
+});
+
+// ADMIN: mark a day's late clock-in as normal for punctuality, or restore the
+// automatic late calculation. This never changes the recorded punch times.
+router.post('/admin/late-normal', requireAdmin, (req, res) => {
+  const user = getUserName.get(Number(req.body.user_id));
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  const day = String(req.body.day || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day required' });
+  if (typeof req.body.normal !== 'boolean') return res.status(400).json({ error: 'normal must be true or false' });
+  setLateNormalOverride.run(user.id, day, req.body.normal ? 1 : 0, req.user.id, now().toMillis());
+  res.json({ user_id: user.id, day, lateNormal: req.body.normal });
 });
 
 // ADMIN: add a punch for an employee.
