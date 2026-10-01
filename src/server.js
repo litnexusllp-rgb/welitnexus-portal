@@ -65,6 +65,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/leaves', require('./routes/leaves'));
 app.use('/api/holidays', require('./routes/holidays'));
+app.use('/api/bonuses', require('./routes/bonuses'));
 app.use('/api/users', require('./routes/directory'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/clients', require('./routes/clients'));
