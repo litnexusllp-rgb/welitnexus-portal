@@ -305,4 +305,20 @@ try {
   console.error('Attendance re-bucketing skipped:', e.message);
 }
 
+// Bonus payments are private admin records; voids retain the original audit trail.
+db.exec(`CREATE TABLE IF NOT EXISTS bonuses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  month TEXT NOT NULL,
+  paid_on TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_ts INTEGER NOT NULL,
+  voided_by INTEGER REFERENCES users(id),
+  voided_ts INTEGER,
+  void_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_employee_month ON bonuses(user_id, month) WHERE voided_ts IS NULL;
+CREATE INDEX IF NOT EXISTS idx_bonus_month ON bonuses(month);`);
+
 module.exports = { db, DB_PATH };

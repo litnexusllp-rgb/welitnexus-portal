@@ -2194,6 +2194,53 @@
     a.download = filename; a.click(); URL.revokeObjectURL(a.href);
   }
 
+  // ---------- Private bonus history ----------
+  let bonusMonth = '';
+  VIEWS.bonuses = async () => {
+    if (!isAdmin()) return;
+    setMain('Bonus history', 'Admin only · Record bonuses already paid and review previous recipients before choosing this month’s employees.', '<div id="bonusContent">Loading…</div>');
+    try {
+      const data = await api.get('/bonuses' + (bonusMonth ? '?month=' + encodeURIComponent(bonusMonth) : ''));
+      if (!$('#bonusContent')) return;
+      bonusMonth = data.month;
+      const previous = new Date(bonusMonth + '-01T12:00:00'); previous.setMonth(previous.getMonth() - 1);
+      const prevMonth = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2, '0');
+      previous.setMonth(previous.getMonth() - 1);
+      const twoMonthsAgo = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2, '0');
+      const recentLabel = u => u.last_bonus_month === bonusMonth ? 'Already recorded this month' : u.last_bonus_month === prevMonth ? 'Received last month' : u.last_bonus_month === twoMonthsAgo ? 'Received two months ago' : '';
+      $('#bonusContent').innerHTML = `<div class="toolbar"><div class="field"><label for="bonusMonth">Review month</label><input id="bonusMonth" type="month" value="${esc(bonusMonth)}" max="${data.today.slice(0,7)}"></div><button class="btn btn-primary" id="recordBonus">+ Record paid bonus</button></div>
+        <p class="page-sub">Latest bonus and counts are shown through the selected month. Employees with no recorded bonus appear first, then the longest waiting. “No record” does not mean they never received a bonus; add past payments to build the history.</p>
+        <div class="section"><h2>Employee overview</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest bonus month</th><th>Bonuses recorded</th><th>Reminder</th></tr></thead><tbody>${data.employees.map(u => `<tr><td>${esc(u.name)}${u.active ? '' : ' (inactive)'}</td><td>${esc(u.last_bonus_month || 'No record')}</td><td>${u.bonus_count}</td><td>${esc(recentLabel(u))}</td></tr>`).join('')}</tbody></table></div></div>
+        <div class="section"><h2>Payment history</h2><label for="bonusHistoryScope">Show</label> <select id="bonusHistoryScope"><option value="month">Selected month</option><option value="all">All months</option></select><div id="bonusHistory"></div></div>`;
+      const renderHistory = () => {
+        const rows = data.history.filter(b => $('#bonusHistoryScope').value === 'all' || b.month === bonusMonth);
+        $('#bonusHistory').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Month</th><th>Employee</th><th>Paid on</th><th>Notes</th><th>Recorded by</th><th>Status</th></tr></thead><tbody>${rows.map(b => `<tr><td>${esc(b.month)}</td><td>${esc(b.name)}</td><td>${esc(fmtDate(b.paid_on))}</td><td>${esc(b.note)}</td><td>${esc(b.recorded_by)}</td><td>${b.voided_ts ? `Voided by ${esc(b.voided_by_name)}: ${esc(b.void_reason)}` : `<button class="btn btn-ghost btn-sm" data-void-bonus="${b.id}">Void incorrect record</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No bonus payments recorded for this period.</div>';
+        document.querySelectorAll('[data-void-bonus]').forEach(button => button.addEventListener('click', () => {
+          modal('<h3>Void incorrect bonus record</h3><p>The original record stays in history. This does not reverse a payment. You can record a corrected entry afterwards.</p><div class="field"><label for="bonusReason">Reason</label><textarea id="bonusReason" maxlength="1000"></textarea></div><div class="modal-actions"><button class="btn btn-ghost" id="bonusCancel">Cancel</button><button class="btn btn-danger" id="bonusVoid">Void record</button></div>');
+          $('#bonusCancel').onclick = closeModal;
+          $('#bonusVoid').onclick = async () => {
+            const btn = $('#bonusVoid'); btn.disabled = true;
+            try { await api.post('/bonuses/' + button.dataset.voidBonus + '/void', { reason: $('#bonusReason').value }); closeModal(); toast('Record voided'); VIEWS.bonuses(); }
+            catch (e) { toast(e.message, true); btn.disabled = false; }
+          };
+        }));
+      };
+      renderHistory(); $('#bonusHistoryScope').onchange = renderHistory;
+      $('#bonusMonth').onchange = e => { if (e.target.value) { bonusMonth = e.target.value; VIEWS.bonuses(); } };
+      $('#recordBonus').onclick = () => {
+        modal(`<h3>Record paid bonus</h3><p>Select one to three employees. Recent recipients are highlighted for your review; the final choice stays with you.</p><div class="form-row"><div class="field"><label for="bonusFor">Bonus for month</label><input type="month" id="bonusFor" value="${esc(bonusMonth)}" readonly></div><div class="field"><label for="bonusPaid">Actual payment date</label><input type="date" id="bonusPaid" value="${data.today}" max="${data.today}"></div></div><fieldset style="max-height:260px;overflow:auto;"><legend>Recipients</legend>${data.employees.map(u => `<label style="display:block;padding:8px;"><input type="checkbox" name="bonusRecipient" value="${u.id}" ${u.last_bonus_month === bonusMonth ? 'disabled' : ''}> ${esc(u.name)}${u.active ? '' : ' (inactive)'} · Last: ${esc(u.last_bonus_month || 'No record')}${recentLabel(u) ? ` · ${esc(recentLabel(u))}` : ''}</label>`).join('')}</fieldset><div class="field"><label for="bonusNote">Notes (optional)</label><textarea id="bonusNote" maxlength="1000" placeholder="Payment reference or reason for bonus"></textarea></div><div class="modal-actions"><button class="btn btn-ghost" id="bonusCancel">Cancel</button><button class="btn btn-primary" id="bonusSave">Save payment record</button></div>`);
+        $('#bonusCancel').onclick = closeModal;
+        $('#bonusSave').onclick = async () => {
+          const ids = [...document.querySelectorAll('input[name="bonusRecipient"]:checked')].map(el => Number(el.value));
+          if (!ids.length || ids.length > 3) return toast('Choose one to three employees', true);
+          const btn = $('#bonusSave'); btn.disabled = true;
+          try { await api.post('/bonuses', { month: bonusMonth, paid_on: $('#bonusPaid').value, user_ids: ids, note: $('#bonusNote').value }); closeModal(); toast('Bonus payment recorded'); VIEWS.bonuses(); }
+          catch (e) { toast(e.message, true); btn.disabled = false; }
+        };
+      };
+    } catch (e) { if ($('#bonusContent')) $('#bonusContent').textContent = 'Unable to load bonus history. Please reopen this page to retry.'; toast(e.message, true); }
+  };
+
   // ---------- Calendar / Holidays ----------
   let calMonth = new Date().getMonth(), calYear = new Date().getFullYear();
   VIEWS.calendar = async () => {
