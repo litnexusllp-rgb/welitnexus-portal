@@ -39,6 +39,12 @@ const forMonth = db.prepare(
   `SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id
    WHERE a.date >= ? AND a.date <= ? ORDER BY a.status = 'PENDING' DESC, a.date DESC`
 );
+// The review queue spans every month; the month picker filters reviewed history only.
+const forReview = db.prepare(
+  `SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id
+   WHERE a.status = 'PENDING' OR (a.date >= ? AND a.date <= ?)
+   ORDER BY a.status = 'PENDING' DESC, a.date DESC, a.id DESC`
+);
 const review = db.prepare(
   `UPDATE achievements SET status = ?, points = ?, reviewed_by = ?, reviewed_ts = ? WHERE id = ?`
 );
@@ -83,7 +89,7 @@ router.delete('/:id', requireAuth, (req, res) => {
 router.get('/month/:month', requireAdmin, (req, res) => {
   const m = String(req.params.month);
   if (!/^\d{4}-\d{2}$/.test(m)) return res.status(400).json({ error: 'Month must be yyyy-mm' });
-  res.json({ achievements: forMonth.all(`${m}-01`, `${m}-31`) });
+  res.json({ achievements: (req.query.include_pending === '1' ? forReview : forMonth).all(`${m}-01`, `${m}-31`) });
 });
 
 // ADMIN: review — acknowledge with points, or decline.
