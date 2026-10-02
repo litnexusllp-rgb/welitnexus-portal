@@ -321,7 +321,7 @@
   function navigate(view, fromAddress = false) {
     if (!ME) return;
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
-    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses'];
+    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
     const hash = '#/' + view;
     if (window.location.hash !== hash) {
@@ -349,6 +349,44 @@
   //  VIEWS
   // ====================================================================
   const VIEWS = {};
+
+  // ---------- Admin operations: automatic read-only exception checks ----------
+  VIEWS.operations = async () => {
+    if (!isAdmin()) return;
+    setMain('Operations', 'Admin only · LIT Tasks and portal approvals in one place. Refreshes every minute while open; Asana reads are shared and cached for up to five minutes.',
+      '<div class="toolbar"><button class="btn btn-ghost" id="opsRefresh">Refresh</button><span id="opsTime" role="status">Loading…</span></div><div id="opsBody"></div>');
+    let loading = false;
+    let taskFilter = 'overdue';
+    const load = async () => {
+      if (loading || !$('#opsBody')) return;
+      loading = true;
+      const host = $('#opsBody');
+      try {
+        const d = await api.get('/operations');
+        if ($('#opsBody') !== host) return;
+        $('#opsTime').textContent = 'Checked ' + new Date(d.observedAt).toLocaleString() + ' · ' + d.timezone;
+        const a = d.asana, c = a.counts;
+        host.innerHTML = `<div class="cards">${statCard('Pending approvals', d.approvals.length, 'value')}${statCard('Overdue Asana tasks', c ? c.overdue : 'Unknown', 'value')}${statCard('No owner', c ? c.unassigned : 'Unknown', 'value')}${statCard('No due date', c ? c.missingDue : 'Unknown', 'value')}</div>
+          <div class="section"><h2>Asana · LIT Tasks</h2><p class="page-sub">${esc(a.scope)}. ${a.lastSuccessAt ? 'Last complete read: ' + esc(new Date(a.lastSuccessAt).toLocaleString()) : 'No complete read yet.'}</p>
+          ${a.state === 'ok' ? `<label for="opsFilter">Show</label> <select id="opsFilter"><option value="overdue">Overdue (${c.overdue})</option><option value="dueToday">Due today (${c.dueToday})</option><option value="unassigned">No owner (${c.unassigned})</option><option value="missingDue">No due date (${c.missingDue})</option><option value="all">All pending (${c.pending})</option></select><div id="opsTasks"></div>` : `<p role="alert">${esc(a.error || 'Asana is not configured. Add the existing Asana integration credentials in Railway.')}${a.retryAt ? ' Retry after ' + esc(new Date(a.retryAt).toLocaleTimeString()) : ''}</p>`}</div>
+          <div class="section"><h2>Waiting for admin review · all months</h2><p class="page-sub">Oldest requests first. Open the relevant section to review using its existing approval controls.</p>${d.approvals.length ? `<div class="table-wrap"><table><thead><tr><th>Waiting</th><th>Type</th><th>Employee</th><th>Request</th><th></th></tr></thead><tbody>${d.approvals.map(r=>`<tr><td>${r.waitingDays} days</td><td>${esc(r.kind)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td><a href="#/${esc(r.view)}">Review</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No pending approvals.</div>'}</div>
+          <div class="section"><h2>Bonus rotation</h2><p class="page-sub">Payment history helps you avoid repeating recipients. Final decisions remain with admins. <a href="#/bonuses">Open bonus history</a></p><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest recorded bonus month</th></tr></thead><tbody>${d.bonuses.map(b=>`<tr><td>${esc(b.name)}</td><td>${esc(b.lastMonth || 'No record')}</td></tr>`).join('')}</tbody></table></div></div>
+          <div class="section"><h2>Automation status</h2><p>New Slack alerts: off. Existing EOD automation: <strong>${d.slack.eodEnabled ? 'enabled' : 'off'}</strong>.</p><p class="page-sub">These checks do not send messages, change Asana tasks, approve requests or make payments. A task’s blocker must be recorded by its owner; an overdue date alone does not explain why it is pending.</p></div>`;
+        if (a.state === 'ok') {
+          const render = () => {
+            const rows = a.tasks.filter(t=>taskFilter==='all'||t[taskFilter]);
+            $('#opsTasks').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Task</th><th>Owner</th><th>Due date</th><th>Flags</th></tr></thead><tbody>${rows.map(t=>`<tr><td><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.name)}</a></td><td>${esc(t.assignee)}</td><td>${esc(t.due || 'Not set')}</td><td>${[t.overdue?'Overdue':'',t.unassigned?'No owner':'',t.missingDue?'No due date':''].filter(Boolean).join(' · ')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No tasks in this category.</div>';
+          };
+          $('#opsFilter').value = taskFilter;
+          $('#opsFilter').onchange = e=>{taskFilter=e.target.value;render();};render();
+        }
+      } catch (e) { if ($('#opsBody')===host) { $('#opsTime').textContent='Refresh failed — displayed information may be out of date.'; toast(e.message,true); } }
+      finally { loading=false; }
+    };
+    $('#opsRefresh').onclick=load;
+    await load();
+    if ($('#opsBody')) dashTimers.push(setInterval(load,60000));
+  };
 
   // ---------- Dashboard ----------
   VIEWS.dashboard = async () => {

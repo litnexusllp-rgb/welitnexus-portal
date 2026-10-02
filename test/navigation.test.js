@@ -16,7 +16,7 @@ function harness(hash='#/myperf',admin=false){
   return {c,links,listeners,renders,history};
 }
 test('each sidebar section is a native link with a distinct address',()=>{
- const h=harness();assert.equal(h.links.length,14);for(const l of h.links)assert.ok(html.includes(`href="#/${l.dataset.view}"`));
+ const h=harness();assert.equal(h.links.length,15);for(const l of h.links)assert.ok(html.includes(`href="#/${l.dataset.view}"`));
  assert.match(app,/navigate\(viewFromAddress\(\), true\)/);
 });
 test('deep links, refresh and history restore the requested section',()=>{
