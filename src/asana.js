@@ -15,6 +15,7 @@
 //   3. their full name (case-insensitive)
 
 const { db } = require('./db');
+const { todayStr } = require('./time');
 
 // ASANA_API_BASE exists so the integration can be pointed at a stub in tests;
 // in normal use it stays on Asana's real API.
@@ -32,13 +33,18 @@ const activeUsers = db.prepare(
 );
 
 let cache = { at: 0, tasks: null };
+let inFlight = null;
+let retryAt = 0;
+let lastError = null;
 
 async function apiGet(path) {
-  const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${cfg().token}` } });
+  const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${cfg().token}` }, signal: AbortSignal.timeout(15000) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = (body && body.errors && body.errors[0] && body.errors[0].message) || `HTTP ${res.status}`;
-    const err = new Error(msg); err.status = res.status; throw err;
+    const err = new Error(msg); err.status = res.status;
+    if (res.status === 429) err.retryMs = Math.max(60000, (Number(res.headers.get('retry-after')) || 60) * 1000);
+    throw err;
   }
   return body;
 }
@@ -47,17 +53,35 @@ async function apiGet(path) {
 async function allTasks(force = false) {
   if (!enabled()) return [];
   if (!force && cache.tasks && Date.now() - cache.at < CACHE_MS) return cache.tasks;
-  const fields = 'name,completed,completed_at,due_on,permalink_url,assignee.name,assignee.email';
-  let path = `/tasks?project=${encodeURIComponent(cfg().project)}&opt_fields=${fields}&limit=100`;
-  const out = [];
-  for (let page = 0; page < 20 && path; page++) { // hard cap: 2000 tasks
-    const body = await apiGet(path);
-    out.push(...(body.data || []));
-    const next = body.next_page && body.next_page.path;
-    path = next ? next.replace(/^\/api\/1\.0/, '') : null;
-  }
-  cache = { at: Date.now(), tasks: out };
-  return out;
+  if (inFlight) return inFlight;
+  if (Date.now() < retryAt) throw new Error(lastError || 'Asana temporarily unavailable');
+  inFlight = (async () => {
+    const fields = 'name,completed,completed_at,due_on,due_at,modified_at,permalink_url,assignee.gid,assignee.name,assignee.email';
+    const base = `/tasks?project=${encodeURIComponent(cfg().project)}&opt_fields=${fields}&limit=100&completed_since=1970-01-01T00%3A00%3A00Z`;
+    let path = base;
+    const out = new Map(); const offsets = new Set();
+    for (let page = 0; path; page++) {
+      if (page >= 1000) throw new Error('Asana pagination exceeded safety limit; results are incomplete');
+      const body = await apiGet(path);
+      if (!Array.isArray(body.data)) throw new Error('Invalid Asana task response');
+      for (const task of body.data) out.set(task.gid, task);
+      const offset = body.next_page?.offset;
+      if (body.next_page && !offset) throw new Error('Asana pagination token missing; results are incomplete');
+      if (offset && offsets.has(offset)) throw new Error('Asana repeated a pagination token; results are incomplete');
+      if (offset) offsets.add(offset);
+      path = offset ? base + '&offset=' + encodeURIComponent(offset) : null;
+    }
+    cache = { at: Date.now(), tasks: [...out.values()] };
+    lastError = null; retryAt = 0;
+    return cache.tasks;
+  })();
+  try { return await inFlight; }
+  catch (e) { lastError = e.message; retryAt = Date.now() + (e.retryMs || 60000); throw e; }
+  finally { inFlight = null; }
+}
+
+function syncStatus() {
+  return { project: cfg().project, lastSuccessAt: cache.at || null, lastError, retryAt: retryAt || null };
 }
 
 // portal user id -> [asana task], using the matching rules described above.
@@ -91,7 +115,7 @@ async function myTasks(userId) {
     .map((t) => ({
       gid: t.gid, name: t.name || '(untitled)', due_on: t.due_on || '',
       url: t.permalink_url || '',
-      overdue: !!(t.due_on && t.due_on < new Date().toLocaleDateString('en-CA')),
+      overdue: !!(t.due_on && t.due_on < todayStr()),
     }));
 }
 
@@ -107,7 +131,7 @@ async function teamTasks() {
     if (u.email) byEmail.set(String(u.email).toLowerCase(), u);
     if (u.name) byName.set(String(u.name).trim().toLowerCase(), u);
   }
-  const today = new Date().toLocaleDateString('en-CA');
+  const today = todayStr();
   const groups = new Map(); // key -> { name, matched, tasks[] }
   for (const t of tasks) {
     if (t.completed) continue; // pending only
@@ -187,4 +211,4 @@ async function diagnose() {
   }
 }
 
-module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks };
+module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus };
