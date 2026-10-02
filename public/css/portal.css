@@ -40,7 +40,7 @@ button { font-family: var(--font); cursor: pointer; }
 .app.show { display: grid; }
 .sidebar { background: var(--navy-dark); color: #c3d2e0; padding: 24px 16px; display: flex; flex-direction: column; }
 .sidebar-logo { width: 185px; max-width: 100%; height: auto; display: block; margin: 4px 4px 26px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 10px;
+.nav-item { text-decoration: none; display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 10px;
   color: #c3d2e0; font-size: 0.94rem; font-weight: 500; cursor: pointer; margin-bottom: 4px; border: none; background: none; width: 100%; text-align: left; }
 .nav-item:hover { background: rgba(255,255,255,.06); color: var(--white); }
 .nav-item.active { background: var(--teal); color: var(--white); }

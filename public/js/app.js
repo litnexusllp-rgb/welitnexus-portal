@@ -231,7 +231,7 @@
     $('#meName').textContent = ME.name;
     $('#meRole').textContent = `${ME.title || ME.role} · ${ME.department || '—'}`;
     startNotifications();
-    navigate('dashboard');
+    navigate(viewFromAddress(), true);
     // Birthday first (it's a one-off moment); the Friday checklist follows.
     checkBirthday().then((shown) => { if (!shown) checkFridayReminder(); });
   }
@@ -303,17 +303,42 @@
   }
 
   // ---------- navigation ----------
+  function viewFromAddress() {
+    return window.location.hash.replace(/^#\//, '') || 'dashboard';
+  }
+
   $('#nav').addEventListener('click', (e) => {
-    const btn = e.target.closest('.nav-item');
-    if (btn) navigate(btn.dataset.view);
+    const link = e.target.closest('.nav-item');
+    // Let the browser handle Command/Ctrl-click, Shift-click and middle-click.
+    if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    navigate(link.dataset.view);
+  });
+  window.addEventListener('hashchange', () => {
+    if (ME) navigate(viewFromAddress(), true);
   });
 
-  function navigate(view) {
-    document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  function navigate(view, fromAddress = false) {
+    if (!ME) return;
+    if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
+    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses'];
+    if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
+    const hash = '#/' + view;
+    if (window.location.hash !== hash) {
+      window.history[fromAddress ? 'replaceState' : 'pushState'](null, '', hash);
+    }
+    document.querySelectorAll('.nav-item').forEach((b) => {
+      const active = b.dataset.view === view;
+      b.classList.toggle('active', active);
+      if (active) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
+    const selected = document.querySelector('.nav-item.active');
+    document.title = (selected ? selected.textContent.trim() + ' · ' : '') + 'WeLitNexus Portal';
+    closeModal();
     clearInterval(clockTimer);
     dashTimers.forEach(clearInterval); dashTimers = []; DASH_LIVE = null;
-    const r = VIEWS[view];
-    if (r) r();
+    VIEWS[view]();
   }
 
   function setMain(title, sub, body) {
@@ -1820,7 +1845,7 @@
        <div class="admin-only section" style="margin-top:30px;">
          <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Review (admin)</h2>
            <input type="month" id="achMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></div>
-         <div id="reviewAch"></div>
+         <p class="page-sub">Pending achievements from all months stay here until reviewed. The month picker filters acknowledged and declined history only.</p><div id="reviewAch"></div>
        </div>`);
     $('#logAchBtn').addEventListener('click', openAchievementModal);
     loadMyAchievements();
@@ -1865,7 +1890,7 @@
   async function loadReviewAchievements() {
     try {
       const m = $('#achMonth').value || thisMonthISO();
-      const { achievements } = await api.get(`/achievements/month/${m}`);
+      const { achievements } = await api.get(`/achievements/month/${m}?include_pending=1`);
       const el = $('#reviewAch'); if (!el) return;
       el.innerHTML = achievements.length ? `<table><thead><tr><th>Date</th><th>Employee</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
         ${achievements.map((a) => `<tr><td>${esc(a.date)}</td><td>${esc(a.name)}</td>
@@ -1877,14 +1902,14 @@
           <td class="row-actions">${a.status === 'PENDING'
             ? `<button class="btn btn-primary btn-sm" data-ack="${a.id}">Award</button><button class="btn btn-danger btn-sm" data-decline="${a.id}">Decline</button>`
             : ''}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No achievements logged in this month.</div>`;
+      </tbody></table>` : `<div class="empty">No pending achievements. No reviewed achievements for this month.</div>`;
       el.querySelectorAll('[data-ack]').forEach((b) => b.addEventListener('click', async () => {
         const pts = Number(el.querySelector(`[data-pts="${b.dataset.ack}"]`)?.value || 0);
-        try { await api.post(`/achievements/${b.dataset.ack}/review`, { status: 'ACKNOWLEDGED', points: pts }); toast(`Awarded ${pts} pts ✓`); loadReviewAchievements(); }
+        try { await api.post(`/achievements/${b.dataset.ack}/review`, { status: 'ACKNOWLEDGED', points: pts }); toast(`Awarded ${pts} pts ✓`); loadReviewAchievements(); loadMyAchievements(); }
         catch (e) { toast(e.message, true); }
       }));
       el.querySelectorAll('[data-decline]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/achievements/${b.dataset.decline}/review`, { status: 'DECLINED' }); toast('Declined'); loadReviewAchievements(); }
+        try { await api.post(`/achievements/${b.dataset.decline}/review`, { status: 'DECLINED' }); toast('Declined'); loadReviewAchievements(); loadMyAchievements(); }
         catch (e) { toast(e.message, true); }
       }));
     } catch (e) { toast(e.message, true); }

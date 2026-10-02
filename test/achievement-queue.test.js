@@ -1,0 +1,21 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
+test('pending review queue survives month and year changes until reviewed',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ems-ach-'));process.env.DB_PATH=path.join(dir,'test.db');process.env.JWT_SECRET='test-only';
+ const {db}=require('../src/db');const auth=require('../src/auth');const express=require('express');const app=express();app.use(express.json(),require('cookie-parser')(),auth.loadUser);app.use('/api/achievements',require('../src/routes/achievements'));
+ const add=(name,role)=>Number(db.prepare('INSERT INTO users(name,email,password_hash,role,created_ts) VALUES(?,?,?,?,0)').run(name,name+'@example.test','test',role).lastInsertRowid);
+ const admin=add('Admin','ADMIN'),employee=add('Employee','EMPLOYEE');
+ const ins=(date,status)=>Number(db.prepare('INSERT INTO achievements(user_id,date,title,description,status,created_ts) VALUES(?,?,?,?,?,0)').run(employee,date,date,'Details',status).lastInsertRowid);
+ const old=ins('2025-12-31','PENDING'),sep=ins('2026-09-30','PENDING'),oct=ins('2026-10-01','PENDING');ins('2026-09-15','ACKNOWLEDGED');ins('2026-10-02','ACKNOWLEDGED');
+ const cookie=id=>auth.COOKIE+'='+auth.issueToken(db.prepare('SELECT * FROM users WHERE id=?').get(id));const server=app.listen(0,'127.0.0.1');await new Promise((r,j)=>{server.once('listening',r);server.once('error',j);});
+ t.after(async()=>{await new Promise(r=>server.close(r));db.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const req=async(url,method='GET',body,id=admin)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/achievements/`+url,{method,headers:{cookie:cookie(id),'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
+ const list=async()=> (await req('month/2026-10?include_pending=1')).body.achievements;
+ assert.equal((await req('month/2026-10?include_pending=1','GET',null,employee)).status,403);
+ let rows=await list();assert.equal(rows.length,4);assert.ok([old,sep,oct].every(id=>rows.some(a=>a.id===id)));
+ assert.equal((await req('month/2026-10')).body.achievements.length,2);
+ assert.equal((await req(`${old}/review`,'POST',{status:'ACKNOWLEDGED',points:8})).status,200);
+ rows=await list();assert.ok(!rows.some(a=>a.id===old));assert.ok(rows.some(a=>a.id===sep));
+ const historic=(await req('month/2025-12')).body.achievements.find(a=>a.id===old);assert.equal(historic.points,8);assert.equal(historic.status,'ACKNOWLEDGED');
+ await req(`${sep}/review`,'POST',{status:'DECLINED'});assert.ok(!(await list()).some(a=>a.id===sep));
+});
