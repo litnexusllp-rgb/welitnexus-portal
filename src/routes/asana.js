@@ -5,13 +5,20 @@
 
 const express = require('express');
 const { requireAuth, requireAdmin } = require('../auth');
-const { enabled, myTasks, teamTasks, diagnose } = require('../asana');
+const { enabled, myTasks, teamTasks, diagnose, adminWork } = require('../asana');
 
 const router = express.Router();
 
 // Is the integration switched on? (Used by the frontend to pick which view to
 // show, so nothing breaks before the token is added.)
 router.get('/status', requireAuth, (_req, res) => res.json({ enabled: enabled() }));
+
+// Admin-only combined work across accessible projects for verified owners.
+router.get('/admin-work', requireAdmin, async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await adminWork()); }
+  catch (_e) { res.status(502).json({ error: 'Could not load Abhey and Saurav’s Asana work. Please retry shortly.' }); }
+});
 
 // My open Asana tasks.
 router.get('/my-tasks', requireAuth, async (req, res) => {

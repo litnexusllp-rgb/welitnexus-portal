@@ -923,15 +923,15 @@
   let asanaScope = null; // 'MINE' | 'TEAM' (admins can see the whole team)
   async function renderAsanaTasks() {
     const admin = isAdmin();
-    // Admins usually aren't assignees, so open on the team view; staff see theirs.
-    if (asanaScope === null) asanaScope = admin ? 'TEAM' : 'MINE';
+    // Admin My tasks combines the two verified owners; team pending remains available.
+    if (asanaScope === null) asanaScope = 'MINE';
     if (!admin) asanaScope = 'MINE';
     setMain(admin ? 'Tasks' : 'My tasks',
       admin ? 'Live from Asana — your work, or everything still pending across the team.'
         : 'Your open work from Asana — add and update tasks in Asana.',
       `<div class="toolbar">
          ${admin ? `<div class="seg" id="asanaSeg">
-             <button data-ascope="MINE" class="${asanaScope === 'MINE' ? 'on' : ''}">My tasks</button>
+             <button data-ascope="MINE" class="${asanaScope === 'MINE' ? 'on' : ''}">Abhey &amp; Saurav</button>
              <button data-ascope="TEAM" class="${asanaScope === 'TEAM' ? 'on' : ''}">Team pending</button>
            </div>` : '<span></span>'}
          <div class="row-actions">
@@ -942,7 +942,7 @@
 
     const taskRows = (tasks) => `<table class="atable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
       ${tasks.map((t) => `<tr>
-        <td class="c-task"><strong>${esc(t.name)}</strong></td>
+        <td class="c-task"><strong>${esc(t.name)}</strong>${t.assignee ? `<div class="page-sub">${esc(t.assignee)} · ${esc((t.projects || []).join(', ') || 'No project')}</div>` : ''}</td>
         <td class="c-due">${t.due_on ? `<span class="${t.overdue ? 'due-overdue' : ''}">${fmtDate(t.due_on)}</span>` : '<span class="muted-empty">Not set</span>'}</td>
         <td class="c-act" style="text-align:right;"><a class="btn-fix" href="${esc(t.url)}" target="_blank" rel="noopener">Open ↗</a></td>
       </tr>`).join('')}
@@ -965,7 +965,7 @@
           el.querySelectorAll('.tgroup-head').forEach((h) => h.addEventListener('click', () => h.closest('.tgroup').classList.toggle('collapsed')));
           return;
         }
-        const { tasks } = await api.get('/asana/my-tasks');
+        const { tasks } = await api.get(admin ? '/asana/admin-work' : '/asana/my-tasks');
         if (!tasks.length) {
           // Distinguish "you're all clear" from "Asana doesn't know who you are",
           // which is the usual cause when someone sees an unexpected empty list.
@@ -1028,7 +1028,7 @@
       `<div class="toolbar">
          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
            <div class="seg" id="scopeSeg" role="tablist" aria-label="Task scope">
-             <button data-scope="MINE" class="${taskScope === 'MINE' ? 'on' : ''}">My tasks</button>
+             <button data-scope="MINE" class="${taskScope === 'MINE' ? 'on' : ''}">Abhey &amp; Saurav</button>
              <button data-scope="ALL" class="${taskScope === 'ALL' ? 'on' : ''}">All tasks</button>
            </div>
          </div>

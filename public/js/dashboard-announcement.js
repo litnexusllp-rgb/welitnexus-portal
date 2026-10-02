@@ -40,6 +40,9 @@
     const src = asanaOn ? (asanaTasks || []) : (portalTasks || []);
     return src.map((t) => ({
       title: asanaOn ? t.name : t.title,
+      url: asanaOn ? t.url : '',
+      owner: asanaOn ? (t.assignee || '') : '',
+      projects: asanaOn ? (t.projects || []).join(', ') : '',
       due: asanaOn ? (t.due_on || '') : (t.due_date || ''),
       overdue: asanaOn ? !!t.overdue : (!!t.due_date && t.due_date < today() && t.status !== 'DONE'),
       client: asanaOn ? '' : (t.client_parent_name ? `${t.client_parent_name} › ${t.client_name}` : (t.client_name || '')),
@@ -48,12 +51,12 @@
       .sort((a, b) => (a.overdue === b.overdue ? String(a.due || '9999').localeCompare(String(b.due || '9999')) : (a.overdue ? -1 : 1)));
   }
 
-  function workHtml(tasks) {
+  function workHtml(tasks, all = false) {
     if (!tasks.length) return '<div class="dc-empty">No open work. 🎉</div>';
-    return tasks.slice(0, 6).map((t) => {
+    return (all ? tasks : tasks.slice(0, 6)).map((t) => {
       const dueClass = t.overdue ? 'dc-overdue' : (t.due === today() ? 'dc-today' : 'dc-upcoming');
       const dueText = t.overdue ? `Overdue · ${fmtDate(t.due)}` : (t.due === today() ? 'Due today' : (t.due ? `Due ${fmtDate(t.due)}` : 'No due date'));
-      return `<div class="dc-work-row"><div><div class="dc-work-title">${esc(t.title)}</div>${t.client ? `<div class="dc-work-meta">${esc(t.client)}</div>` : ''}</div><div class="dc-due ${dueClass}">${esc(dueText)}</div></div>`;
+      return `<div class="dc-work-row"><div><div class="dc-work-title">${t.url ? `<a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.title)}</a>` : esc(t.title)}</div>${t.owner ? `<div class="dc-work-meta">${esc(t.owner)} · ${esc(t.projects || 'No project')}</div>` : ''}${t.client ? `<div class="dc-work-meta">${esc(t.client)}</div>` : ''}</div><div class="dc-due ${dueClass}">${esc(dueText)}</div></div>`;
     }).join('');
   }
 
@@ -72,30 +75,33 @@
     root.innerHTML = '<div class="dc-empty">Loading dashboard…</div>';
     oldCards.parentNode.insertBefore(root, oldCards.nextSibling);
 
+    const admin = isAdmin();
     const baseReqs = [
-      safe('/attendance/status'), safe('/leaves/mine'), safe(`/kpi/me?month=${month()}`),
+      safe('/attendance/status'), safe('/leaves/mine'), admin ? safe('/operations') : safe(`/kpi/me?month=${month()}`),
       safe('/holidays'), safe('/announcements'), safe('/asana/status'), safe('/tasks/mine')
     ];
     const [status, leaves, kpiData, holidayData, announcementData, asanaStatus, portalTaskData] = await Promise.all(baseReqs);
     if (!isDashboard()) return;
 
     let asanaTaskData = null;
-    if (asanaStatus?.enabled) asanaTaskData = await safe('/asana/my-tasks');
-    const tasks = normalizeTasks(portalTaskData?.tasks, asanaTaskData?.tasks, !!asanaStatus?.enabled);
+    if (admin || asanaStatus?.enabled) asanaTaskData = await safe(admin ? '/asana/admin-work' : '/asana/my-tasks');
+    if (!isDashboard() || !root.isConnected) return;
+    const workUnavailable = (admin || asanaStatus?.enabled) ? !asanaTaskData : !portalTaskData;
+    const tasks = normalizeTasks(portalTaskData?.tasks, asanaTaskData?.tasks, (admin || !!asanaStatus?.enabled));
     const k = kpiData?.rows?.[0] || {};
     const pendingLeave = (leaves?.leaves || []).filter((l) => l.status === 'PENDING').length;
     const nextOwnLeave = (leaves?.leaves || []).filter((l) => l.status === 'APPROVED' && l.end_date >= today()).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
     const holidays = (holidayData?.holidays || []).filter((h) => h.date >= today()).slice(0, 3);
     const announcements = announcementData?.announcements || [];
     const a = announcements.find((x) => Number(x.pinned) === 1) || announcements[0];
-    const openCount = tasks.length;
+    const openCount = workUnavailable ? '—' : tasks.length;
     const overdueCount = tasks.filter((t) => t.overdue).length;
 
     root.innerHTML = `
       <div class="dc-stats">
         <div class="dc-stat"><div class="k">Today</div><div class="v">${esc(status?.state || '—')}</div><div class="s">Attendance status</div></div>
         <div class="dc-stat"><div class="k">Worked today</div><div class="v">${fmtMins(status?.workedMinutes)}</div><div class="s">Break ${fmtMins(status?.breakMinutes)}</div></div>
-        <div class="dc-stat"><div class="k">My work</div><div class="v">${openCount}</div><div class="s">${overdueCount ? `${overdueCount} overdue` : 'Nothing overdue'}</div></div>
+        <div class="dc-stat"><div class="k">My work</div><div class="v">${openCount}</div><div class="s">${workUnavailable ? 'Unable to load work' : overdueCount ? `${overdueCount} overdue` : 'Nothing overdue'}</div></div>
         <div class="dc-stat"><div class="k">Leave balance</div><div class="v">${esc(leaves?.balance ?? k.leaveBalance ?? '—')}</div><div class="s">${pendingLeave ? `${pendingLeave} request pending` : 'days available'}</div></div>
       </div>
 
@@ -103,8 +109,16 @@
 
       <div class="dc-grid">
         <div>
-          <div class="dc-card"><div class="dc-head"><h2>My Work</h2><button class="dc-link" data-go="tasks">Open tasks</button></div>${workHtml(tasks)}</div>
-          <div class="dc-card dc-section-gap"><div class="dc-head"><h2>This Month</h2><button class="dc-link" data-go="myperf">My performance</button></div>
+          <div class="dc-card"><div class="dc-head"><h2>My Work</h2><a class="dc-link" href="#/tasks">Open tasks</a></div>${admin ? '<p class="dc-small">Abhey and Saurav · all accessible Asana projects · open work only</p>' : ''}${workUnavailable ? '<div class="dc-empty" role="alert">Unable to load work. Please refresh to retry.</div>' : workHtml(tasks, admin)}</div>
+          ${admin ? `<div class="dc-card dc-section-gap"><div class="dc-head"><h2>Needs your attention</h2><a class="dc-link" href="#/operations">Open Operations</a></div>
+            ${kpiData ? `<div class="dc-perf">
+              <div><strong>${kpiData.approvals.filter(a=>a.kind==='Achievement').length}</strong><span><a href="#/achievements">Achievements pending</a></span></div>
+              <div><strong>${kpiData.approvals.filter(a=>a.kind==='Leave').length}</strong><span><a href="#/leaves">Leave requests</a></span></div>
+              <div><strong>${kpiData.approvals.filter(a=>a.kind==='Punch correction').length}</strong><span><a href="#/clock">Punch corrections</a></span></div>
+              <div><strong>${kpiData.asana.counts?.overdue ?? '—'}</strong><span>Overdue team tasks · LIT</span></div>
+              <div><strong>${kpiData.asana.counts?.unassigned ?? '—'}</strong><span>Unassigned tasks · LIT</span></div>
+            </div><p class="dc-small">Pending approvals from all months. <a href="#/kpi">View team performance</a></p>` : '<div class="dc-empty">Unable to load admin overview. Open Operations to retry.</div>'}
+          </div>` : `          <div class="dc-card dc-section-gap"><div class="dc-head"><h2>This Month</h2><button class="dc-link" data-go="myperf">My performance</button></div>
             <div class="dc-perf">
               <div><strong>${esc(k.daysPresent ?? 0)}</strong><span>Days present</span></div>
               <div><strong>${k.punctualPct == null ? 'N/A' : `${k.punctualPct}%`}</strong><span>Punctuality</span></div>
@@ -112,7 +126,8 @@
               <div><strong>${esc(k.achievementsAcknowledged ?? 0)}</strong><span>Achievements</span></div>
               <div><strong>${esc(k.leaveDays ?? 0)}</strong><span>Leave used</span></div>
             </div>
-          </div>
+          </div>`}
+
         </div>
         <div>
           <div class="dc-card"><div class="dc-head"><h2>Upcoming</h2><button class="dc-link" data-go="calendar">Holidays</button></div>
@@ -133,8 +148,9 @@
 
     if (isAdmin() && adminHost) {
       const [teamToday, upcomingLeaves, pendingLeaves, punchPending, achMonth] = await Promise.all([
-        safe('/attendance/today'), safe('/leaves/upcoming'), safe('/leaves/pending'), safe('/punch-requests/pending'), safe(`/achievements/month/${month()}`)
+        safe('/attendance/today'), safe('/leaves/upcoming'), safe('/leaves/pending'), safe('/punch-requests/pending'), safe(`/achievements/month/${month()}?include_pending=1`)
       ]);
+      if (!isDashboard() || !root.isConnected || !adminHost.isConnected) return;
       let overdueTeam = 0;
       if (asanaStatus?.enabled) {
         const teamTasks = await safe('/asana/team-tasks');
@@ -143,6 +159,7 @@
         const allTasks = await safe('/tasks/all');
         overdueTeam = (allTasks?.tasks || []).filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today()).length;
       }
+      if (!isDashboard() || !root.isConnected || !adminHost.isConnected) return;
       const people = teamToday?.people || [];
       const working = people.filter((p) => p.state === 'IN' || p.state === 'BREAK').length;
       const todayLeaves = (upcomingLeaves?.leaves || []).filter((l) => l.start_date <= today() && l.end_date >= today()).length;

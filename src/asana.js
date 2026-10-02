@@ -184,6 +184,48 @@ async function kpiTaskStats(start, end) {
   return stats;
 }
 
+// Shared admin work is explicitly scoped to the two verified Asana identities.
+// This does not change employee task visibility or the LIT-only team dashboard.
+const ADMIN_WORK_USERS = ['1211961548870023', '1211961768263720'];
+const ADMIN_WORK_WORKSPACE = '1211961678895256';
+let adminWorkCache = { at: 0, tasks: null };
+let adminWorkFlight = null;
+let adminWorkRetryAt = 0;
+async function adminWork() {
+  if (!cfg().token) throw new Error('Asana is not configured');
+  if (adminWorkCache.tasks && Date.now() - adminWorkCache.at < CACHE_MS) return { ...adminWorkCache, scope: 'Abhey and Saurav · all accessible Asana projects' };
+  if (adminWorkFlight) return adminWorkFlight;
+  if (Date.now() < adminWorkRetryAt) throw new Error('Asana temporarily unavailable. Please retry shortly.');
+  adminWorkFlight = (async () => {
+    const tasks = new Map();
+    const fields = 'name,completed,due_on,due_at,assignee.gid,assignee.name,projects.name';
+    for (const user of ADMIN_WORK_USERS) {
+      const base = `/tasks?workspace=${ADMIN_WORK_WORKSPACE}&assignee=${user}&completed_since=now&limit=100&opt_fields=${fields}`;
+      let path = base; const seen = new Set();
+      for (let page = 0; path; page++) {
+        if (page >= 1000) throw new Error('Admin work pagination exceeded safety limit');
+        const body = await apiGet(path);
+        if (!Array.isArray(body.data)) throw new Error('Invalid Asana response');
+        for (const t of body.data) if (!t.completed && ADMIN_WORK_USERS.includes(t.assignee?.gid)) {
+          tasks.set(t.gid, { gid:t.gid,name:t.name || '(Untitled task)',due_on:t.due_on || '',
+            overdue:!!t.due_on && t.due_on<todayStr(),assignee:t.assignee.name,
+            projects:(t.projects || []).map(p=>p.name).filter(Boolean),
+            url:`https://app.asana.com/0/0/${encodeURIComponent(t.gid)}` });
+        }
+        const offset = body.next_page?.offset;
+        if (body.next_page && (!offset || seen.has(offset))) throw new Error('Incomplete Asana pagination');
+        if (offset) seen.add(offset);
+        path = offset ? base + '&offset=' + encodeURIComponent(offset) : null;
+      }
+    }
+    adminWorkCache = { at:Date.now(),tasks:[...tasks.values()].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.due_on||'9999').localeCompare(b.due_on||'9999')) };
+    return { ...adminWorkCache, scope:'Abhey and Saurav · all accessible Asana projects' };
+  })();
+  try { return await adminWorkFlight; }
+  catch (e) { adminWorkRetryAt=Date.now()+(e.retryMs||60000);throw e; }
+  finally { adminWorkFlight=null; }
+}
+
 // Admin diagnostic: is the connection working, and who isn't matching?
 async function diagnose() {
   const c = cfg();
@@ -211,4 +253,4 @@ async function diagnose() {
   }
 }
 
-module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus };
+module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus, adminWork };
