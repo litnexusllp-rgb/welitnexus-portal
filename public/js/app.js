@@ -531,19 +531,57 @@
   const REQ_BADGE = { PENDING: 'b-pending', APPROVED: 'b-approved', REJECTED: 'b-high' };
   function openPunchRequestModal(presetDay) {
     modal(`<h3>Request an attendance correction</h3>
-      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Forgot to clock in/out or punched the wrong time? Send it to an admin to add for you.</p>
+      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Select a recorded punch to correct its time, or add a missed punch. Times use the office timezone; after-midnight times belong to the preceding shift day.</p>
       <div class="form-row"><div class="field"><label>Day</label><input type="date" id="prDay" value="${esc(presetDay || todayISO())}"></div>
-        <div class="field"><label>What to add</label><select id="prType">${Object.entries(PUNCH_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>
+        <div class="field"><label>Request</label><select id="prOperation"><option value="EDIT">Correct a recorded punch</option><option value="ADD">Add a missed punch</option></select></div></div>
+      <div class="form-row"><div class="field" id="prOriginalField"><label>Original punch</label><select id="prOriginal"></select></div>
+        <div class="field"><label>Punch type</label><select id="prType">${Object.entries(PUNCH_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>
       <div class="form-row"><div class="field"><label>Time (24h)</label><input type="time" id="prTime"></div><div class="field"></div></div>
       <div class="form-row one"><div class="field"><label>Reason</label><textarea id="prReason" placeholder="e.g. Forgot to clock out, left at 6:30pm"></textarea></div></div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSend">Send request</button></div>`);
+      <p id="prError" role="alert" style="color:var(--danger);"></p>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSend" disabled>Send request</button></div>`);
+    const dayInput = $('#prDay'), operationInput = $('#prOperation'), originalInput = $('#prOriginal');
+    const typeInput = $('#prType'), timeInput = $('#prTime'), sendButton = $('#mSend'), errorEl = $('#prError'), originalField = $('#prOriginalField');
+    let events = [], loadedDay = null, loading = 0, sending = false;
+    const selectOriginal = (updateTime = true) => {
+      const editing = operationInput.value === 'EDIT';
+      originalField.hidden = !editing;
+      typeInput.disabled = editing;
+      const selected = events.find(e => e.id === Number(originalInput.value));
+      if (editing && selected) { typeInput.value = selected.type; if (updateTime) timeInput.value = selected.time; }
+      sendButton.disabled = sending || loadedDay !== dayInput.value || (editing && !selected);
+    };
+    const loadEvents = async () => {
+      const version = ++loading, day = dayInput.value;
+      loadedDay = null; sendButton.disabled = true; errorEl.textContent = '';
+      try {
+        const data = await api.get(`/punch-requests/events?day=${encodeURIComponent(day)}`);
+        if (version !== loading || !dayInput.isConnected) return;
+        events = data.events; loadedDay = day;
+        originalInput.innerHTML = events.map(e => `<option value="${e.id}">${PUNCH_LABEL[e.type]} · ${esc(e.time)}</option>`).join('');
+        if (events.length) originalInput.value = String(events[events.length - 1].id);
+        else operationInput.value = 'ADD';
+        selectOriginal();
+      } catch (e) { if (version === loading && dayInput.isConnected) errorEl.textContent = e.message; }
+    };
+    dayInput.addEventListener('change', loadEvents);
+    operationInput.addEventListener('change', selectOriginal);
+    originalInput.addEventListener('change', selectOriginal);
     $('#mCancel').addEventListener('click', closeModal);
-    $('#mSend').addEventListener('click', async () => {
-      const payload = { day: $('#prDay').value, type: $('#prType').value, time: $('#prTime').value, reason: $('#prReason').value };
+    sendButton.addEventListener('click', async () => {
+      if (sendButton.disabled || loadedDay !== dayInput.value) return;
+      const payload = { day: dayInput.value, operation: operationInput.value, type: typeInput.value, time: timeInput.value, reason: $('#prReason').value };
+      if (payload.operation === 'EDIT') payload.target_event_id = Number(originalInput.value);
       if (!payload.day || !payload.time) return toast('Pick a day and time', true);
-      try { await api.post('/punch-requests', payload); closeModal(); toast('Request sent to admin ✓'); loadMyPunchRequests(); }
-      catch (e) { toast(e.message, true); }
+      sending = true; sendButton.disabled = true; errorEl.textContent = '';
+      try { await api.post('/punch-requests', payload); if (dayInput.isConnected) closeModal(); toast('Request sent to admin ✓'); loadMyPunchRequests(); }
+      catch (e) { sending = false; errorEl.textContent = e.message; selectOriginal(false); }
     });
+    loadEvents();
+  }
+  function punchRequestAction(r) {
+    const from = r.original_time;
+    return r.operation === 'EDIT' ? `Correct${from ? ' ' + from + ' →' : ''}` : r.operation === 'ADD' ? 'Add' : 'Legacy correction (auto-match)';
   }
   async function loadMyPunchRequests() {
     try {
@@ -551,7 +589,7 @@
       const el = $('#myPunchReqs'); if (!el) return;
       if (!requests.length) { el.innerHTML = `<div class="empty">No correction requests.</div>`; return; }
       el.innerHTML = `<table><thead><tr><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
-        ${requests.map((r) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(r.time)}</td>
+        ${requests.map((r) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.time)}</td>
           <td>${esc(r.reason || '—')}</td><td><span class="badge ${REQ_BADGE[r.status] || ''}">${cap(r.status)}</span>${r.admin_note ? `<div style="color:var(--slate);font-size:.76rem;margin-top:3px;">${esc(r.admin_note)}</div>` : ''}</td>
           <td>${r.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel-req="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}
       </tbody></table>`;
@@ -862,7 +900,7 @@
   function punchApprovalTable(requests) {
     return `<table><thead><tr><th>Employee</th><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Action</th></tr></thead><tbody>
       ${requests.map((r) => `<tr>
-        <td>${esc(r.name)}</td><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(r.time)}</td><td>${esc(r.reason || '—')}</td>
+        <td>${esc(r.name)}</td><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.time)}</td><td>${esc(r.reason || '—')}</td>
         <td class="row-actions"><button class="btn btn-primary btn-sm" data-preq-approve="${r.id}">Approve</button>
           <button class="btn btn-danger btn-sm" data-preq-reject="${r.id}">Reject</button></td>
       </tr>`).join('')}</tbody></table>`;
@@ -871,11 +909,14 @@
     document.querySelectorAll('[data-preq-approve],[data-preq-reject]').forEach((b) => {
       if (b.dataset.wired) return; b.dataset.wired = '1';
       b.addEventListener('click', async () => {
+        if (b.disabled) return;
         const id = b.dataset.preqApprove || b.dataset.preqReject;
         const decision = b.dataset.preqApprove ? 'APPROVED' : 'REJECTED';
-        try { await api.post(`/punch-requests/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓ — punch added' : 'Rejected');
+        const buttons = b.closest('tr').querySelectorAll('button');
+        buttons.forEach(button => { button.disabled = true; });
+        try { await api.post(`/punch-requests/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓ — attendance updated' : 'Rejected');
           navigate(document.querySelector('.nav-item.active').dataset.view);
-        } catch (e) { toast(e.message, true); }
+        } catch (e) { toast(e.message, true); buttons.forEach(button => { button.disabled = false; }); }
       });
     });
   }
