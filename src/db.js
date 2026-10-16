@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read);
 
 -- Employee-submitted attendance corrections ("fix my punch"). An admin
--- approves (which inserts the real punch) or rejects.
+-- approves an addition or a correction to an identified punch, or rejects.
 CREATE TABLE IF NOT EXISTS punch_requests (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL,
@@ -279,6 +279,23 @@ BEGIN
   UPDATE users SET session_version = session_version + 1 WHERE id = NEW.id;
 END;`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`);
+
+// Additive correction migration. NULL operation identifies older requests.
+// Retain event IDs in requests/audits if an admin later deletes the punch.
+db.transaction(() => {
+  const columns = new Set(db.pragma('table_info(punch_requests)').map(c => c.name));
+  for (const [name, type] of [['operation', 'TEXT'], ['target_event_id', 'INTEGER'], ['original_event', 'TEXT']]) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE punch_requests ADD COLUMN ${name} ${type}`);
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS punch_request_changes (
+    request_id INTEGER PRIMARY KEY REFERENCES punch_requests(id),
+    event_id INTEGER NOT NULL,
+    before_json TEXT,
+    after_json TEXT NOT NULL,
+    changed_by INTEGER NOT NULL REFERENCES users(id),
+    changed_ts INTEGER NOT NULL
+  )`);
+})();
 
 // --- One-time re-bucketing of attendance events into "shift days" ---------
 // Historically each event's `day` was the calendar day it happened on, so an
