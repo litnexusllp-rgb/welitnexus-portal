@@ -88,7 +88,7 @@ app.use('/api/eod', require('./routes/eod'));
 app.get('/api/health', (_req, res) => {
   try {
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, ts: Date.now() });
+    res.json({ ok: true, ts: Date.now(), revision: process.env.RAILWAY_GIT_COMMIT_SHA || null });
   } catch (e) {
     res.status(503).json({ ok: false, error: 'database unavailable', ts: Date.now() });
   }

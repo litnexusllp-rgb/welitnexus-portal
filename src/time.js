@@ -37,12 +37,14 @@ function inclusiveDays(startStr, endStr) {
 const ATT_CUTOVER = () => Math.min(23, Math.max(0, Number(process.env.ATTENDANCE_CUTOVER_HOUR ?? 8)));
 
 // The attendance date (yyyy-LL-dd) that an epoch-ms timestamp belongs to.
-function attendanceDayFromTs(ts) {
-  return DateTime.fromMillis(ts).setZone(ZONE).minus({ hours: ATT_CUTOVER() }).toFormat('yyyy-LL-dd');
+function attendanceDayFromTs(ts, config = {}) {
+  const dt = DateTime.fromMillis(ts, { zone: config.timezone || ZONE });
+  // Compare wall-clock hours, not elapsed hours: DST days may have 23/25 hours.
+  return (dt.hour < (config.cutover ?? ATT_CUTOVER()) ? dt.minus({ days: 1 }) : dt).toISODate();
 }
 // The attendance date that "now" is in.
-function attendanceToday() {
-  return now().minus({ hours: ATT_CUTOVER() }).toFormat('yyyy-LL-dd');
+function attendanceToday(config = {}) {
+  return attendanceDayFromTs(now().toMillis(), config);
 }
 // [startMs, endMs) window for a given attendance date string.
 function attendanceWindow(dateStr) {

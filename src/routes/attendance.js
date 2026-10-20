@@ -3,10 +3,11 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
-const { now, DateTime, ZONE, ATT_CUTOVER, attendanceDayFromTs, attendanceToday } = require('../time');
-const { summarize, VALID } = require('../compute');
+const { now, DateTime, attendanceToday } = require('../time');
+const { summarize } = require('../compute');
 const { changeAttendance, attendanceError } = require('../attendanceValidation');
 
+const { settings, daySettings, snapshot, currentSession, liveForDay, wallTime, withTimes } = require('../attendanceSession');
 const router = express.Router();
 
 const insertEvent = db.prepare(
@@ -41,10 +42,7 @@ const setLateNormalOverride = db.prepare(`
 // GET the current attendance-day status for the signed-in user. "day" here is
 // the shift day (cutover-adjusted), so an overnight shift stays one day.
 router.get('/status', requireAuth, (req, res) => {
-  const day = attendanceToday();
-  const events = eventsForUserDay.all(req.user.id, day);
-  const summary = summarize(events, now().toMillis());
-  res.json({ day, ...summary, allowed: VALID[summary.state], events });
+  res.json(currentSession(req.user));
 });
 
 // POST a punch action: { type: IN | OUT | BREAK_START | BREAK_END }
@@ -54,55 +52,49 @@ router.post('/punch', requireAuth, (req, res) => {
   if (!['IN', 'OUT', 'BREAK_START', 'BREAK_END'].includes(type)) {
     return res.status(400).json({ error: 'Invalid punch type' });
   }
-  const day = attendanceToday();
-  const events = eventsForUserDay.all(req.user.id, day);
-  const { state } = summarize(events, now().toMillis());
-  if (!VALID[state].includes(type)) {
-    return res.status(409).json({ error: `Cannot ${type} while ${state}` });
-  }
-  const ts = now().toMillis();
-  try { changeAttendance(req.user.id, [day, attendanceDayFromTs(ts)], () =>
-    insertEvent.run(req.user.id, type, ts, attendanceDayFromTs(ts), note, deviceFrom(req))); }
-  catch (e) { return attendanceError(e, res); }
-  const updated = eventsForUserDay.all(req.user.id, day);
-  const summary = summarize(updated, now().toMillis());
-  res.json({ day, ...summary, allowed: VALID[summary.state], events: updated });
+  try {
+    const result = db.transaction(() => {
+      const ts = now().toMillis(); // server UTC instant; never trust a browser clock
+      const session = currentSession(req.user, ts);
+      if (!session.allowed.includes(type)) throw Object.assign(new Error(`Cannot ${type} while ${session.state}`), { status: 409, attendanceValidation: true });
+      if (session.lastPunchTs != null && ts <= session.lastPunchTs) throw Object.assign(new Error('Punch time must follow the last recorded punch.'), { status: 409, attendanceValidation: true });
+      const day = type === 'IN' ? attendanceToday(settings(req.user)) : session.day;
+      snapshot(req.user, day);
+      changeAttendance(req.user.id, [day], () => insertEvent.run(req.user.id, type, ts, day, note, deviceFrom(req)));
+      return currentSession(req.user, ts);
+    }).immediate();
+    res.json(result);
+  } catch (e) { return attendanceError(e, res); }
 });
 
 // GET my timesheet for a range of attendance days (defaults to last 14).
 router.get('/timesheet', requireAuth, (req, res) => {
-  const end = String(req.query.end || attendanceToday());
-  const start = String(req.query.start || now().minus({ days: 13 }).toFormat('yyyy-LL-dd'));
+  const end = String(req.query.end || attendanceToday(settings(req.user)));
+  const start = String(req.query.start || DateTime.fromISO(end).minus({ days: 13 }).toISODate());
   const rows = eventsForUserBetween.all(req.user.id, start, end);
   const byDay = {};
   for (const e of rows) (byDay[e.day] = byDay[e.day] || []).push(e);
-  const today = attendanceToday();
   // The in-progress day gets a live tail; finished days stop at their last punch.
   const days = Object.keys(byDay).sort().map((day) => ({
-    day, ...summarize(byDay[day], day === today ? now().toMillis() : null),
+    day, ...daySettings(req.user, day), ...summarize(byDay[day], liveForDay(req.user, day)),
   }));
   res.json({ start, end, days });
 });
 
 // ADMIN: who is in today, with live state.
-const allEventsForDay = db.prepare(
-  `SELECT e.*, u.name FROM events e JOIN users u ON u.id = e.user_id
-   WHERE e.day = ? ORDER BY e.user_id, e.ts ASC, e.id ASC`
-);
-const activeUsers = db.prepare(`SELECT id, name, department, title FROM users WHERE active = 1 ORDER BY name`);
+const activeUsers = db.prepare(`SELECT * FROM users WHERE active = 1 ORDER BY name`);
 
 router.get('/today', requireAdmin, (req, res) => {
   const day = attendanceToday(); // current shift day, not calendar day
-  const rows = allEventsForDay.all(day);
-  const byUser = {};
-  for (const e of rows) (byUser[e.user_id] = byUser[e.user_id] || []).push(e);
   const people = activeUsers.all().map((u) => {
-    const events = byUser[u.id] || [];
-    const s = summarize(events, now().toMillis());
+    const session = currentSession(u);
+    const events = session.events;
+    const s = session;
     // Device of the most recent punch that recorded one (their latest session).
     const lastWithDevice = [...events].reverse().find((e) => e.device);
     return {
       id: u.id, name: u.name, department: u.department, title: u.title,
+      day: session.day, timezone: session.timezone, needsReview: session.needsReview,
       state: events.length ? s.state : 'OFF',
       attendanceError: s.error || null,
       workedMinutes: s.workedMinutes, breakMinutes: s.breakMinutes,
@@ -120,23 +112,7 @@ const EVENT_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
 const getEvent = db.prepare(`SELECT * FROM events WHERE id = ?`);
 const updateEvent = db.prepare(`UPDATE events SET type = ?, ts = ?, day = ?, note = ? WHERE id = ?`);
 const deleteEvent = db.prepare(`DELETE FROM events WHERE id = ?`);
-const getUserName = db.prepare(`SELECT id, name FROM users WHERE id = ?`);
-
-// Combine an attendance day (yyyy-LL-dd) and HH:mm time into epoch ms. A time
-// before the cutover is the post-midnight tail of that shift, so it lands on the
-// next calendar day (but still the same attendance day).
-function toTs(day, time) {
-  let dt = DateTime.fromFormat(`${day} ${time}`, 'yyyy-LL-dd HH:mm', { zone: ZONE });
-  if (!dt.isValid) return null;
-  if (Number(String(time).split(':')[0]) < ATT_CUTOVER()) dt = dt.plus({ days: 1 });
-  return dt.toMillis();
-}
-
-// Attach a HH:mm office-zone time string to each event (so the admin UI shows
-// and edits times in office time, not the admin's browser timezone).
-function withTimes(events) {
-  return events.map((e) => ({ ...e, time: DateTime.fromMillis(e.ts).setZone(ZONE).toFormat('HH:mm') }));
-}
+const getUserName = db.prepare(`SELECT id, name, shift_start, attendance_timezone, attendance_cutover FROM users WHERE id = ?`);
 
 // GET one employee's punches for a day (admin view for editing).
 router.get('/admin/day', requireAdmin, (req, res) => {
@@ -145,9 +121,9 @@ router.get('/admin/day', requireAdmin, (req, res) => {
   const day = String(req.query.day || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day (yyyy-mm-dd) required' });
   const events = eventsForUserDay.all(user.id, day);
-  const summary = summarize(events, day === attendanceToday() ? now().toMillis() : null);
+  const summary = summarize(events, liveForDay(user, day));
   const lateNormal = getLateNormalOverride.get(user.id, day)?.ignore_late === 1;
-  res.json({ user, day, events: withTimes(events), lateNormal, ...summary });
+  res.json({ user, day, ...daySettings(user, day), events: withTimes(events, daySettings(user, day)), lateNormal, ...summary });
 });
 
 // ADMIN: mark a day's late clock-in as normal for punctuality, or restore the
@@ -171,13 +147,14 @@ router.post('/admin/event', requireAdmin, (req, res) => {
   const time = String(req.body.time || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day required' });
   if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
-  const ts = toTs(day, time);
+  const ts = wallTime(day, time, daySettings(user, day), req.body.event_date);
   if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
-  try { changeAttendance(user.id, [day, attendanceDayFromTs(ts)], () =>
-    insertEvent.run(user.id, type, ts, attendanceDayFromTs(ts), `edited by ${req.user.name}`, '')); }
+  try { changeAttendance(user.id, [day], () => {
+    snapshot(user, day);
+    return insertEvent.run(user.id, type, ts, day, `edited by ${req.user.name}`, ''); }); }
   catch (e) { return attendanceError(e, res); }
   const events = eventsForUserDay.all(user.id, day);
-  res.json({ user, day, events: withTimes(events), ...summarize(events, day === attendanceToday() ? now().toMillis() : null) });
+  res.json({ user, day, ...daySettings(user, day), events: withTimes(events, daySettings(user, day)), ...summarize(events, liveForDay(user, day)) });
 });
 
 // ADMIN: edit a punch's type/time.
@@ -186,23 +163,26 @@ router.put('/admin/event/:id', requireAdmin, (req, res) => {
   if (!ev) return res.status(404).json({ error: 'Punch not found' });
   const type = req.body.type ? String(req.body.type).toUpperCase() : ev.type;
   if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
-  const ts = req.body.time ? toTs(ev.day, String(req.body.time)) : ev.ts;
+  const user = getUserName.get(ev.user_id);
+  const ts = req.body.time ? wallTime(ev.day, String(req.body.time), daySettings(user, ev.day), req.body.event_date || DateTime.fromMillis(ev.ts, { zone: daySettings(user, ev.day).timezone }).toISODate()) : ev.ts;
   if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
-  const day = attendanceDayFromTs(ts);
-  try { changeAttendance(ev.user_id, [ev.day, day], () => updateEvent.run(type, ts, day, `edited by ${req.user.name}`, ev.id)); }
+  const day = ev.day;
+  try { changeAttendance(ev.user_id, [ev.day, day], () => { snapshot(user, day); return updateEvent.run(type, ts, day, `edited by ${req.user.name}`, ev.id); }); }
   catch (e) { return attendanceError(e, res); }
   const events = eventsForUserDay.all(ev.user_id, day);
-  res.json({ day, events: withTimes(events), ...summarize(events, day === attendanceToday() ? now().toMillis() : null) });
+  res.json({ day, events: withTimes(events, daySettings(user, day)), ...summarize(events, liveForDay(user, day)) });
 });
 
 // ADMIN: delete a punch.
 router.delete('/admin/event/:id', requireAdmin, (req, res) => {
   const ev = getEvent.get(Number(req.params.id));
   if (!ev) return res.status(404).json({ error: 'Punch not found' });
-  try { changeAttendance(ev.user_id, [ev.day], () => deleteEvent.run(ev.id)); }
+  try { changeAttendance(ev.user_id, [ev.day], () => { snapshot(getUserName.get(ev.user_id), ev.day); return deleteEvent.run(ev.id); }); }
   catch (e) { return attendanceError(e, res); }
+  const user = getUserName.get(ev.user_id);
+  const day = ev.day;
   const events = eventsForUserDay.all(ev.user_id, ev.day);
-  res.json({ day: ev.day, events: withTimes(events), ...summarize(events, ev.day === attendanceToday() ? now().toMillis() : null) });
+  res.json({ day: ev.day, events: withTimes(events, daySettings(user, day)), ...summarize(events, liveForDay(user, day)) });
 });
 
 module.exports = router;

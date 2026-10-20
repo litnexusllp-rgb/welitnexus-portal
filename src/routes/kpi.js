@@ -7,11 +7,12 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAdmin, requireAuth } = require('../auth');
-const { now, attendanceToday, dayFromTs, DateTime, ZONE } = require('../time');
+const { now, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const asana = require('../asana');
 const { employmentStatus, overlapsEmployment } = require('../employment');
 
+const { daySettings, liveForDay, shiftInstant } = require('../attendanceSession');
 const router = express.Router();
 
 // Punctuality = clocked in by the employee's shift start (+ a grace window).
@@ -29,7 +30,7 @@ function shiftStartOf(hhmm) {
 const fmtHHmm = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
 
 const activeUsers = db.prepare(
-  `SELECT id, name, department, title, shift_start, leave_balance, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`
+  `SELECT id, name, department, title, shift_start, attendance_timezone, attendance_cutover, leave_balance, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`
 );
 const eventsBetween = db.prepare(
   `SELECT user_id, type, ts, day FROM events WHERE day >= ? AND day <= ? ORDER BY user_id, ts, id`
@@ -65,7 +66,6 @@ async function buildKpi(req) {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
-  const today = attendanceToday();
   const startMs = DateTime.fromISO(start, { zone: ZONE }).startOf('day').toMillis();
   const endMs = DateTime.fromISO(end, { zone: ZONE }).endOf('day').toMillis();
 
@@ -95,18 +95,17 @@ async function buildKpi(req) {
     const [uid, day] = k.split('|');
     const employee = userById.get(uid);
     if (!employee || employmentStatus(employee, day) === 'NOT_EMPLOYED') continue;
-    const s = summarize(byUserDay[k], day === today ? now().toMillis() : null);
+    const s = summarize(byUserDay[k], liveForDay(employee, day));
     if (s.valid === false) { invalidDays[uid] = (invalidDays[uid] || 0) + 1; continue; }
     const a = (attendance[uid] = attendance[uid] || { days: 0, minutes: 0, present: 0, onTime: 0 });
     a.days += halfHolidays.has(day) ? 0.5 : 1;
     a.minutes += s.workedMinutes;
     // Punctuality: was the first clock-in by THIS employee's shift start (+ grace)?
     if (s.firstIn != null && !halfDays.has(k) && !halfHolidays.has(day)) {
+      const start = shiftInstant(day, daySettings(employee, day));
+      if (start === null && !lateNormalDays.has(k)) continue; // ambiguous schedule is excluded from punctuality
       a.present += 1;
-      const sh = userShift[uid] || { h: SHIFT_START_HOUR, m: 0 };
-      const cutoff = DateTime.fromISO(day, { zone: ZONE })
-        .set({ hour: sh.h, minute: sh.m, second: 0, millisecond: 0 })
-        .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
+      const cutoff = start + SHIFT_GRACE_MIN * 60000;
       if (s.firstIn <= cutoff || lateNormalDays.has(k)) a.onTime += 1;
     }
   }

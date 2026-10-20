@@ -8,10 +8,12 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
-const { now, DateTime, ZONE, ATT_CUTOVER, attendanceDayFromTs } = require('../time');
+const { now, DateTime } = require('../time');
 const { notify, notifyAdmins } = require('../notify');
 const { validateDay, attendanceError } = require('../attendanceValidation');
 
+const { daySettings, snapshot, wallTime, withTimes } = require('../attendanceSession');
+const userFor = id => db.prepare('SELECT * FROM users WHERE id=?').get(id);
 const router = express.Router();
 
 const EVENT_TYPES = ['IN', 'OUT', 'BREAK_START', 'BREAK_END'];
@@ -54,16 +56,14 @@ function legacyTarget(userId, day, type) {
 
 function withOriginalTime(r) {
   const original = r.original_event ? JSON.parse(r.original_event) : null;
-  return { ...r, original_time: original ? DateTime.fromMillis(original.ts).setZone(ZONE).toFormat('HH:mm') : null };
+  const c = daySettings(userFor(r.user_id), r.day);
+  return { ...r, timezone: c.timezone, event_date: r.requested_ts ? DateTime.fromMillis(r.requested_ts, { zone: c.timezone }).toISODate() : null, original_time: original ? DateTime.fromMillis(original.ts, { zone: c.timezone }).toFormat('HH:mm') : null };
 }
 
 // Combine an attendance day (yyyy-LL-dd) + HH:mm into epoch ms. A time before
 // the cutover is the post-midnight tail of that shift → next calendar day.
-function toTs(day, time) {
-  let dt = DateTime.fromFormat(`${day} ${time}`, 'yyyy-LL-dd HH:mm', { zone: ZONE });
-  if (!dt.isValid) return null;
-  if (Number(String(time).split(':')[0]) < ATT_CUTOVER()) dt = dt.plus({ days: 1 });
-  return dt.toMillis();
+function toTs(day, time, userId, eventDate) {
+  return wallTime(day, time, daySettings(userFor(userId), day), eventDate);
 }
 
 // Employee: submit a correction request.
@@ -74,7 +74,7 @@ router.post('/', requireAuth, (req, res) => {
   const reason = String(req.body.reason || '').slice(0, 300);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day (yyyy-mm-dd) required' });
   if (!EVENT_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid punch type' });
-  if (!/^\d{2}:\d{2}$/.test(time) || toTs(day, time) === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
+  if (!/^\d{2}:\d{2}$/.test(time) || toTs(day, time, req.user.id, req.body.event_date) === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
   const operation = req.body.operation == null ? null : String(req.body.operation).toUpperCase();
   if (operation !== null && !['ADD', 'EDIT'].includes(operation)) return res.status(400).json({ error: 'operation must be ADD or EDIT' });
   if (operation !== 'EDIT' && req.body.target_event_id != null) return res.status(400).json({ error: 'Only EDIT may select an original punch' });
@@ -89,17 +89,23 @@ router.post('/', requireAuth, (req, res) => {
       const actualOperation = target ? 'EDIT' : 'ADD';
       const info = insertReq.run(req.user.id, day, type, time, reason, now().toMillis(), actualOperation, target?.id ?? null, target ? JSON.stringify(target) : null);
       notifyAdmins({ type: 'PUNCH', title: 'Attendance correction request', body: `${req.user.name} asked to ${target ? 'correct' : 'add'} ${TYPE_LABEL[type]} at ${time} on ${day}.`, link: 'clock' }, req.user.id);
+      const originalDate = target && DateTime.fromMillis(target.ts, { zone: daySettings(req.user, day).timezone }).toISODate();
+      const requestedTs = toTs(day, time, req.user.id, req.body.event_date || (originalDate > day ? originalDate : undefined));
+      if (requestedTs === null) fail('Invalid or ambiguous local date/time.', 400);
+      snapshot(req.user, day);
+      db.prepare('UPDATE punch_requests SET requested_ts=? WHERE id=?').run(requestedTs, info.lastInsertRowid);
       return getReq.get(info.lastInsertRowid);
     }).immediate();
     res.json({ request: withOriginalTime(result) });
   } catch (e) { return attendanceError(e, res); }
 });
 
-// Read only the signed-in employee's punches, with office-zone display times.
+// Read only the signed-in employee's punches, in the recorded workday timezone.
 router.get('/events', requireAuth, (req, res) => {
   const day = String(req.query.day || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || toTs(day, '12:00') === null) return res.status(400).json({ error: 'Valid day required' });
-  res.json({ day, events: dayEvents.all(req.user.id, day).map(e => ({ id: e.id, type: e.type, time: DateTime.fromMillis(e.ts).setZone(ZONE).toFormat('HH:mm') })) });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || toTs(day, '12:00', req.user.id) === null) return res.status(400).json({ error: 'Valid day required' });
+  const c = daySettings(req.user, day);
+  res.json({ day, ...c, events: withTimes(dayEvents.all(req.user.id, day), c) });
 });
 
 // Employee: my requests.
@@ -130,8 +136,8 @@ router.post('/:id/decide', requireAdmin, (req, res) => {
     const decidedTs = now().toMillis();
     let target = null;
     if (decision === 'APPROVED') {
-      const ts = toTs(r.day, r.time);
-      if (ts === null || attendanceDayFromTs(ts) !== r.day) fail('Invalid correction date or time.', 400);
+      const ts = r.requested_ts ?? toTs(r.day, r.time, r.user_id);
+      if (ts === null) fail('Invalid correction date or time.', 400);
       if (r.operation === 'EDIT') {
         target = getEvent.get(r.target_event_id);
         if (!target || target.user_id !== r.user_id || target.day !== r.day || target.type !== r.type || JSON.stringify(target) !== r.original_event) {
