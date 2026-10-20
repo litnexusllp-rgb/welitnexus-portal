@@ -12,6 +12,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isAdmin = () => ME && ME.role === 'ADMIN';
   const fmtMins = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
+  const attendanceTime = (ts, timezone) => ts ? new Date(ts).toLocaleString([], { timeZone: timezone || 'Asia/Kolkata', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
   // Friendly date: '2026-06-22' -> '22 Jun 2026'. Passes through anything else.
   const fmtDate = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? new Date(s + 'T00:00').toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : (s || '—'));
   const todayISO = () => new Date().toLocaleDateString('en-CA'); // yyyy-mm-dd local
@@ -269,6 +270,8 @@
       ${ro('Department', ME.department)}
       ${ro('Title', ME.title)}
       ${ro('Shift start', ME.shift_start)}
+      ${ro('Attendance timezone', ME.attendance_timezone || 'Office default')}
+      ${ro('Workday starts at hour', ME.attendance_cutover ?? 'Office default')}
       ${ro('Date of joining', ME.join_date)}
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Save</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
@@ -401,9 +404,9 @@
       const pending = mine.leaves.filter((l) => l.status === 'PENDING').length;
       const openTasks = tasks.tasks.filter((t) => t.status !== 'DONE').length;
       $('#dashCards').innerHTML = `
-        ${statCard('Today', `${badge(status.state)}`, 'value small')}
-        ${statCard('Worked today', fmtMins(status.workedMinutes), 'value small')}
-        ${statCard('Break today', fmtMins(status.breakMinutes), 'value small')}
+        ${statCard('Current session', `${badge(status.state)}`, 'value small')}
+        ${statCard('Worked this session day', fmtMins(status.workedMinutes), 'value small')}
+        ${statCard('Break this session day', fmtMins(status.breakMinutes), 'value small')}
         ${statCard('Leave balance', `${mine.balance} days`, 'value small')}
         ${statCard('Open tasks', openTasks, 'value')}
         ${statCard('Pending leave requests', pending, 'value')}`;
@@ -423,7 +426,7 @@
   function tickDashTimers() {
     if (!DASH_LIVE) return;
     const elapsed = Date.now() - DASH_LIVE.receivedAt;
-    DASH_LIVE.working.forEach((p) => {
+    DASH_LIVE.working.filter(p => !p.needsReview).forEach((p) => {
       const el = document.querySelector(`[data-livetimer="${p.id}"]`);
       if (el) el.textContent = fmtHMS(p.workedMinutes * 60000 + elapsed);
     });
@@ -441,7 +444,6 @@
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
       DASH_LIVE = { receivedAt: Date.now(), working }; // anchor for the live tick
-      const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
       // Small phone/PC indicator next to a name, from their latest punch's device.
       const deviceTag = (d) => d === 'MOBILE' ? ' <span class="dev-tag" title="Clocked in from a phone">📱 Mobile</span>'
         : d === 'PC' ? ' <span class="dev-tag" title="Clocked in from a computer">💻 PC</span>' : '';
@@ -456,21 +458,21 @@
           <div class="section" style="margin-bottom:0;">
             <h2>🟢 Currently in (${working.length})${onBreak.length ? '' : ' <span class="ratio-ind">· no one on break</span>'}</h2>
             ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th><th>Break</th></tr></thead><tbody>
-              ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
+              ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
             </tbody></table>` : `<div class="empty">No one is clocked in right now.</div>`}
           </div>
           ${onBreak.length ? `<div class="section" style="margin-bottom:0;">
             <h2>☕ On break (${onBreak.length})</h2>
             <table><thead><tr><th>Name</th><th>Dept</th><th>Total break</th></tr></thead><tbody>
-              ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td><td><strong style="color:#9a6b00;">${fmtMins(p.breakMinutes)}</strong></td></tr>`).join('')}
+              ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td><td><strong style="color:#9a6b00;">${fmtMins(p.breakMinutes)}</strong></td></tr>`).join('')}
             </tbody></table>
           </div>` : ''}
         </div>
         <div class="section">
           <h2>✅ Clocked out today (${clockedOut.length})</h2>
           ${clockedOut.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
-            ${clockedOut.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}</td><td>${esc(p.department || '—')}</td>
-              <td>${fmtTime(p.firstIn)}</td><td>${fmtTime(p.lastOut)}</td>
+            ${clockedOut.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td>
+              <td>${attendanceTime(p.firstIn, p.timezone)}</td><td>${attendanceTime(p.lastOut, p.timezone)}</td>
               <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
           </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
         </div>
@@ -478,7 +480,7 @@
           <h2>⚠️ Missing clock-outs (${missing.rows.length})<span class="ratio-ind">· last 7 days — hours are understated until fixed</span></h2>
           <table><thead><tr><th>Employee</th><th>Day</th><th>Clocked in</th><th>Left as</th><th></th></tr></thead><tbody>
             ${missing.rows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.day)}</td>
-              <td>${fmtTime(m.firstIn)}</td><td><span class="badge b-pending">${cap(m.state)}</span></td>
+              <td>${attendanceTime(m.firstIn, m.timezone)}</td><td><span class="badge b-pending">${cap(m.state)}</span></td>
               <td style="text-align:right;"><button class="btn-fix" data-fixmiss="${m.user_id}:${m.day}">Fix</button></td></tr>`).join('')}
           </tbody></table>
         </div>` : ''}
@@ -522,7 +524,7 @@
        <div class="section"><h2>My correction requests</h2><div id="myPunchReqs"></div></div>`);
     await renderClock();
     loadTimesheet();
-    $('#fixPunchBtn').addEventListener('click', () => openPunchRequestModal());
+    $('#fixPunchBtn').addEventListener('click', () => openPunchRequestModal($('#fixPunchBtn').dataset.day));
     loadMyPunchRequests();
     if (isAdmin()) startLiveAttendance('clockTeam', false); // live team timers + 10s refresh
   };
@@ -531,12 +533,13 @@
   const REQ_BADGE = { PENDING: 'b-pending', APPROVED: 'b-approved', REJECTED: 'b-high' };
   function openPunchRequestModal(presetDay) {
     modal(`<h3>Request an attendance correction</h3>
-      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Select a recorded punch to correct its time, or add a missed punch. Times use the office timezone; after-midnight times belong to the preceding shift day.</p>
+      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Select a recorded punch to correct its time, or add a missed punch. Times use the attendance timezone shown below. The workday stays with the original clock-in; choose the actual calendar date for an overnight punch.</p>
       <div class="form-row"><div class="field"><label>Day</label><input type="date" id="prDay" value="${esc(presetDay || todayISO())}"></div>
         <div class="field"><label>Request</label><select id="prOperation"><option value="EDIT">Correct a recorded punch</option><option value="ADD">Add a missed punch</option></select></div></div>
       <div class="form-row"><div class="field" id="prOriginalField"><label>Original punch</label><select id="prOriginal"></select></div>
         <div class="field"><label>Punch type</label><select id="prType">${Object.entries(PUNCH_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>
-      <div class="form-row"><div class="field"><label>Time (24h)</label><input type="time" id="prTime"></div><div class="field"></div></div>
+      <div class="form-row"><div class="field"><label>Time (24h)</label><input type="time" id="prTime"></div><div class="field"><label>Actual punch date</label><input type="date" id="prEventDate"></div></div>
+      <p id="prZone" class="page-sub"></p>
       <div class="form-row one"><div class="field"><label>Reason</label><textarea id="prReason" placeholder="e.g. Forgot to clock out, left at 6:30pm"></textarea></div></div>
       <p id="prError" role="alert" style="color:var(--danger);"></p>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSend" disabled>Send request</button></div>`);
@@ -548,7 +551,7 @@
       originalField.hidden = !editing;
       typeInput.disabled = editing;
       const selected = events.find(e => e.id === Number(originalInput.value));
-      if (editing && selected) { typeInput.value = selected.type; if (updateTime) timeInput.value = selected.time; }
+      if (editing && selected) { typeInput.value = selected.type; if (updateTime) { timeInput.value = selected.time; $('#prEventDate').value = selected.event_date || ''; } }
       sendButton.disabled = sending || loadedDay !== dayInput.value || (editing && !selected);
     };
     const loadEvents = async () => {
@@ -558,7 +561,9 @@
         const data = await api.get(`/punch-requests/events?day=${encodeURIComponent(day)}`);
         if (version !== loading || !dayInput.isConnected) return;
         events = data.events; loadedDay = day;
-        originalInput.innerHTML = events.map(e => `<option value="${e.id}">${PUNCH_LABEL[e.type]} · ${esc(e.time)}</option>`).join('');
+        $('#prZone').textContent = data.timezone || '';
+        $('#prEventDate').value = '';
+        originalInput.innerHTML = events.map(e => `<option value="${e.id}">${PUNCH_LABEL[e.type]} · ${esc(e.event_date || day)} ${esc(e.time)} ${esc(e.offset || '')}</option>`).join('');
         if (events.length) originalInput.value = String(events[events.length - 1].id);
         else operationInput.value = 'ADD';
         selectOriginal();
@@ -571,6 +576,7 @@
     sendButton.addEventListener('click', async () => {
       if (sendButton.disabled || loadedDay !== dayInput.value) return;
       const payload = { day: dayInput.value, operation: operationInput.value, type: typeInput.value, time: timeInput.value, reason: $('#prReason').value };
+      if ($('#prEventDate').value) payload.event_date = $('#prEventDate').value;
       if (payload.operation === 'EDIT') payload.target_event_id = Number(originalInput.value);
       if (!payload.day || !payload.time) return toast('Pick a day and time', true);
       sending = true; sendButton.disabled = true; errorEl.textContent = '';
@@ -589,7 +595,7 @@
       const el = $('#myPunchReqs'); if (!el) return;
       if (!requests.length) { el.innerHTML = `<div class="empty">No correction requests.</div>`; return; }
       el.innerHTML = `<table><thead><tr><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
-        ${requests.map((r) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.time)}</td>
+        ${requests.map((r) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.event_date || '')} ${esc(r.time)} ${esc(r.timezone || '')}</td>
           <td>${esc(r.reason || '—')}</td><td><span class="badge ${REQ_BADGE[r.status] || ''}">${cap(r.status)}</span>${r.admin_note ? `<div style="color:var(--slate);font-size:.76rem;margin-top:3px;">${esc(r.admin_note)}</div>` : ''}</td>
           <td>${r.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel-req="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}
       </tbody></table>`;
@@ -611,18 +617,23 @@
     };
     const card = $('#clockCard');
     if (!card) return;
+    const correctionButton = $('#fixPunchBtn');
+    if (correctionButton) correctionButton.dataset.day = status.day;
     card.innerHTML = `
       <span class="state-badge b-${status.state.toLowerCase()}">${labels[status.state] || status.state}</span>
       <div class="now" id="liveClock">--:--:--</div>
-      <div class="meta">Total break today: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
+      <div class="meta">Workday ${esc(status.day)} · ${esc(status.timezone)}${status.ongoing && status.day !== status.currentDay ? ' · ongoing session from an earlier workday' : ''}</div>
+      ${status.needsReview ? '<p style="color:var(--danger);">This session has been open over 24 hours. Review the punches before using its totals.</p>' : ''}
+      <div class="meta">Total break this workday: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
       ${status.valid === false ? `<p style="color:var(--danger);">${esc(status.error)} Ask an administrator to correct today’s punches.</p>` : ''}<div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
     card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
       punch(b.dataset.punch);
     }));
     clearInterval(clockTimer);
-    const tick = () => { const el = $('#liveClock'); if (el) el.textContent = new Date().toLocaleTimeString(); };
-    tick(); clockTimer = setInterval(tick, 1000);
+    const tick = () => { const el = $('#liveClock'); if (el) el.textContent = new Date().toLocaleTimeString([], { timeZone: status.timezone }); };
+    let ticks = 0;
+    tick(); clockTimer = setInterval(() => { tick(); if (++ticks % 30 === 0) renderClock(); }, 1000);
   }
 
   // Second confirmation for clocking out — people were hitting it by mistake
@@ -654,8 +665,8 @@
       el.innerHTML = `<table><thead><tr><th>Date</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th></tr></thead><tbody>
         ${days.slice().reverse().map((d) => `<tr>
           <td>${esc(d.day)}</td>
-          <td>${d.firstIn ? new Date(d.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-          <td>${d.lastOut ? new Date(d.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+          <td>${attendanceTime(d.firstIn, d.timezone)}</td>
+          <td>${attendanceTime(d.lastOut, d.timezone)}</td>
           <td>${fmtMins(d.workedMinutes)}</td><td>${fmtMins(d.breakMinutes)}</td></tr>`).join('')}
       </tbody></table>`;
     } catch (e) { toast(e.message, true); }
@@ -900,7 +911,7 @@
   function punchApprovalTable(requests) {
     return `<table><thead><tr><th>Employee</th><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Action</th></tr></thead><tbody>
       ${requests.map((r) => `<tr>
-        <td>${esc(r.name)}</td><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.time)}</td><td>${esc(r.reason || '—')}</td>
+        <td>${esc(r.name)}</td><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.event_date || '')} ${esc(r.time)} ${esc(r.timezone || '')}</td><td>${esc(r.reason || '—')}</td>
         <td class="row-actions"><button class="btn btn-primary btn-sm" data-preq-approve="${r.id}">Approve</button>
           <button class="btn btn-danger btn-sm" data-preq-reject="${r.id}">Reject</button></td>
       </tr>`).join('')}</tbody></table>`;
@@ -2134,9 +2145,9 @@
         ${statCard('Hours worked', fmtMins(t.workedMinutes), 'value small')}</div>`;
       $('#repTable').innerHTML = `<table class="dense"><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
         ${data.rows.map((r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
-          <td>${badge(r.status)}${r.attendanceError || r.employmentWarning ? `<div style="color:var(--danger);">${esc(r.attendanceError || r.employmentWarning)}</div>` : ''}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
-          <td>${r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-          <td>${r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+          <td>${badge(r.status)}${r.attendanceError || r.employmentWarning || r.configWarning ? `<div style="color:var(--danger);">${esc(r.attendanceError || r.employmentWarning || r.configWarning)}</div>` : ''}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
+          <td>${attendanceTime(r.firstIn, r.timezone)}</td>
+          <td>${attendanceTime(r.lastOut, r.timezone)}</td>
           <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td>
           <td>${['FUTURE', 'NOT_EMPLOYED'].includes(r.status) ? '' : `<button class="btn-fix" data-fix-day="${r.day}" title="Correct this day's punches">Fix</button>`}</td></tr>`).join('')}
       </tbody></table>`;
@@ -2161,11 +2172,11 @@
       .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`).join('');
     const body = $('#fixBody'); if (!body) return;
     body.innerHTML = `
-      <p style="color:var(--slate);margin:0 0 14px;"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
+      <p style="color:var(--slate);margin:0 0 14px;"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
       ${data.error ? `<p style="color:var(--danger);">${esc(data.error)}</p>` : ''}${data.events.length ? `<table style="margin-bottom:14px;"><thead><tr><th>Punch</th><th>Time</th><th></th></tr></thead><tbody>
         ${data.events.map((e) => `<tr>
           <td><select data-etype="${e.id}">${typeOpts(e.type)}</select></td>
-          <td><input type="time" data-etime="${e.id}" value="${esc(e.time)}" style="padding:6px;border:1px solid var(--line);border-radius:6px;"></td>
+          <td><input type="date" data-edate="${e.id}" value="${esc(e.event_date)}"><input type="time" data-etime="${e.id}" value="${esc(e.time)}" style="padding:6px;border:1px solid var(--line);border-radius:6px;"></td>
           <td class="row-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}">✕</button></td>
         </tr>`).join('')}
       </tbody></table>` : `<div class="empty" style="margin-bottom:14px;">No punches recorded for this day.</div>`}
@@ -2176,7 +2187,7 @@
         </div>` : ''}
       <div class="field" style="margin-bottom:6px;"><label>Add a punch</label></div>
       <div class="form-row" style="margin-bottom:0;">
-        <div class="field"><select id="newType">${typeOpts('IN')}</select></div>
+        <div class="field"><label>Actual punch date (optional)</label><input type="date" id="newEventDate"><select id="newType">${typeOpts('IN')}</select></div>
         <div class="field" style="display:flex;gap:8px;"><input type="time" id="newTime" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;"><button class="btn btn-navy btn-sm" id="addPunch">Add</button></div>
       </div>
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
@@ -2192,7 +2203,7 @@
     body.querySelectorAll('[data-esave]').forEach((b) => b.addEventListener('click', async () => {
       const id = b.dataset.esave;
       try {
-        await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
+        await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, event_date: body.querySelector(`[data-edate="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
         toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow);
       } catch (e) { toast(e.message, true); }
     }));
@@ -2203,7 +2214,7 @@
     $('#addPunch').addEventListener('click', async () => {
       const time = $('#newTime').value;
       if (!time) return toast('Pick a time', true);
-      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow); }
+      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time, event_date: $('#newEventDate').value || undefined }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow); }
       catch (e) { toast(e.message, true); }
     });
     $('#fixDone').addEventListener('click', () => { closeModal(); if (onDone) onDone(); else { loadEmpReport(); loadRegister(); } });
@@ -2214,9 +2225,9 @@
     const head = ['Date', 'Day', 'Status', 'First In', 'Last Out', 'Worked (min)', 'Break (min)', 'Review Warning'];
     const lines = [head.join(',')].concat(EMP_REPORT.rows.map((r) => [
       r.day, r.weekday, r.status,
-      r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      r.lastOut ? new Date(r.lastOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      r.workedMinutes, r.breakMinutes, csvCell(r.attendanceError || r.employmentWarning || ''),
+      csvCell(r.firstIn ? attendanceTime(r.firstIn, r.timezone) : ''),
+      csvCell(r.lastOut ? attendanceTime(r.lastOut, r.timezone) : ''),
+      r.workedMinutes, r.breakMinutes, csvCell(r.attendanceError || r.employmentWarning || r.configWarning || ''),
     ].join(',')));
     downloadCsv(lines.join('\n'), `attendance-${EMP_REPORT.user.name.replace(/\s+/g, '_')}-${EMP_REPORT.start}_to_${EMP_REPORT.end}.csv`);
   }
@@ -2468,7 +2479,7 @@
     const first = new Date(y, m - 1, 1);
     const daysInMonth = new Date(y, m, 0).getDate();
     const lead = (first.getDay() + 6) % 7; // Monday-first grid
-    const todayISOv = todayISO();
+    const todayISOv = att.today || todayISO();
     const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
     // Clicking a past/today cell opens the fix editor (admins) or a correction
@@ -2494,7 +2505,7 @@
       else if (r.lateOverride) { cls = 'pcal-ok'; tag = 'Normal · admin'; }
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
-      const inTime = r.firstIn ? new Date(r.firstIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const inTime = r.firstIn ? attendanceTime(r.firstIn, r.timezone) : '';
       const can = clickable(r);
       const action = isAdmin() ? 'click to fix punches' : 'click to request a correction';
       const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
@@ -2536,7 +2547,7 @@
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Click any day to fix its punches.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Click any day to fix its punches.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -2729,6 +2740,9 @@
         <div class="field"><label>Email</label><input id="eEmail" value="${esc(u?.email || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Employee code</label><input id="eCode" value="${esc(u?.emp_code || '')}" placeholder="e.g. LN-001"></div>
         <div class="field"><label>Shift start (for punctuality)</label><input type="time" id="eShift" value="${esc(u?.shift_start || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank to use the firm default.</div></div></div>
+      <div class="form-row"><div class="field"><label>Attendance timezone (IANA name)</label><input id="eTimezone" value="${esc(u?.attendance_timezone || '')}" placeholder="Blank uses office timezone"></div>
+        <div class="field"><label>Workday starts at hour (0–23)</label><input type="number" min="0" max="23" step="1" id="eCutover" value="${u?.attendance_cutover ?? ''}" placeholder="Blank uses office default"></div></div>
+      <p class="page-sub">Shift start is interpreted in this timezone. Choose a workday boundary before the shift begins. Close any open session before changing these settings.</p>
       <div class="form-row"><div class="field"><label>Department</label><input id="eDept" value="${esc(u?.department || '')}"></div>
         <div class="field"><label>Title</label><input id="eTitle" value="${esc(u?.title || '')}"></div></div>
       <div class="form-row"><div class="field"><label>Phone</label><input id="ePhone" value="${esc(u?.phone || '')}"></div>
@@ -2742,7 +2756,7 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, asana_email: $('#eAsana').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, attendance_timezone: $('#eTimezone').value.trim(), attendance_cutover: $('#eCutover').value === '' ? null : Number($('#eCutover').value), join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, asana_email: $('#eAsana').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }

@@ -17,11 +17,12 @@
 const { db } = require('./db');
 const { now, attendanceToday, DateTime, ZONE } = require('./time');
 const { notifyAdmins } = require('./notify');
+const { settings } = require('./attendanceSession');
 const { employmentStatus } = require('./employment');
 
 const HABIT_DAYS = 14;
 
-const activeEmployees = db.prepare(`SELECT id, name, active, join_date, exit_date FROM users WHERE active = 1 AND role = 'EMPLOYEE'`);
+const activeEmployees = db.prepare(`SELECT id, name, attendance_timezone, attendance_cutover, active, join_date, exit_date FROM users WHERE active = 1 AND role = 'EMPLOYEE'`);
 const inOnDay = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day = ? LIMIT 1`);
 const inWithinWindow = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day >= ? AND day <= ? LIMIT 1`);
 const isHolidayOn = db.prepare(`SELECT duration FROM holidays WHERE date = ? LIMIT 1`);
@@ -36,12 +37,17 @@ const insertPendingLeave = db.prepare(
 
 // The most recently completed attendance day (yesterday's shift), when run
 // after the cutover. Callers may pass an explicit day for manual runs/tests.
-function lastCompletedAttendanceDay() {
-  return DateTime.fromISO(attendanceToday(), { zone: ZONE }).minus({ days: 1 }).toFormat('yyyy-LL-dd');
+function lastCompletedAttendanceDay(user) {
+  return DateTime.fromISO(attendanceToday(settings(user)), { zone: ZONE }).minus({ days: 1 }).toFormat('yyyy-LL-dd');
 }
 
 // Flag no-shows for one attendance day. Returns the number of requests created.
 function flagAbsences(dayStr) {
+  if (!dayStr) {
+    // Each employee's most recently closed local day may differ from the office.
+    const days = new Set(activeEmployees.all().map(u => lastCompletedAttendanceDay(u)));
+    return [...days].reduce((n, day) => n + flagAbsences(day), 0);
+  }
   const day = dayStr || lastCompletedAttendanceDay();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return 0;
 
@@ -58,6 +64,7 @@ function flagAbsences(dayStr) {
 
   const run = db.transaction(() => {
     for (const u of activeEmployees.all()) {
+      if (day > lastCompletedAttendanceDay(u)) continue;
       if (employmentStatus(u, day)) continue;
       if (inOnDay.get(u.id, day)) continue;                                   // they were present
       if (!inWithinWindow.get(u.id, windowStart, day)) continue;             // no clock-in habit

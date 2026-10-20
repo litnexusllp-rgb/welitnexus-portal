@@ -13,7 +13,7 @@ function element(value = '') {
     addEventListener(name, fn) { this.listeners[name] = fn; } };
 }
 function harness(get) {
-  const elements = Object.fromEntries(['prDay','prOperation','prOriginal','prOriginalField','prType','prTime','prReason','prError','mCancel','mSend'].map(k=>[k,element()]));
+  const elements = Object.fromEntries(['prDay','prOperation','prOriginal','prOriginalField','prType','prTime','prEventDate','prZone','prReason','prError','mCancel','mSend'].map(k=>[k,element()]));
   const posts = [], toasts = []; let closed = 0;
   const c = { $, modal, todayISO:()=> '2026-06-01', esc:s=>String(s), toast:(...args)=>toasts.push(args),
     closeModal:()=>{closed++;}, api:{get,post:async (url,payload)=>{posts.push({url,payload});}}, document:{} };
@@ -25,12 +25,13 @@ function harness(get) {
   return {c,e:elements,posts,toasts,get closed(){return closed;}};
 }
 test('employee selects the exact recorded break and submits an EDIT with target ID', async () => {
-  const h=harness(async()=>({events:[{id:1,type:'BREAK_START',time:'10:00'},{id:2,type:'BREAK_START',time:'12:00'},{id:3,type:'OUT',time:'15:10'}]}));
+  const h=harness(async()=>({events:[{id:1,type:'BREAK_START',time:'10:00'},{id:2,type:'BREAK_START',time:'12:00',event_date:'2026-06-02'},{id:3,type:'OUT',time:'15:10'}]}));
   await settle();
   assert.equal(h.e.prOriginal.value,'3'); assert.equal(h.e.prType.disabled,true);
   h.e.prOriginal.value='2'; h.e.prOriginal.listeners.change(); h.e.prTime.value='11:50';
   await h.e.mSend.listeners.click();
   assert.equal(h.posts[0].payload.operation,'EDIT'); assert.equal(h.posts[0].payload.target_event_id,2);
+  assert.equal(h.posts[0].payload.event_date,'2026-06-02');
   assert.equal(h.posts[0].payload.type,'BREAK_START'); assert.equal(h.posts[0].payload.time,'11:50'); assert.equal(h.closed,1);
   assert.equal(h.c.punchRequestAction({operation:'EDIT',original_time:'15:10'}),'Correct 15:10 →');
 });

@@ -55,7 +55,7 @@ then delete the sample employees (Disable).
 |-----|---------|-------|
 | `PORT` | `3000` | Listen port |
 | `JWT_SECRET` | dev placeholder | **Set a long random string in production** |
-| `TZ_OFFICE` | `Asia/Kolkata` | Controls what counts as "today" for clock-in |
+| `TZ_OFFICE` | `Asia/Kolkata` | Default attendance timezone; employee profiles can override it |
 | `DB_PATH` | `./data/portal.db` | On Railway, point at the volume: `/data/portal.db` |
 | `NODE_ENV` | `development` | Set `production` to enable secure (HTTPS-only) cookies |
 
@@ -110,3 +110,5 @@ welitnexus-portal/
 - Google Sheets mirror of attendance (the bot already has `googleSheets.js`)
 - Per-employee leave types (sick / casual / earned) and accrual rules
 - CSV export of timesheets and leave history
+
+Attendance timezone, overnight-session ownership, correction dates and deployment checks: [attendance timezones](docs/attendance-timezones.md).

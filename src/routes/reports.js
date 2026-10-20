@@ -14,6 +14,7 @@ const { summarize } = require('../compute');
 const { halfHolidayStatus, addAttendanceTotals } = require('../holidayAttendance');
 const { employmentStatus, overlapsEmployment } = require('../employment');
 
+const { settings, daySettings, liveForDay, shiftInstant } = require('../attendanceSession');
 const router = express.Router();
 
 // Punctuality thresholds (mirror the KPI page): a clock-in counts as late past
@@ -28,8 +29,8 @@ function shiftStartOf(hhmm) {
 }
 const fmtShift = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
 
-const getUser = db.prepare(`SELECT id, name, department, title, shift_start, active, join_date, exit_date FROM users WHERE id = ?`);
-const reportUsers = db.prepare(`SELECT id, name, department, title, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`);
+const getUser = db.prepare(`SELECT id, name, department, title, shift_start, attendance_timezone, attendance_cutover, active, join_date, exit_date FROM users WHERE id = ?`);
+const reportUsers = db.prepare(`SELECT id, name, department, title, shift_start, attendance_timezone, attendance_cutover, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`);
 const eventsForUserBetween = db.prepare(
   `SELECT type, ts, day FROM events WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts, id`
 );
@@ -80,12 +81,11 @@ function classify(day, summary, leaveKind, isHoliday, isFuture, isWorkingOverrid
 // Build one employee's day-by-day attendance for a range. Shared by the admin
 // report and the employee's own calendar (which passes their own id).
 function buildAttendanceReport(user, req) {
-  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end)) ? String(req.query.end) : attendanceToday();
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.end)) ? String(req.query.end) : attendanceToday(settings(user));
   const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.start)) ? String(req.query.start)
     : DateTime.fromISO(end, { zone: ZONE }).startOf('month').toFormat('yyyy-LL-dd');
   if (start > end) return { error: 'Start must be before end' };
 
-  const today = attendanceToday();
   const shift = shiftStartOf(user.shift_start); // this employee's own expected clock-in
   const byDay = {};
   for (const e of eventsForUserBetween.all(user.id, start, end)) (byDay[e.day] = byDay[e.day] || []).push(e);
@@ -104,30 +104,33 @@ function buildAttendanceReport(user, req) {
 
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
-    const s = byDay[day] ? summarize(byDay[day], day === today ? now().toMillis() : null) : null;
-    const status = classify(day, s, leaveByDay[day], holidaySet[day], day > today, !!workingSet[day], user);
+    const c = daySettings(user, day);
+    const localToday = attendanceToday(c);
+    const s = byDay[day] ? summarize(byDay[day], liveForDay(user, day)) : null;
+    const status = classify(day, s, leaveByDay[day], holidaySet[day], day > localToday, !!workingSet[day], user);
     const excluded = status === 'NOT_EMPLOYED' || status === 'INVALID' || status === 'EMPLOYMENT_UNKNOWN';
     addAttendanceTotals(totals, status, !excluded && s ? s.workedMinutes : 0);
     const halfHoliday = holidaySet[day]?.duration === 'HALF';
     // Punctuality / short-day flags for the calendar view. An approved half day
     // is exempt — coming in later (or leaving early) is the point of it.
     let late = false; let minutesLate = 0;
+    const expectedStart = shiftInstant(day, c);
+    const configWarning = expectedStart === null && s?.firstIn ? 'Scheduled start falls in a daylight-saving transition; review punctuality.' : null;
     const lateOverride = lateNormalDays.has(day);
-    if (!lateOverride && !excluded && s && s.firstIn != null && status !== 'HALF' && !halfHoliday) {
-      const cutoff = DateTime.fromISO(day, { zone: ZONE })
-        .set({ hour: shift.h, minute: shift.m, second: 0, millisecond: 0 })
-        .plus({ minutes: SHIFT_GRACE_MIN }).toMillis();
+    if (!lateOverride && !excluded && s && s.firstIn != null && status !== 'HALF' && !halfHoliday && expectedStart !== null) {
+      const cutoff = expectedStart + SHIFT_GRACE_MIN * 60000;
       if (s.firstIn > cutoff) { late = true; minutesLate = Math.round((s.firstIn - cutoff) / 60000); }
     }
     // Forgot to clock out: a finished day that still ends IN or on BREAK. The
     // recorded hours are incomplete, so flag that rather than calling it short.
-    const noClockOut = !!(!excluded && s && s.firstIn != null && day < today && s.state !== 'OUT');
-    const short = !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && day < today && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
+    const noClockOut = !!(!excluded && s && s.firstIn != null && liveForDay(user, day) === null && day < localToday && s.state !== 'OUT');
+    const short = !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && s.state === 'OUT' && day < localToday && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
     return {
-      day,
+      day, timezone: c.timezone, shiftStart: c.shift_start,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
       status,
       attendanceError: s?.error || null,
+      configWarning,
       employmentWarning: employmentStatus(user, day) === 'EMPLOYMENT_UNKNOWN' ? 'Employment dates need review.' : null,
       holidayName: holidaySet[day]?.name || '',
       holidayDuration: holidaySet[day]?.duration || null,
@@ -142,7 +145,7 @@ function buildAttendanceReport(user, req) {
       noClockOut,
     };
   });
-  return { user, start, end, rows, totals, needsReview: rows.some(r => r.attendanceError || r.employmentWarning), shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
+  return { user, today: attendanceToday(settings(user)), timezone: settings(user).timezone, start, end, rows, totals, needsReview: rows.some(r => r.attendanceError || r.employmentWarning || r.configWarning || r.noClockOut), shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
 }
 
 // ADMIN: any employee's day-by-day report.
@@ -174,21 +177,22 @@ router.get('/missing-clockouts', requireAdmin, (req, res) => {
   const today = attendanceToday();
   const start = DateTime.fromISO(today, { zone: ZONE }).minus({ days }).toFormat('yyyy-LL-dd');
   const byUserDay = {};
-  for (const e of allEventsBetween.all(start, today)) {
+  for (const e of allEventsBetween.all(start, DateTime.fromISO(today).plus({ days: 1 }).toISODate())) {
     const k = `${e.user_id}|${e.day}`;
     (byUserDay[k] = byUserDay[k] || []).push(e);
   }
   const names = {};
-  for (const u of reportUsers.all()) if (u.active) names[u.id] = u.name;
+  const employees = {};
+  for (const u of reportUsers.all()) if (u.active) { names[u.id] = u.name; employees[u.id] = u; }
   const rows = [];
   for (const k of Object.keys(byUserDay)) {
     const [uid, day] = k.split('|');
-    if (day >= today) continue;              // today is still in progress
+    if (!employees[uid] || day >= attendanceToday(settings(employees[uid])) || liveForDay(employees[uid], day) !== null) continue;              // today is still in progress
     if (!names[uid]) continue;               // inactive employee
     const s = summarize(byUserDay[k], null); // no live tail: past day
     if (s.firstIn == null || s.state === 'OUT') continue;
     rows.push({
-      user_id: Number(uid), name: names[uid], day,
+      user_id: Number(uid), name: names[uid], day, timezone: daySettings(employees[uid], day).timezone,
       firstIn: s.firstIn, state: s.state, workedMinutes: s.workedMinutes,
     });
   }
@@ -201,7 +205,6 @@ router.get('/register', requireAdmin, (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
-  const today = attendanceToday();
   const days = eachDay(start, end);
 
   const holidaySet = {};
@@ -227,8 +230,8 @@ router.get('/register', requireAdmin, (req, res) => {
     const totals = { present: 0, leave: 0, absent: 0 };
     for (const day of days) {
       const ev = eventsByUserDay[`${u.id}|${day}`];
-      const s = ev ? summarize(ev, day === today ? now().toMillis() : null) : null;
-      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], holidaySet[day], day > today, !!workingSet[day], u);
+      const s = ev ? summarize(ev, liveForDay(u, day)) : null;
+      const status = classify(day, s, leaveByUserDay[`${u.id}|${day}`], holidaySet[day], day > attendanceToday(daySettings(u, day)), !!workingSet[day], u);
       cells[day] = status;
       addAttendanceTotals(totals, status);
     }
