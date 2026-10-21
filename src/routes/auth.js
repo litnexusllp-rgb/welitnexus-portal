@@ -3,6 +3,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { db } = require('../db');
+const { syncBalance } = require('../leavePolicy');
 const {
   verifyPassword, hashPassword, issueToken, setAuthCookie, clearAuthCookie, requireAuth,
 } = require('../auth');
@@ -36,6 +37,7 @@ router.post('/login', loginLimiter, (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
   const token = issueToken(user);
+  user.leave_balance = syncBalance(user.id).balance;
   setAuthCookie(res, token);
   delete user.password_hash;
   res.json({ user });
@@ -47,7 +49,7 @@ router.post('/logout', (req, res) => {
 });
 
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: req.user });
+  res.json({ user: { ...req.user, leave_balance: syncBalance(req.user.id).balance } });
 });
 
 // Self-service: change your own password (must confirm the current one).

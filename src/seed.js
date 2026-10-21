@@ -19,7 +19,7 @@ const insertUser = db.prepare(
 function ensureUser(u) {
   const existing = findByEmail.get(u.email);
   if (existing) { console.log(`= exists: ${u.email}`); return existing.id; }
-  const info = insertUser.run({ leave_balance: 18, department: '', title: '', phone: '', ...u, password_hash: hashPassword(u.password), created_ts: ts });
+  const info = insertUser.run({ leave_balance: 20, department: '', title: '', phone: '', ...u, password_hash: hashPassword(u.password), created_ts: ts });
   console.log(`+ created ${u.role}: ${u.email}  (password: ${u.password})`);
   return info.lastInsertRowid;
 }

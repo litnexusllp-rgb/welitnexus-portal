@@ -16,6 +16,7 @@ const { startBirthdayScheduler } = require('./birthdays');
 const { getScheduler } = require('./eodScheduler');
 
 bootstrapAdmin(); // create first admin on a fresh database
+require('./leavePolicy').syncAllBalances();
 
 const app = express();
 app.set('trust proxy', 1); // Railway terminates TLS in front of us; needed for rate-limit + secure cookies

@@ -63,6 +63,7 @@ function overlapDays(aStart, aEnd, bStart, bEnd) {
 // Build the KPI payload for a month. Shared by the admin worksheet and the
 // employee's own "My performance" view (which filters to just their row).
 async function buildKpi(req) {
+  require('../leavePolicy').syncAllBalances();
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
