@@ -81,6 +81,7 @@ app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/punch-requests', require('./routes/punchRequests'));
 app.use('/api/asana', require('./routes/asana'));
+app.use('/api/asana-review', require('./routes/asanaReview'));
 app.use('/api/operations', require('./routes/operations'));
 app.use('/api/eod', require('./routes/eod'));
 
