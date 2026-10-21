@@ -130,14 +130,26 @@ test('October leave year, category credits and unpaid dates', async t => {
   await t.test('a pre-category database upgrades without rewriting leave history',()=>{
     const legacyPath=path.join(dir,'legacy.db');
     const Database=require('better-sqlite3'), legacy=new Database(legacyPath);
-    // Use the prior committed schema to reproduce a real existing installation.
-    const prior=require('node:child_process').spawnSync('git',['show','HEAD:src/db.js'],{cwd:path.join(__dirname,'..'),encoding:'utf8'});
-    assert.equal(prior.status,0,prior.stderr);
-    fs.writeFileSync(path.join(dir,'prior-db.cjs'),prior.stdout.replace("require('better-sqlite3')",`require(${JSON.stringify(require.resolve('better-sqlite3'))})`));
+    // Frozen pre-category tables: independent of the checkout's current HEAD.
+    legacy.exec(`CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+      emp_code TEXT DEFAULT '', role TEXT NOT NULL DEFAULT 'EMPLOYEE',
+      department TEXT DEFAULT '', title TEXT DEFAULT '', phone TEXT DEFAULT '',
+      leave_balance REAL NOT NULL DEFAULT 18, active INTEGER NOT NULL DEFAULT 1,
+      created_ts INTEGER NOT NULL
+    ); CREATE TABLE leaves (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+      start_date TEXT NOT NULL, end_date TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'FULL',
+      reason TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'PENDING', days REAL NOT NULL DEFAULT 1,
+      decided_by INTEGER, decided_ts INTEGER, admin_note TEXT DEFAULT '', created_ts INTEGER NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    );
+    INSERT INTO users(name,email,password_hash,leave_balance,created_ts) VALUES('Legacy','legacy@example.test','x',4.5,0);
+    INSERT INTO leaves(user_id,start_date,end_date,kind,reason,status,days,created_ts) VALUES(1,'2026-10-15','2026-10-15','FULL','Original reason','APPROVED',1,0);`);
+    assert.equal(legacy.pragma('table_info(leaves)').some(c=>c.name==='category'),false);
     legacy.close();
-    let child=require('node:child_process').spawnSync(process.execPath,['-e',`const {db}=require(${JSON.stringify(path.join(dir,'prior-db.cjs'))});db.prepare("INSERT INTO users(name,email,password_hash,leave_balance,created_ts) VALUES('Legacy','legacy@example.test','x',4.5,0)").run();db.prepare("INSERT INTO leaves(user_id,start_date,end_date,kind,reason,status,days,created_ts) VALUES(1,'2026-10-15','2026-10-15','FULL','Original reason','APPROVED',1,0)").run();db.close();`],{env:{...process.env,DB_PATH:legacyPath},encoding:'utf8'});
-    assert.equal(child.status,0,child.stderr);
-    child=require('node:child_process').spawnSync(process.execPath,['-e',"const {db}=require('./src/db');console.log(JSON.stringify({user:db.prepare('SELECT leave_balance FROM users WHERE id=1').get(),leave:db.prepare('SELECT * FROM leaves WHERE id=1').get(),resets:db.prepare('SELECT COUNT(*) n FROM leave_balance_resets').get().n}));db.close();"],{cwd:path.join(__dirname,'..'),env:{...process.env,DB_PATH:legacyPath},encoding:'utf8'});
+    const child=require('node:child_process').spawnSync(process.execPath,['-e',"const {db}=require('./src/db');console.log(JSON.stringify({user:db.prepare('SELECT leave_balance FROM users WHERE id=1').get(),leave:db.prepare('SELECT * FROM leaves WHERE id=1').get(),resets:db.prepare('SELECT COUNT(*) n FROM leave_balance_resets').get().n}));db.close();"],{cwd:path.join(__dirname,'..'),env:{...process.env,DB_PATH:legacyPath},encoding:'utf8'});
     assert.equal(child.status,0,child.stderr);const result=JSON.parse(child.stdout);
     assert.equal(result.user.leave_balance,4.5);assert.equal(result.leave.reason,'Original reason');assert.equal(result.leave.status,'APPROVED');assert.equal(result.leave.category,'REGULAR');assert.equal(result.resets,0);
   });
