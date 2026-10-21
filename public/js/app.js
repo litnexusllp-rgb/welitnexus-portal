@@ -35,6 +35,7 @@
   let lastFocusBeforeModal = null;
   function modal(html) {
     const m = $('#modal');
+    m.classList.remove('attendance-editor');
     m.innerHTML = html;
     m.setAttribute('role', 'dialog');
     m.setAttribute('aria-modal', 'true');
@@ -2161,6 +2162,7 @@
   // but the calendar passes its own reloader).
   async function openAttendanceEditor(userId, day, onDone, performanceRow) {
     modal(`<h3>Fix attendance</h3><div id="fixBody">Loading…</div>`);
+    $('#modal').classList.add('attendance-editor');
     renderAttendanceEditor(userId, day, onDone, performanceRow);
   }
 
@@ -2172,24 +2174,30 @@
       .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`).join('');
     const body = $('#fixBody'); if (!body) return;
     body.innerHTML = `
-      <p style="color:var(--slate);margin:0 0 14px;"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
-      ${data.error ? `<p style="color:var(--danger);">${esc(data.error)}</p>` : ''}${data.events.length ? `<table style="margin-bottom:14px;"><thead><tr><th>Punch</th><th>Time</th><th></th></tr></thead><tbody>
-        ${data.events.map((e) => `<tr>
-          <td><select data-etype="${e.id}">${typeOpts(e.type)}</select></td>
-          <td><input type="date" data-edate="${e.id}" value="${esc(e.event_date)}"><input type="time" data-etime="${e.id}" value="${esc(e.time)}" style="padding:6px;border:1px solid var(--line);border-radius:6px;"></td>
-          <td class="row-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}">✕</button></td>
-        </tr>`).join('')}
-      </tbody></table>` : `<div class="empty" style="margin-bottom:14px;">No punches recorded for this day.</div>`}
+      <p class="attendance-editor-summary"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
+      ${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
+        ${data.events.map((e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
+          <div class="field attendance-punch-type"><label for="fixType${e.id}">Punch type</label><select id="fixType${e.id}" data-etype="${e.id}">${typeOpts(e.type)}</select></div>
+          <div class="field"><label for="fixDate${e.id}">Date</label><input id="fixDate${e.id}" type="date" data-edate="${e.id}" value="${esc(e.event_date)}"></div>
+          <div class="field"><label for="fixTime${e.id}">Time</label><input id="fixTime${e.id}" type="time" data-etime="${e.id}" value="${esc(e.time)}"></div>
+          <div class="attendance-punch-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}" aria-label="Save punch ${i + 1}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}" aria-label="Delete punch ${i + 1}">Delete</button></div>
+        </div>`).join('')}
+      </div>` : `<div class="empty attendance-editor-empty">No punches recorded for this day.</div>`}
       ${performanceRow && (performanceRow.late || performanceRow.lateOverride || data.lateNormal) ? `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;margin-bottom:14px;border:1px solid var(--line);border-radius:9px;background:var(--mist);">
-          <div><strong>Punctuality</strong><div style="font-size:.78rem;color:var(--slate);margin-top:2px;">${data.lateNormal ? 'This day is treated as Normal by admin override.' : 'This clock-in is currently counted as Late.'}</div></div>
+        <div class="attendance-punctuality">
+          <div><strong>Punctuality</strong><div class="attendance-editor-hint">${data.lateNormal ? 'This day is treated as Normal by admin override.' : 'This clock-in is currently counted as Late.'}</div></div>
           <button class="btn ${data.lateNormal ? 'btn-ghost' : 'btn-primary'} btn-sm" id="lateNormalBtn">${data.lateNormal ? 'Restore late status' : 'Mark late as normal'}</button>
         </div>` : ''}
-      <div class="field" style="margin-bottom:6px;"><label>Add a punch</label></div>
-      <div class="form-row" style="margin-bottom:0;">
-        <div class="field"><label>Actual punch date (optional)</label><input type="date" id="newEventDate"><select id="newType">${typeOpts('IN')}</select></div>
-        <div class="field" style="display:flex;gap:8px;"><input type="time" id="newTime" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;"><button class="btn btn-navy btn-sm" id="addPunch">Add</button></div>
-      </div>
+      <section class="attendance-add-punch" aria-labelledby="addPunchTitle">
+        <h4 id="addPunchTitle">Add a punch</h4>
+        <p class="attendance-editor-hint" id="punchDateHint">Use the actual calendar date for overnight punches. Leave the date blank to infer it from the workday. Times use ${esc(data.timezone)}.</p>
+        <div class="attendance-punch-row">
+          <div class="field attendance-punch-type"><label for="newType">Punch type</label><select id="newType">${typeOpts('IN')}</select></div>
+          <div class="field"><label for="newEventDate">Date (optional)</label><input type="date" id="newEventDate" aria-describedby="punchDateHint"></div>
+          <div class="field"><label for="newTime">Time</label><input type="time" id="newTime"></div>
+          <div class="attendance-punch-actions"><button class="btn btn-navy btn-sm" id="addPunch">Add</button></div>
+        </div>
+      </section>
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
 
     $('#lateNormalBtn')?.addEventListener('click', async () => {
