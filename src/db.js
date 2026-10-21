@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
   department    TEXT    DEFAULT '',
   title         TEXT    DEFAULT '',
   phone         TEXT    DEFAULT '',
-  leave_balance REAL    NOT NULL DEFAULT 18,
+  leave_balance REAL    NOT NULL DEFAULT 20,
   active        INTEGER NOT NULL DEFAULT 1,
   created_ts    INTEGER NOT NULL
 );
@@ -330,5 +330,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS bonuses (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_employee_month ON bonuses(user_id, month) WHERE voided_ts IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bonus_month ON bonuses(month);`);
+
+// Leave categories are separate from FULL/HALF duration. Legacy requests retain
+// their original dates/status/reason and use the regular pool unless reviewed.
+if (!db.pragma('table_info(leaves)').some(c => c.name === 'category')) {
+  db.exec("ALTER TABLE leaves ADD COLUMN category TEXT NOT NULL DEFAULT 'REGULAR'");
+}
+db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  period_start TEXT NOT NULL,
+  previous_balance REAL NOT NULL,
+  entitlement_json TEXT NOT NULL,
+  recorded_ts INTEGER NOT NULL,
+  PRIMARY KEY(user_id, period_start)
+);`);
 
 module.exports = { db, DB_PATH };

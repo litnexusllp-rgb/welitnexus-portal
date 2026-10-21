@@ -395,7 +395,7 @@
   // ---------- Dashboard ----------
   VIEWS.dashboard = async () => {
     setMain(`Hi ${ME.name.split(' ')[0]} 👋`, new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      `<div class="cards" id="dashCards"></div><div id="dashAdmin"></div>`);
+      `<div class="cards" id="dashCards"></div><div id="dashLeaveBalances"></div><div id="dashAdmin"></div>`);
     try {
       const [status, mine, tasks] = await Promise.all([
         api.get('/attendance/status'),
@@ -411,6 +411,7 @@
         ${statCard('Leave balance', `${mine.balance} days`, 'value small')}
         ${statCard('Open tasks', openTasks, 'value')}
         ${statCard('Pending leave requests', pending, 'value')}`;
+      $('#dashLeaveBalances').innerHTML = leaveBalanceMarkup(mine.balances);
     } catch (e) { toast(e.message, true); }
 
     if (isAdmin()) startLiveAttendance('dashAdmin', true);
@@ -739,14 +740,26 @@
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" role="img"><line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e3eaf1"/>${bars}${labels}</svg>`;
   }
   // ---------- Leaves ----------
+  const LEAVE_CATEGORIES = { REGULAR: 'Regular paid leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' };
+  const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+  const leaveTypeLabel = l => `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
+  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid`;
+  function leaveBalanceMarkup(b) {
+    if (!b) return '';
+    const labels = { regular: 'Regular leave', flexi: 'Flexi leave', special: 'Birthday / anniversary' };
+    return `<section class="section leave-balance-panel"><h2>Your leave balances</h2>
+      <p class="page-sub">${fmtDate(b.period.start)} – ${fmtDate(b.period.end)} · Resets every 1 October · ${b.balance} days remaining after approved leave</p>
+      <div class="cards">${Object.entries(labels).map(([key,label]) => { const p = b.buckets[key]; return `<div class="card stat"><div class="label">${label}</div><div class="value small">${p.remaining} / ${p.entitlement} days</div><div class="leave-balance-note">${p.pending} pending · ${p.available} available to request</div></div>`; }).join('')}</div>
+      <p class="leave-balance-note">Birthday and anniversary share one paid day. Pending requests reserve balance until approved, rejected or cancelled. Leave from the 1st–12th is unpaid and does not use paid leave. Next reset: ${fmtDate(b.period.nextReset)}.</p></section>`;
+  }
   VIEWS.leaves = async () => {
-    // Admins get a team view (approvals + who's off) — no personal apply/balance.
+    const personal = `<div id="leaveBalanceCards"></div><div class="toolbar"><h2 style="margin:0;color:var(--navy);">My requests</h2><button class="btn btn-primary" id="applyBtn">+ Apply for leave</button></div><div class="leave-table-wrap" id="myLeaves"></div>`;
     if (isAdmin()) {
       setMain('Leaves', "Requests waiting for approval, and who's on leave.",
-        `<div class="toolbar"><span></span><div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn" title="Create pending leave for anyone who normally clocks in but didn't, for the last completed shift">⚠️ Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div></div>
-         <div class="section" id="adminLeaves"></div>
-         <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div id="onLeave"></div></div>
-         <div class="section"><h2>Leave balances</h2><div id="leaveSummary"></div></div>`);
+        `${personal}<div class="toolbar leave-admin-toolbar"><span></span><div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn" title="Create pending leave for anyone who normally clocks in but didn't, for the last completed shift">⚠️ Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div></div>
+         <div class="section leave-table-wrap" id="adminLeaves"></div>
+         <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div class="leave-table-wrap" id="onLeave"></div></div>
+         <div class="section"><h2>Leave balances</h2><div class="leave-table-wrap" id="leaveSummary"></div></div>`);
       $('#markLeaveBtn').addEventListener('click', openMarkLeaveModal);
       $('#flagAbsBtn').addEventListener('click', async () => {
         const btn = $('#flagAbsBtn'); btn.disabled = true;
@@ -759,14 +772,9 @@
       loadAdminLeaves();
       loadOnLeave();
       loadLeaveSummary();
-      return;
+    } else {
+      setMain('Leaves', 'Apply for time off and track your requests.', personal);
     }
-    // Employees: personal balance + their own requests.
-    setMain('Leaves', 'Apply for time off and track your requests.',
-      `<div class="cards"><div class="card stat"><div class="label">Leave balance</div><div class="value small" id="balVal">—</div></div></div>
-       <div class="toolbar"><h2 style="margin:0;color:var(--navy);">My requests</h2>
-         <button class="btn btn-primary" id="applyBtn">+ Apply for leave</button></div>
-       <div id="myLeaves"></div>`);
     $('#applyBtn').addEventListener('click', openApplyLeave);
     await loadMyLeaves();
   };
@@ -782,30 +790,25 @@
     modal(`<h3>Mark leave for an employee</h3>
       <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Recorded as approved right away — the employee is notified and their balance is updated. Past dates are allowed.</p>
       <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser">${LEAVE_BALANCES.map((u) => `<option value="${u.id}" data-bal="${u.balance}">${esc(u.name)} — ${u.balance} left</option>`).join('')}</select></div>
-        <div class="field"><label>Type</label><select id="mlKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
+        <div class="field"><label>Duration</label><select id="mlKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
+      <div class="form-row one"><div class="field"><label>Leave category</label><select id="mlCategory">${leaveCategoryOptions()}</select></div></div>
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${todayISO()}"></div>
         <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${todayISO()}"></div></div>
       <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
+      <p class="leave-policy-note">Leave from the 1st–12th is unpaid. Flexi leave is available only after the 15th. Birthday and anniversary share one paid day per leave year.</p>
+      <p id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></p>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
-    // Half day = a single date; keep end in lockstep and disable it.
-    const syncKind = () => { const half = $('#mlKind').value === 'HALF'; $('#mlEnd').disabled = half; if (half) $('#mlEnd').value = $('#mlStart').value; };
-    $('#mlKind').addEventListener('change', syncKind);
-    $('#mlStart').addEventListener('change', () => { if ($('#mlKind').value === 'HALF' || $('#mlEnd').value < $('#mlStart').value) $('#mlEnd').value = $('#mlStart').value; });
+    const form = wireLeavePreview('ml', '#mSave', true);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const kind = $('#mlKind').value, start = $('#mlStart').value, end = kind === 'HALF' ? $('#mlStart').value : $('#mlEnd').value;
-      if (!start || !end) return toast('Pick the dates', true);
-      // Balance warning, same spirit as the approval flow.
-      const opt = $('#mlUser').selectedOptions[0];
-      const bal = Number(opt.dataset.bal);
-      const days = kind === 'HALF' ? 0.5 : Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
-      if (days > 0 && days > bal && !confirm(`${opt.textContent.split(' — ')[0]} has ${bal} day(s) left but this is ${days} day(s). Their balance will go to ${bal - days}. Mark anyway?`)) return;
+      if (!form.ready()) return;
+      form.saving(true);
       try {
-        await api.post('/leaves/admin', { user_id: $('#mlUser').value, kind, start_date: start, end_date: end, reason: $('#mlReason').value });
+        await api.post('/leaves/admin', form.payload());
         closeModal(); toast('Leave marked ✓');
         LEAVE_BALANCES = []; // refetch next time — balance changed
-        loadAdminLeaves(); loadOnLeave(); loadLeaveSummary();
-      } catch (e) { toast(e.message, true); }
+        loadAdminLeaves(); loadOnLeave(); loadLeaveSummary(); loadMyLeaves();
+      } catch (e) { toast(e.message, true); } finally { form.saving(false); }
     });
   }
 
@@ -815,22 +818,23 @@
       LEAVE_BALANCES = rows;
       const el = $('#leaveSummary'); if (!el) return;
       el.innerHTML = rows.length ? `<p class="page-sub" style="margin:0 0 10px;">Click a row to see that employee's leave history.</p>
-        <table><thead><tr><th>Employee</th><th>Department</th><th>Leaves left</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
+        <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Total left</th><th>Regular</th><th>Flexi</th><th>Birthday / anniversary</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
         ${rows.map((r) => `<tr style="cursor:pointer;" data-leave-emp="${r.id}" data-leave-name="${esc(r.name)}"><td><strong>${esc(r.name)}</strong></td><td>${esc(r.department || '—')}</td>
           <td><strong>${r.balance}</strong> ${r.balance === 1 ? 'day' : 'days'}</td>
+          <td>${r.balances.buckets.regular.remaining}</td><td>${r.balances.buckets.flexi.remaining}</td><td>${r.balances.buckets.special.remaining}</td>
           <td>${daysLabel(r.taken30)}</td><td>${daysLabel(r.takenYear)}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No employees.</div>`;
+      </tbody></table></div>` : `<div class="empty">No employees.</div>`;
       el.querySelectorAll('[data-leave-emp]').forEach((tr) => tr.addEventListener('click', () => openLeaveBreakdown(tr.dataset.leaveEmp, tr.dataset.leaveName)));
     } catch (e) { toast(e.message, true); }
   }
 
   async function openLeaveBreakdown(userId, name) {
-    modal(`<h3>Leave history — ${esc(name)}</h3><div id="lbBody">Loading…</div>`);
+    modal(`<h3>Leave history — ${esc(name)}</h3><div class="leave-table-wrap" id="lbBody">Loading…</div>`);
     try {
       const { leaves } = await api.get(`/leaves/for/${userId}`);
       $('#lbBody').innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th></tr></thead><tbody>
         ${leaves.map((l) => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`).join('')}
+          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${leavePaymentLabel(l)}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No leave records.</div>`;
     } catch (e) { $('#lbBody').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
     const done = document.createElement('div');
@@ -866,13 +870,14 @@
 
   async function loadMyLeaves() {
     try {
-      const { balance, leaves } = await api.get('/leaves/mine');
-      $('#balVal').textContent = `${balance} days`;
+      const { balances, leaves } = await api.get('/leaves/mine');
+      const host = $('#leaveBalanceCards'); if (!host) return;
+      host.innerHTML = leaveBalanceMarkup(balances);
       const el = $('#myLeaves');
       el.innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
         ${leaves.map((l) => `<tr>
           <td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
+          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${leavePaymentLabel(l)}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
           <td>${l.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>` : ''}</td>
         </tr>`).join('')}</tbody></table>` : `<div class="empty">No leave requests yet.</div>`;
       el.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
@@ -881,21 +886,58 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  // One preview path for employee requests and admin-recorded leave. Stale
+  // responses cannot enable a submit button for a different set of dates.
+  function wireLeavePreview(prefix, buttonSelector, admin = false) {
+    const start = $('#' + prefix + 'Start'), end = $('#' + prefix + 'End');
+    const kind = $('#' + prefix + 'Kind'), category = $('#' + prefix + 'Category');
+    const reason = $('#' + prefix + 'Reason'), preview = $('#' + prefix + 'Preview');
+    const user = admin ? $('#mlUser') : null, button = $(buttonSelector);
+    let valid = false, busy = false, version = 0;
+    const payload = () => ({ start_date: start.value, end_date: kind.value === 'HALF' ? start.value : end.value, kind: kind.value, category: category.value, reason: reason.value, ...(admin ? { user_id: Number(user.value) } : {}) });
+    const updateButton = () => { button.disabled = !valid || busy; };
+    const refresh = async () => {
+      const current = ++version;
+      valid = false; updateButton();
+      end.disabled = kind.value === 'HALF';
+      if (end.disabled || end.value < start.value) end.value = start.value;
+      const reasonLabel = $('#lReasonLabel');
+      if (!admin && reasonLabel) { const flexi = category.value === 'FLEXI'; reasonLabel.textContent = flexi ? 'Reason (optional)' : 'Reason *'; reason.required = !flexi; reason.placeholder = flexi ? 'Optional — no explanation needed for Flexi leave' : 'Required — e.g. family function, medical, personal work'; }
+      preview.textContent = 'Checking leave dates and balance…'; preview.classList.remove('error');
+      try {
+        const result = await api.post('/leaves/preview', payload());
+        if (current !== version || !preview.isConnected) return;
+        valid = true;
+        const l = result.leave;
+        preview.textContent = `${l.paid_days} paid day(s) · ${l.unpaid_days} unpaid day(s). ${l.unpaid_days ? 'Salary deduction applies to the unpaid days, even when paid leave is available. ' : ''}Only paid days use the selected category balance.`;
+      } catch (e) { if (current === version && preview.isConnected) { preview.textContent = e.message; preview.classList.add('error'); } }
+      if (current === version) updateButton();
+    };
+    [start, end, kind, category, user].filter(Boolean).forEach(el => el.addEventListener('change', refresh));
+    refresh();
+    return { payload, ready: () => valid && !busy, saving: value => { busy = value; updateButton(); } };
+  }
+
   function openApplyLeave() {
     modal(`<h3>Apply for leave</h3>
+      <div class="form-row one"><div class="field"><label>Leave category</label><select id="lCategory">${leaveCategoryOptions()}</select></div></div>
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="lStart" value="${todayISO()}"></div>
         <div class="field"><label>End date</label><input type="date" id="lEnd" value="${todayISO()}"></div></div>
-      <div class="form-row"><div class="field"><label>Type</label><select id="lKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div>
-        <div class="field"><label>&nbsp;</label><div style="font-size:.82rem;color:var(--slate);padding-top:10px;">Half day counts as 0.5 days.</div></div></div>
-      <div class="form-row one"><div class="field"><label>Reason <span style="color:var(--danger);">*</span></label><textarea id="lReason" placeholder="Required — e.g. family function, medical, personal work"></textarea></div></div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSubmit">Submit request</button></div>`);
+      <div class="form-row one"><div class="field"><label>Duration</label><select id="lKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select><div class="leave-balance-note">Half day counts as 0.5 days.</div></div></div>
+      <p class="leave-policy-note">Leave from the 1st–12th is unpaid. Flexi leave is available only after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
+      <p id="lPreview" class="leave-payment-preview" role="status" aria-live="polite"></p>
+      <div class="form-row one"><div class="field"><label id="lReasonLabel">Reason *</label><textarea id="lReason" placeholder="Required — e.g. family function, medical, personal work"></textarea></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSubmit" disabled>Submit request</button></div>`);
+    const form = wireLeavePreview('l', '#mSubmit');
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSubmit').addEventListener('click', async () => {
-      if (!$('#lReason').value.trim()) return toast('Please give a reason for your leave', true);
+      if (!form.ready()) return;
+      if ($('#lCategory').value !== 'FLEXI' && !$('#lReason').value.trim()) return toast('Please give a reason for your leave', true);
+      form.saving(true);
       try {
-        await api.post('/leaves', { start_date: $('#lStart').value, end_date: $('#lEnd').value, kind: $('#lKind').value, reason: $('#lReason').value });
+        await api.post('/leaves', form.payload());
         closeModal(); toast('Request submitted ✓'); loadMyLeaves();
-      } catch (e) { toast(e.message, true); }
+      } catch (e) { toast(e.message, true); } finally { form.saving(false); }
     });
   }
 
@@ -903,9 +945,9 @@
     return `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Action</th></tr></thead><tbody>
       ${leaves.map((l) => `<tr>
         <td>${esc(l.name)}</td><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-        <td>${esc(cap(l.kind))}</td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
-        <td class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}" data-days="${l.days}" data-balance="${l.leave_balance ?? ''}" data-name="${esc(l.name)}">Approve</button>
-          <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></td>
+        <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${leavePaymentLabel(l)}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
+        <td><div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button>
+          <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div></td>
       </tr>`).join('')}</tbody></table>`;
   }
 
@@ -937,16 +979,14 @@
     document.querySelectorAll('[data-approve],[data-reject]').forEach((b) => {
       if (b.dataset.wired) return; b.dataset.wired = '1';
       b.addEventListener('click', async () => {
+        if (b.disabled) return;
         const id = b.dataset.approve || b.dataset.reject;
         const decision = b.dataset.approve ? 'APPROVED' : 'REJECTED';
-        // Warn before approving a request that exceeds the employee's balance.
-        if (b.dataset.approve && b.dataset.balance !== '') {
-          const days = Number(b.dataset.days); const bal = Number(b.dataset.balance);
-          if (days > bal && !confirm(`${b.dataset.name} has ${bal} day(s) left but this request is ${days} day(s). Approving takes the balance to ${bal - days}. Approve anyway?`)) return;
-        }
+        const buttons = b.closest('tr').querySelectorAll('button');
+        buttons.forEach(button => { button.disabled = true; });
         try { await api.post(`/leaves/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓' : 'Rejected');
           navigate(document.querySelector('.nav-item.active').dataset.view);
-        } catch (e) { toast(e.message, true); }
+        } catch (e) { toast(e.message, true); buttons.forEach(button => { button.disabled = false; }); }
       });
     });
   }
@@ -2759,7 +2799,7 @@
         <div class="field"><label>Last working day</label><input type="date" id="eExit" value="${esc(u?.exit_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank if still employed.</div></div></div>
       <div class="form-row"><div class="field"><label>Birthday</label><input type="date" id="eBday" value="${esc(u?.birthday || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only the day and month are shown to the team.</div></div>
         <div class="field"><label>Asana email (optional)</label><input id="eAsana" value="${esc(u?.asana_email || '')}" placeholder="if different from their login email"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only needed if Asana doesn't match by name or login email.</div></div></div>
-      <div class="form-row"><div class="field"><label>Leave balance</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 18}"></div>
+      <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid leave. Resets each 1 October.</div></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);

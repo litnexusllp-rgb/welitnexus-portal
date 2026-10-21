@@ -24,7 +24,7 @@ function bootstrapAdmin() {
 
   db.prepare(
     `INSERT INTO users (name, email, password_hash, role, department, title, leave_balance, active, created_ts)
-     VALUES (?, ?, ?, 'ADMIN', 'Leadership', 'Partner', 18, 1, ?)`
+     VALUES (?, ?, ?, 'ADMIN', 'Leadership', 'Partner', 20, 1, ?)`
   ).run(name, email, hashPassword(password), now().toMillis());
 
   console.log(`Bootstrap: created first admin ${email}. Log in and change the password.`);

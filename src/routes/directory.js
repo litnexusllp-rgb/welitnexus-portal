@@ -7,6 +7,7 @@ const { now } = require('../time');
 const { IANAZone } = require('luxon');
 const { currentSession, snapshot } = require('../attendanceSession');
 const { employmentError } = require('../employment');
+const { syncBalance, syncAllBalances } = require('../leavePolicy');
 
 const router = express.Router();
 
@@ -22,7 +23,7 @@ const insertUser = db.prepare(
 );
 const updateUser = db.prepare(
   `UPDATE users SET name=@name, email=@email, emp_code=@emp_code, role=@role, department=@department,
-   title=@title, phone=@phone, shift_start=@shift_start, attendance_timezone=@attendance_timezone, attendance_cutover=@attendance_cutover, join_date=@join_date, exit_date=@exit_date, birthday=@birthday, asana_email=@asana_email, leave_balance=@leave_balance WHERE id=@id`
+   title=@title, phone=@phone, shift_start=@shift_start, attendance_timezone=@attendance_timezone, attendance_cutover=@attendance_cutover, join_date=@join_date, exit_date=@exit_date, birthday=@birthday, asana_email=@asana_email WHERE id=@id`
 );
 // Accept "HH:mm" (24h) or empty; anything else is stored as blank (firm default).
 const cleanShift = (v) => (/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(v || '')) ? String(v).padStart(5, '0') : '');
@@ -40,7 +41,7 @@ const otherActiveAdmins = db.prepare(
 router.get('/', requireAuth, (_req, res) => res.json({ users: listAll.all() }));
 
 // ADMIN: full list (used for assigning tasks, managing people).
-router.get('/manage', requireAdmin, (_req, res) => res.json({ users: listAllIncInactive.all() }));
+router.get('/manage', requireAdmin, (_req, res) => { syncAllBalances(); res.json({ users: listAllIncInactive.all() }); });
 
 function configError(body) {
   if (body.attendance_timezone != null && body.attendance_timezone !== '' && (typeof body.attendance_timezone !== 'string' || !IANAZone.isValidZone(body.attendance_timezone))) return 'Use a valid IANA attendance timezone.';
@@ -77,9 +78,10 @@ router.post('/', requireAdmin, (req, res) => {
     exit_date: cleanDate(req.body.exit_date),
     birthday: cleanDate(req.body.birthday),
     asana_email: String(req.body.asana_email || '').trim().toLowerCase().slice(0,160),
-    leave_balance: Number(req.body.leave_balance) >= 0 ? Number(req.body.leave_balance) : 18,
+    leave_balance: 20,
     created_ts: now().toMillis(),
   });
+  syncBalance(info.lastInsertRowid);
   res.json({ user: getOne.get(info.lastInsertRowid) });
 });
 
@@ -153,9 +155,9 @@ router.put('/:id', requireAdmin, (req, res) => {
       exit_date: cleanDate(req.body.exit_date ?? existing.exit_date),
       birthday: cleanDate(req.body.birthday ?? existing.birthday),
       asana_email: String(req.body.asana_email ?? existing.asana_email ?? '').trim().toLowerCase().slice(0,160),
-      leave_balance: Number(req.body.leave_balance ?? existing.leave_balance),
     });
   }).immediate();
+  syncBalance(existing.id);
   res.json({ user: getOne.get(existing.id) });
 });
 
