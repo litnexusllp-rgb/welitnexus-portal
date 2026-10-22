@@ -498,3 +498,18 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
   .main { max-height: none; padding: 20px 18px; }
   .form-row { grid-template-columns: 1fr; }
 }
+/* Task review keeps long task names and history readable on smaller screens. */
+.review-controls { flex-wrap:wrap; align-items:end; gap:12px; }
+.review-controls .field { margin:0; min-width:160px; }
+.review-controls input, .review-controls select { max-width:100%; }
+#asanaReviewRoot { min-width:0; max-width:100%; }
+#asanaReviewRoot .cards { grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr)); }
+#asanaReviewRoot .table-wrap { max-width:100%; overflow-x:auto; }
+.review-table { table-layout:fixed; min-width:700px; }
+.review-table th:first-child, .review-table td:first-child { width:34%; }
+.review-table td { vertical-align:top; overflow-wrap:anywhere; }
+.review-table details { margin-top:10px; white-space:normal; }
+.review-table summary { cursor:pointer; color:var(--teal); }
+.review-timeline { padding-left:20px; min-width:0; }
+.review-timeline li { margin-bottom:12px; }
+@media(max-width:600px) { .review-controls .field { width:100%; } }

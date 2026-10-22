@@ -325,7 +325,7 @@
   function navigate(view, fromAddress = false) {
     if (!ME) return;
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
-    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations'];
+    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
     const hash = '#/' + view;
     if (window.location.hash !== hash) {
@@ -353,6 +353,12 @@
   //  VIEWS
   // ====================================================================
   const VIEWS = {};
+
+  VIEWS.taskreview = async () => {
+    if (!isAdmin()) return;
+    setMain('Task review', 'Staff-wise pending work and deadline changes from Asana.', '<div id="asanaReviewRoot"></div>');
+    await window.AsanaReview.mount($('#asanaReviewRoot'), { api, onInterval: timer => dashTimers.push(timer) });
+  };
 
   // ---------- Admin operations: automatic read-only exception checks ----------
   VIEWS.operations = async () => {
