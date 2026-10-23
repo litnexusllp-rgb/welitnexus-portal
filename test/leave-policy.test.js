@@ -121,6 +121,25 @@ test('October leave year, category credits and unpaid dates', async t => {
     const id=employee();let r=await request(id,'leaves','POST',body('2027-10-16','FLEXI'));assert.equal(r.status,200);assert.equal(r.body.balances.available,20);
     assert.equal((await request(id,'leaves','POST',body('2027-10-17','FLEXI'))).status,409);
   });
+  await t.test('admins have no personal leave; employee management and existing records remain',async()=>{
+    const otherAdmin=employee('ADMIN'),id=employee();
+    rawLeave(otherAdmin,'2026-10-16','2026-10-16');
+    const before=db.prepare('SELECT * FROM leaves ORDER BY id').all();
+    for(const owner of [admin,otherAdmin]){
+      assert.equal((await request(owner,'leaves/mine')).status,403);
+      assert.equal((await request(owner,'leaves','POST',body('2026-11-05'))).status,403);
+      assert.equal((await request(owner,'leaves/preview','POST',body('2026-11-05'))).status,403);
+      assert.equal((await request(admin,'leaves/preview','POST',body('2026-11-05','REGULAR',{user_id:owner}))).status,403);
+      assert.equal((await request(admin,'leaves/admin','POST',body('2026-11-05','REGULAR',{user_id:owner}))).status,403);
+    }
+    assert.deepEqual(db.prepare('SELECT * FROM leaves ORDER BY id').all(),before);
+    const summary=await request(admin,'leaves/summary');assert.equal(summary.status,200);
+    assert.ok(summary.body.rows.some(u=>u.id===id));assert.ok(!summary.body.rows.some(u=>[admin,otherAdmin].includes(u.id)));
+    const preview=await request(admin,'leaves/preview','POST',body('2026-11-05','REGULAR',{user_id:id}));assert.equal(preview.status,200);assert.equal(preview.body.leave.unpaid_days,1);
+    assert.equal((await request(admin,'leaves/admin','POST',body('2026-11-05','REGULAR',{user_id:id}))).status,200);
+    assert.equal((await request(id,'leaves/mine')).body.leaves.length,1);
+    assert.equal((await request(admin,`leaves/for/${otherAdmin}`)).body.leaves.length,1);
+  });
   await t.test('restart and additive migration preserve original leave records and reset markers',()=>{
     const id=employee();rawLeave(id,'2026-10-13','2026-10-13');policy.syncBalance(id);
     const source=db.prepare('SELECT * FROM leaves WHERE user_id=?').all(id);const count=db.prepare('SELECT COUNT(*) n FROM leave_balance_resets').get().n;

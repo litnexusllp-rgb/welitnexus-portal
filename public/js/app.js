@@ -405,19 +405,19 @@
     try {
       const [status, mine, tasks] = await Promise.all([
         api.get('/attendance/status'),
-        api.get('/leaves/mine'),
+        isAdmin() ? null : api.get('/leaves/mine'),
         api.get('/tasks/mine'),
       ]);
-      const pending = mine.leaves.filter((l) => l.status === 'PENDING').length;
+      const pending = mine?.leaves.filter((l) => l.status === 'PENDING').length || 0;
       const openTasks = tasks.tasks.filter((t) => t.status !== 'DONE').length;
       $('#dashCards').innerHTML = `
         ${statCard('Current session', `${badge(status.state)}`, 'value small')}
         ${statCard('Worked this session day', fmtMins(status.workedMinutes), 'value small')}
         ${statCard('Break this session day', fmtMins(status.breakMinutes), 'value small')}
-        ${statCard('Leave balance', `${mine.balance} days`, 'value small')}
+        ${mine ? statCard('Leave balance', `${mine.balance} days`, 'value small') : ''}
         ${statCard('Open tasks', openTasks, 'value')}
-        ${statCard('Pending leave requests', pending, 'value')}`;
-      $('#dashLeaveBalances').innerHTML = leaveBalanceMarkup(mine.balances);
+        ${mine ? statCard('Pending leave requests', pending, 'value') : ''}`;
+      $('#dashLeaveBalances').innerHTML = mine ? leaveBalanceMarkup(mine.balances) : '';
     } catch (e) { toast(e.message, true); }
 
     if (isAdmin()) startLiveAttendance('dashAdmin', true);
@@ -770,7 +770,7 @@
     const personal = `<div id="leaveBalanceCards"></div><div class="toolbar"><h2 style="margin:0;color:var(--navy);">My requests</h2><button class="btn btn-primary" id="applyBtn">+ Apply for leave</button></div><div class="leave-table-wrap" id="myLeaves"></div>`;
     if (isAdmin()) {
       setMain('Leaves', "Requests waiting for approval, and who's on leave.",
-        `${personal}<div class="toolbar leave-admin-toolbar"><span></span><div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn" title="Create pending leave for anyone who normally clocks in but didn't, for the last completed shift">⚠️ Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div></div>
+        `<div class="toolbar leave-admin-toolbar"><span></span><div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn" title="Create pending leave for anyone who normally clocks in but didn't, for the last completed shift">⚠️ Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div></div>
          <div class="section leave-table-wrap" id="adminLeaves"></div>
          <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div class="leave-table-wrap" id="onLeave"></div></div>
          <div class="section"><h2>Leave balances</h2><div class="leave-table-wrap" id="leaveSummary"></div></div>`);
@@ -788,9 +788,9 @@
       loadLeaveSummary();
     } else {
       setMain('Leaves', 'Apply for time off and track your requests.', personal);
+      $('#applyBtn').addEventListener('click', openApplyLeave);
+      await loadMyLeaves();
     }
-    $('#applyBtn').addEventListener('click', openApplyLeave);
-    await loadMyLeaves();
   };
 
   const daysLabel = (n) => (n ? `${n} ${n === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>');
@@ -821,7 +821,7 @@
         await api.post('/leaves/admin', form.payload());
         closeModal(); toast('Leave marked ✓');
         LEAVE_BALANCES = []; // refetch next time — balance changed
-        loadAdminLeaves(); loadOnLeave(); loadLeaveSummary(); loadMyLeaves();
+        loadAdminLeaves(); loadOnLeave(); loadLeaveSummary();
       } catch (e) { toast(e.message, true); } finally { form.saving(false); }
     });
   }
@@ -883,6 +883,7 @@
   }
 
   async function loadMyLeaves() {
+    if (isAdmin()) return;
     try {
       const { balances, leaves } = await api.get('/leaves/mine');
       const host = $('#leaveBalanceCards'); if (!host) return;
@@ -933,6 +934,7 @@
   }
 
   function openApplyLeave() {
+    if (isAdmin()) return;
     modal(`<h3>Apply for leave</h3>
       <div class="form-row one"><div class="field"><label>Leave category</label><select id="lCategory">${leaveCategoryOptions()}</select></div></div>
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="lStart" value="${todayISO()}"></div>

@@ -25,6 +25,7 @@
       .dc-card{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 1px 2px rgba(15,32,52,.04)}
       .dc-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.dc-head h2{margin:0;color:var(--navy);font-size:1rem}.dc-link{border:0;background:none;color:var(--teal-dark);font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;padding:0}
       .dc-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 18px}.dc-stat{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:16px}.dc-stat .k{color:var(--slate);font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.35px}.dc-stat .v{color:var(--navy);font-weight:800;font-size:1.22rem;margin-top:7px}.dc-stat .s{color:var(--slate);font-size:.76rem;margin-top:4px}
+      .dc-stats-admin{grid-template-columns:repeat(3,minmax(0,1fr))}
       .dc-work-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.dc-work-row:last-child{border-bottom:0}.dc-work-title{font-weight:700;color:var(--navy);font-size:.88rem}.dc-work-meta{color:var(--slate);font-size:.76rem;margin-top:3px}.dc-due{font-size:.76rem;font-weight:700;white-space:nowrap}.dc-overdue{color:var(--danger)}.dc-today{color:#9a6b00}.dc-upcoming{color:var(--slate)}
       .dc-perf{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.dc-perf>div{background:var(--mist);border-radius:10px;padding:12px;text-align:center}.dc-perf strong{display:block;color:var(--navy);font-size:1.08rem}.dc-perf span{display:block;color:var(--slate);font-size:.72rem;margin-top:3px}
       .dc-ann{border-left:4px solid var(--teal);padding-left:14px}.dc-ann-title{font-weight:800;color:var(--navy);margin:3px 0 7px}.dc-ann-body{white-space:pre-wrap;color:var(--text);font-size:.86rem;line-height:1.5}.dc-small{color:var(--slate);font-size:.76rem;margin-top:8px}
@@ -77,7 +78,7 @@
 
     const admin = isAdmin();
     const baseReqs = [
-      safe('/attendance/status'), safe('/leaves/mine'), admin ? safe('/operations') : safe(`/kpi/me?month=${month()}`),
+      safe('/attendance/status'), admin ? null : safe('/leaves/mine'), admin ? safe('/operations') : safe(`/kpi/me?month=${month()}`),
       safe('/holidays'), safe('/announcements'), safe('/asana/status'), safe('/tasks/mine')
     ];
     const [status, leaves, kpiData, holidayData, announcementData, asanaStatus, portalTaskData] = await Promise.all(baseReqs);
@@ -98,11 +99,11 @@
     const overdueCount = tasks.filter((t) => t.overdue).length;
 
     root.innerHTML = `
-      <div class="dc-stats">
+      <div class="dc-stats${admin ? ' dc-stats-admin' : ''}">
         <div class="dc-stat"><div class="k">Today</div><div class="v">${esc(status?.state || '—')}</div><div class="s">Attendance status</div></div>
         <div class="dc-stat"><div class="k">Worked today</div><div class="v">${fmtMins(status?.workedMinutes)}</div><div class="s">Break ${fmtMins(status?.breakMinutes)}</div></div>
         <div class="dc-stat"><div class="k">My work</div><div class="v">${openCount}</div><div class="s">${workUnavailable ? 'Unable to load work' : overdueCount ? `${overdueCount} overdue` : 'Nothing overdue'}</div></div>
-        <div class="dc-stat"><div class="k">Leave balance</div><div class="v">${esc(leaves?.balance ?? k.leaveBalance ?? '—')}</div><div class="s">${pendingLeave ? `${pendingLeave} request pending` : 'days available'}</div></div>
+        ${admin ? '' : `<div class="dc-stat"><div class="k">Leave balance</div><div class="v">${esc(leaves?.balance ?? k.leaveBalance ?? '—')}</div><div class="s">${pendingLeave ? `${pendingLeave} request pending` : 'days available'}</div></div>`}
       </div>
 
       ${a ? `<div class="dc-card" style="margin-bottom:18px"><div class="dc-head"><h2>${Number(a.pinned) === 1 ? '📌 Pinned announcement' : '📣 Latest announcement'}</h2><button class="dc-link" data-go="noticeboard">View all notices</button></div><div class="dc-ann"><div class="dc-ann-title">${esc(a.title)}</div>${a.body ? `<div class="dc-ann-body">${esc(a.body)}</div>` : ''}<div class="dc-small">${esc(a.author || 'LIT Nexus')}${a.created_ts ? ` · ${esc(new Date(a.created_ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}` : ''}</div></div></div>` : ''}
@@ -132,13 +133,13 @@
         <div>
           <div class="dc-card"><div class="dc-head"><h2>Upcoming</h2><button class="dc-link" data-go="calendar">Holidays</button></div>
             <div class="dc-list">
-              ${nextOwnLeave ? `<div class="dc-list-item"><span>My approved leave</span><strong>${esc(nextOwnLeave.start_date === nextOwnLeave.end_date ? fmtDate(nextOwnLeave.start_date) : `${fmtDate(nextOwnLeave.start_date)}–${fmtDate(nextOwnLeave.end_date)}`)}</strong></div>` : ''}
+              ${!admin && nextOwnLeave ? `<div class="dc-list-item"><span>My approved leave</span><strong>${esc(nextOwnLeave.start_date === nextOwnLeave.end_date ? fmtDate(nextOwnLeave.start_date) : `${fmtDate(nextOwnLeave.start_date)}–${fmtDate(nextOwnLeave.end_date)}`)}</strong></div>` : ''}
               ${holidays.length ? holidays.map((h) => `<div class="dc-list-item"><span>${esc(h.name)}</span><strong>${esc(fmtDate(h.date))}</strong></div>`).join('') : '<div class="dc-empty">No upcoming holidays published.</div>'}
             </div>
           </div>
           <div class="dc-card dc-section-gap"><div class="dc-head"><h2>Quick access</h2></div><div class="dc-list">
             <button class="btn btn-ghost" data-go="clock">Attendance / Clock</button>
-            <button class="btn btn-ghost" data-go="leaves">Leave</button>
+            <button class="btn btn-ghost" data-go="leaves">${admin ? 'Manage employee leave' : 'Leave'}</button>
             <button class="btn btn-ghost" data-go="achievements">Log achievement</button>
           </div></div>
         </div>

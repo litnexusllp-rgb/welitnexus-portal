@@ -67,3 +67,7 @@ Do not roll back to the old balance-decrementing handlers after live leave
 decisions; they cannot account for the new pools or unpaid days. Retain the
 additive columns/audit records and use a forward fix or an explicitly reviewed
 database restore if a financial rollback is needed.
+
+## Admin accounts
+
+Personal leave is available to employees. Admin accounts use Leaves for employee approvals, recording leave and reviewing balances; their own balance, requests and Apply button are omitted from Leaves and Dashboard. Admins are excluded from the balance summary and employee selector. Direct personal request/preview calls for an admin are rejected. Historical leave rows are preserved and remain available through administrator history APIs.
