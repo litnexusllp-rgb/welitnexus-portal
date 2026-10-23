@@ -781,16 +781,24 @@
   }
   // ---------- Leaves ----------
   const LEAVE_CATEGORIES = { REGULAR: 'Regular paid leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' };
-  const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+  const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${value === 'REGULAR' ? 'Regular leave' : label}</option>`).join('');
   const leaveTypeLabel = l => `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
   const salaryMoney = paise => Number.isSafeInteger(paise) && paise >= 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100) : 'Unavailable';
   const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}`;
-  function deductionPreviewMarkup(estimate) {
-    if (!estimate) return '';
-    if (estimate.status !== 'AVAILABLE') return `<div class="leave-deduction-estimate"><strong>Deduction estimate unavailable</strong><div>Monthly gross salary has not been recorded for ${estimate.missing_salary_dates?.length || 'some'} unpaid leave date(s). Ask an admin to add the applicable salary. You can still submit your request.</div></div>`;
-    return `<div class="leave-deduction-estimate"><strong>Estimated salary deduction: ${salaryMoney(estimate.total_paise)}</strong>
-      ${estimate.items.map(item => `<div>${esc(item.month)} · ${salaryMoney(item.monthly_gross_paise)} ÷ 30 × ${item.unpaid_days} unpaid day(s)</div>`).join('')}
-      <div>${estimate.unpaid_days ? 'Based on monthly gross salary effective on the leave dates. Half days count as 0.5. Rounded once to the nearest paise.' : 'No unpaid days in this request.'} This is an estimate for payroll review.</div></div>`;
+  function leavePreviewMarkup(leave, admin = false) {
+    const estimate = leave.deduction_estimate;
+    const available = estimate?.status === 'AVAILABLE';
+    const money = paise => salaryMoney(paise).replace(/\.00$/, '');
+    const days = n => `${n} ${n === 1 ? 'day' : 'days'}`;
+    return `<div class="leave-preview-heading"><strong>${days(leave.days)} total</strong><span>${leave.paid_days} paid · ${leave.unpaid_days} unpaid</span></div>
+      <div class="leave-preview-deduction"><span>Estimated deduction</span><strong>${available ? money(estimate.total_paise) : 'Unavailable'}</strong></div>
+      ${!available ? `<p class="leave-preview-note">${admin ? 'Add the employee’s salary' : 'Ask an admin to add your salary'} to see the amount. You can still ${admin ? 'save this leave' : 'apply'}.</p>` : ''}
+      <details class="leave-preview-details"><summary>Calculation &amp; leave rules</summary><div>
+        ${available ? estimate.items.map(item => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ 30 × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
+        <p>${leave.unpaid_days ? 'Leave on the 1st–12th is unpaid, even when paid leave is available.' : 'No unpaid days in this request.'} Only paid days use the selected leave balance.</p>
+        <p>Deductions use monthly gross salary effective on each leave date. Half days count as 0.5. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
+        <p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
+      </div></details>`;
   }
   function leaveBalanceMarkup(b) {
     if (!b) return '';
@@ -836,15 +844,14 @@
       try { LEAVE_BALANCES = (await api.get('/leaves/summary')).rows; } catch (e) { return toast(e.message, true); }
     }
     modal(`<h3>Mark leave for an employee</h3>
-      <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;">Recorded as approved right away — the employee is notified and their balance is updated. Past dates are allowed.</p>
-      <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser">${LEAVE_BALANCES.map((u) => `<option value="${u.id}" data-bal="${u.balance}">${esc(u.name)} — ${u.balance} left</option>`).join('')}</select></div>
+      <p class="leave-form-intro">Saves as approved and notifies the employee.</p>
+      <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser">${LEAVE_BALANCES.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Duration</label><select id="mlKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
       <div class="form-row one"><div class="field"><label>Leave category</label><select id="mlCategory">${leaveCategoryOptions()}</select></div></div>
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${todayISO()}"></div>
         <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${todayISO()}"></div></div>
       <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
-      <p class="leave-policy-note">Leave from the 1st–12th is unpaid. Flexi leave is available only after the 15th. Birthday and anniversary share one paid day per leave year.</p>
-      <p id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></p>
+      <div id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
     const form = wireLeavePreview('ml', '#mSave', true);
     $('#mCancel').addEventListener('click', closeModal);
@@ -958,7 +965,7 @@
         if (current !== version || !preview.isConnected) return;
         valid = true;
         const l = result.leave;
-        preview.innerHTML = `${l.paid_days} paid day(s) · ${l.unpaid_days} unpaid day(s). ${l.unpaid_days ? 'Salary deduction applies to the unpaid days, even when paid leave is available. ' : ''}Only paid days use the selected category balance.${deductionPreviewMarkup(l.deduction_estimate)}`;
+        preview.innerHTML = leavePreviewMarkup(l, admin);
       } catch (e) { if (current === version && preview.isConnected) { preview.textContent = e.message; preview.classList.add('error'); } }
       if (current === version) updateButton();
     };
@@ -973,10 +980,9 @@
       <div class="form-row one"><div class="field"><label>Leave category</label><select id="lCategory">${leaveCategoryOptions()}</select></div></div>
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="lStart" value="${todayISO()}"></div>
         <div class="field"><label>End date</label><input type="date" id="lEnd" value="${todayISO()}"></div></div>
-      <div class="form-row one"><div class="field"><label>Duration</label><select id="lKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select><div class="leave-balance-note">Half day counts as 0.5 days.</div></div></div>
-      <p class="leave-policy-note">Leave from the 1st–12th is unpaid. Flexi leave is available only after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
-      <p id="lPreview" class="leave-payment-preview" role="status" aria-live="polite"></p>
+      <div class="form-row one"><div class="field"><label>Duration</label><select id="lKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
       <div class="form-row one"><div class="field"><label id="lReasonLabel">Reason *</label><textarea id="lReason" placeholder="Required — e.g. family function, medical, personal work"></textarea></div></div>
+      <div id="lPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSubmit" disabled>Submit request</button></div>`);
     const form = wireLeavePreview('l', '#mSubmit');
     $('#mCancel').addEventListener('click', closeModal);
