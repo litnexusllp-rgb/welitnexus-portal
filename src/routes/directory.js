@@ -8,6 +8,7 @@ const { IANAZone } = require('luxon');
 const { currentSession, snapshot } = require('../attendanceSession');
 const { employmentError } = require('../employment');
 const { syncBalance, syncAllBalances } = require('../leavePolicy');
+const { validateSalary, saveSalary, salaryHistory } = require('../salaryDeduction');
 
 const router = express.Router();
 
@@ -43,6 +44,20 @@ router.get('/', requireAuth, (_req, res) => res.json({ users: listAll.all() }));
 // ADMIN: full list (used for assigning tasks, managing people).
 router.get('/manage', requireAdmin, (_req, res) => { syncAllBalances(); res.json({ users: listAllIncInactive.all() }); });
 
+// Compensation is never included in the shared employee directory or auth
+// payloads. Only admins can read or edit another employee's salary history.
+router.get('/:id/salary', requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const user = getOne.get(Number(req.params.id));
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  res.json(salaryHistory(user.id));
+});
+
+function salaryError(body) {
+  if (body.salary === undefined) return null;
+  try { validateSalary(body.salary); return null; } catch (e) { return e.message; }
+}
+
 function configError(body) {
   if (body.attendance_timezone != null && body.attendance_timezone !== '' && (typeof body.attendance_timezone !== 'string' || !IANAZone.isValidZone(body.attendance_timezone))) return 'Use a valid IANA attendance timezone.';
   if (body.attendance_cutover != null && (!Number.isInteger(body.attendance_cutover) || body.attendance_cutover < 0 || body.attendance_cutover > 23)) return 'Attendance cutover must be an integer hour from 0 to 23, or null for the office default.';
@@ -51,6 +66,7 @@ function configError(body) {
 
 // ADMIN: create employee.
 router.post('/', requireAdmin, (req, res) => {
+  const se = salaryError(req.body); if (se) return res.status(400).json({ error: se });
   const ce = configError(req.body); if (ce) return res.status(400).json({ error: ce });
   const name = String(req.body.name || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -63,25 +79,29 @@ router.post('/', requireAdmin, (req, res) => {
   if (datesError) return res.status(400).json({ error: datesError });
   const empCode = String(req.body.emp_code || '').trim();
   if (empCode && findByCode.get(empCode)) return res.status(409).json({ error: 'Employee code already in use' });
-  const info = insertUser.run({
-    name, email,
-    password_hash: hashPassword(password),
-    emp_code: empCode,
-    role: String(req.body.role || 'EMPLOYEE').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE',
-    department: String(req.body.department || ''),
-    title: String(req.body.title || ''),
-    phone: String(req.body.phone || ''),
-    shift_start: cleanShift(req.body.shift_start),
-    attendance_timezone: req.body.attendance_timezone || '',
-    attendance_cutover: req.body.attendance_cutover ?? null,
-    join_date: cleanDate(req.body.join_date),
-    exit_date: cleanDate(req.body.exit_date),
-    birthday: cleanDate(req.body.birthday),
-    asana_email: String(req.body.asana_email || '').trim().toLowerCase().slice(0,160),
-    leave_balance: 20,
-    created_ts: now().toMillis(),
-  });
-  syncBalance(info.lastInsertRowid);
+  const info = db.transaction(() => {
+    const created = insertUser.run({
+      name, email,
+      password_hash: hashPassword(password),
+      emp_code: empCode,
+      role: String(req.body.role || 'EMPLOYEE').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE',
+      department: String(req.body.department || ''),
+      title: String(req.body.title || ''),
+      phone: String(req.body.phone || ''),
+      shift_start: cleanShift(req.body.shift_start),
+      attendance_timezone: req.body.attendance_timezone || '',
+      attendance_cutover: req.body.attendance_cutover ?? null,
+      join_date: cleanDate(req.body.join_date),
+      exit_date: cleanDate(req.body.exit_date),
+      birthday: cleanDate(req.body.birthday),
+      asana_email: String(req.body.asana_email || '').trim().toLowerCase().slice(0,160),
+      leave_balance: 20,
+      created_ts: now().toMillis(),
+    });
+    if (req.body.salary !== undefined) saveSalary(created.lastInsertRowid, req.body.salary, req.user.id);
+    syncBalance(created.lastInsertRowid);
+    return created;
+  }).immediate();
   res.json({ user: getOne.get(info.lastInsertRowid) });
 });
 
@@ -109,6 +129,7 @@ router.put('/me', requireAuth, (req, res) => {
 
 // ADMIN: update employee profile.
 router.put('/:id', requireAdmin, (req, res) => {
+  const se = salaryError(req.body); if (se) return res.status(400).json({ error: se });
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const ce = configError(req.body); if (ce) return res.status(400).json({ error: ce });
@@ -156,6 +177,7 @@ router.put('/:id', requireAdmin, (req, res) => {
       birthday: cleanDate(req.body.birthday ?? existing.birthday),
       asana_email: String(req.body.asana_email ?? existing.asana_email ?? '').trim().toLowerCase().slice(0,160),
     });
+    if (req.body.salary !== undefined) saveSalary(existing.id, req.body.salary, req.user.id);
   }).immediate();
   syncBalance(existing.id);
   res.json({ user: getOne.get(existing.id) });

@@ -345,4 +345,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
   PRIMARY KEY(user_id, period_start)
 );`);
 
+// Salary data is intentionally separate from users, whose rows are returned by
+// authentication, directory and attendance endpoints. Amounts are integer paise.
+db.exec(`CREATE TABLE IF NOT EXISTS employee_salary_rates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  effective_from TEXT NOT NULL,
+  monthly_gross_paise INTEGER NOT NULL CHECK(monthly_gross_paise >= 0),
+  currency TEXT NOT NULL DEFAULT 'INR' CHECK(currency = 'INR'),
+  updated_by INTEGER NOT NULL REFERENCES users(id),
+  updated_ts INTEGER NOT NULL,
+  UNIQUE(user_id, effective_from)
+);
+CREATE INDEX IF NOT EXISTS idx_salary_user_effective ON employee_salary_rates(user_id, effective_from);
+CREATE TABLE IF NOT EXISTS salary_rate_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  effective_from TEXT NOT NULL,
+  before_json TEXT,
+  after_json TEXT NOT NULL,
+  changed_by INTEGER NOT NULL REFERENCES users(id),
+  changed_ts INTEGER NOT NULL
+);`);
+if (!db.pragma('table_info(leaves)').some(c => c.name === 'deduction_quote_json')) {
+  db.exec('ALTER TABLE leaves ADD COLUMN deduction_quote_json TEXT');
+}
+
 module.exports = { db, DB_PATH };

@@ -749,7 +749,15 @@
   const LEAVE_CATEGORIES = { REGULAR: 'Regular paid leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' };
   const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
   const leaveTypeLabel = l => `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
-  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid`;
+  const salaryMoney = paise => Number.isSafeInteger(paise) && paise >= 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100) : 'Unavailable';
+  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}`;
+  function deductionPreviewMarkup(estimate) {
+    if (!estimate) return '';
+    if (estimate.status !== 'AVAILABLE') return `<div class="leave-deduction-estimate"><strong>Deduction estimate unavailable</strong><div>Monthly gross salary has not been recorded for ${estimate.missing_salary_dates?.length || 'some'} unpaid leave date(s). Ask an admin to add the applicable salary. You can still submit your request.</div></div>`;
+    return `<div class="leave-deduction-estimate"><strong>Estimated salary deduction: ${salaryMoney(estimate.total_paise)}</strong>
+      ${estimate.items.map(item => `<div>${esc(item.month)} · ${salaryMoney(item.monthly_gross_paise)} ÷ 30 × ${item.unpaid_days} unpaid day(s)</div>`).join('')}
+      <div>${estimate.unpaid_days ? 'Based on monthly gross salary effective on the leave dates. Half days count as 0.5. Rounded once to the nearest paise.' : 'No unpaid days in this request.'} This is an estimate for payroll review.</div></div>`;
+  }
   function leaveBalanceMarkup(b) {
     if (!b) return '';
     const labels = { regular: 'Regular leave', flexi: 'Flexi leave', special: 'Birthday / anniversary' };
@@ -915,7 +923,7 @@
         if (current !== version || !preview.isConnected) return;
         valid = true;
         const l = result.leave;
-        preview.textContent = `${l.paid_days} paid day(s) · ${l.unpaid_days} unpaid day(s). ${l.unpaid_days ? 'Salary deduction applies to the unpaid days, even when paid leave is available. ' : ''}Only paid days use the selected category balance.`;
+        preview.innerHTML = `${l.paid_days} paid day(s) · ${l.unpaid_days} unpaid day(s). ${l.unpaid_days ? 'Salary deduction applies to the unpaid days, even when paid leave is available. ' : ''}Only paid days use the selected category balance.${deductionPreviewMarkup(l.deduction_estimate)}`;
       } catch (e) { if (current === version && preview.isConnected) { preview.textContent = e.message; preview.classList.add('error'); } }
       if (current === version) updateButton();
     };
@@ -2787,8 +2795,16 @@
     return ` <span class="badge ${past ? 'b-rejected' : 'b-pending'}" style="font-size:.66rem" title="Last working day ${esc(u.exit_date)}">${past ? 'Left' : 'Leaving'} ${esc(when)}</span>`;
   }
 
-  function openEmployeeModal(u) {
+  async function openEmployeeModal(u) {
     const editing = !!u;
+    let salary = { rates: [], latest: null, current: null };
+    if (editing) {
+      const view = document.querySelector('.nav-item.active')?.dataset.view;
+      try { salary = await api.get(`/users/${u.id}/salary`); } catch (e) { return toast(e.message, true); }
+      if (view !== document.querySelector('.nav-item.active')?.dataset.view) return;
+    }
+    const initialGross = salary.latest ? (salary.latest.monthly_gross_paise / 100).toFixed(2) : '';
+    const initialSalaryDate = salary.latest?.effective_from || todayISO();
     modal(`<h3>${editing ? 'Edit employee' : 'Add employee'}</h3>
       <div class="form-row"><div class="field"><label>Name</label><input id="eName" value="${esc(u?.name || '')}"></div>
         <div class="field"><label>Email</label><input id="eEmail" value="${esc(u?.email || '')}"></div></div>
@@ -2805,17 +2821,30 @@
         <div class="field"><label>Last working day</label><input type="date" id="eExit" value="${esc(u?.exit_date || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Leave blank if still employed.</div></div></div>
       <div class="form-row"><div class="field"><label>Birthday</label><input type="date" id="eBday" value="${esc(u?.birthday || '')}"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only the day and month are shown to the team.</div></div>
         <div class="field"><label>Asana email (optional)</label><input id="eAsana" value="${esc(u?.asana_email || '')}" placeholder="if different from their login email"><div style="color:var(--slate);font-size:.76rem;margin-top:4px;">Only needed if Asana doesn't match by name or login email.</div></div></div>
+      <div class="salary-admin-panel"><h4>Salary for leave estimates</h4>
+        <div class="form-row"><div class="field"><label for="eGross">Monthly gross salary (INR)</label><input id="eGross" inputmode="decimal" value="${esc(initialGross)}" placeholder="Not recorded"></div>
+          <div class="field"><label for="eSalaryDate">Salary effective from</label><input type="date" id="eSalaryDate" value="${esc(initialSalaryDate)}"></div></div>
+        <p class="leave-balance-note">Admin only. Employees can see their own deduction estimate. Unpaid leave uses monthly gross salary ÷ 30 × unpaid days, including 0.5 for a half day. Add an effective date when salary changes; earlier rates and saved estimates are retained.</p>
+        ${salary.rates.length ? `<details><summary>Recorded salary history</summary><div class="leave-table-wrap"><table><thead><tr><th>Effective from</th><th>Monthly gross</th></tr></thead><tbody>${salary.rates.map(rate => `<tr><td>${fmtDate(rate.effective_from)}</td><td>${salaryMoney(rate.monthly_gross_paise)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+      </div>
       <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid leave. Resets each 1 October.</div></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
+      if ($('#mSave').disabled) return;
       const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, attendance_timezone: $('#eTimezone').value.trim(), attendance_cutover: $('#eCutover').value === '' ? null : Number($('#eCutover').value), join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, asana_email: $('#eAsana').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
+      const gross = $('#eGross').value.trim(), effective = $('#eSalaryDate').value;
+      if (gross !== initialGross || (gross && effective !== initialSalaryDate)) {
+        if (!gross && salary.latest) return toast('Enter a salary amount. Earlier salary records cannot be cleared here.', true);
+        if (gross) payload.salary = { monthly_gross: gross, effective_from: effective, currency: 'INR' };
+      }
+      const saveButton = $('#mSave'); saveButton.disabled = true;
       try {
         if (editing) await api.put(`/users/${u.id}`, payload);
         else { payload.password = $('#ePw').value; await api.post('/users', payload); }
         closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadEmployees();
-      } catch (e) { toast(e.message, true); }
+      } catch (e) { toast(e.message, true); } finally { saveButton.disabled = false; }
     });
   }
 
