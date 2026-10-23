@@ -40,11 +40,15 @@ const presentLeave = leave => {
 };
 const present = leaves => leaves.map(presentLeave);
 const fail = (res, e) => res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not update leave. Please try again.' });
+const personalLeaveUnavailable = res => res.status(403).json({ error: 'Personal leave is not available for admin accounts.' });
 
 // Server-authoritative payment preview; employees can preview only themselves.
 router.post('/preview', requireAuth, (req, res) => {
   const userId = Number(req.body.user_id || req.user.id);
   if (userId !== req.user.id && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admins only' });
+  const user = getUser.get(userId);
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
     const leave = normalizeLeave(req.body, { allowPast: req.user.role === 'ADMIN', requireReason: false });
     assertAvailable(userId, leave);
@@ -54,6 +58,7 @@ router.post('/preview', requireAuth, (req, res) => {
 
 // Apply for leave.
 router.post('/', requireAuth, (req, res) => {
+  if (req.user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
     const leave = normalizeLeave(req.body);
     const created = db.transaction(() => {
@@ -68,6 +73,7 @@ router.post('/', requireAuth, (req, res) => {
 
 // My leave history + balance.
 router.get('/mine', requireAuth, (req, res) => {
+  if (req.user.role === 'ADMIN') return personalLeaveUnavailable(res);
   const balances = syncBalance(req.user.id);
   res.json({ balance: balances.balance, balances, leaves: present(leavesForUser.all(req.user.id)) });
 });
@@ -96,6 +102,7 @@ const insertApprovedLeave = db.prepare(
 router.post('/admin', requireAdmin, (req, res) => {
   const user = getUser.get(Number(req.body.user_id));
   if (!user || !user.active) return res.status(404).json({ error: 'Employee not found' });
+  if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   let leaveId;
   let leave;
   try {
@@ -138,7 +145,7 @@ router.get('/upcoming', requireAdmin, (_req, res) => res.json({ leaves: present(
 
 // ADMIN: per-employee leave balance + days taken (last 30 days and this year).
 const activeUsersForLeave = db.prepare(
-  `SELECT id, name, department, leave_balance FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`
+  `SELECT id, name, department, leave_balance FROM users WHERE active = 1 AND role = 'EMPLOYEE' ORDER BY name COLLATE NOCASE`
 );
 const approvedOverlap = db.prepare(
   `SELECT user_id, start_date, end_date, kind FROM leaves

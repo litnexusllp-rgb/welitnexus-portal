@@ -8,9 +8,22 @@ async function render(admin,failWork=false,holidays=[]){
 }
 test('admin replaces personal performance with review actions and shared owner work',async()=>{
  const r=await render(true);assert.ok(r.html.includes('Needs your attention'));assert.ok(!r.html.includes('My performance'));assert.ok(r.html.includes('Saurav'));assert.ok(r.html.includes('Other project'));assert.ok(r.requests.includes('/asana/admin-work'));assert.ok(!r.requests.some(p=>p.startsWith('/kpi/me')));
+ assert.ok(!r.requests.includes('/leaves/mine'));assert.ok(!r.html.includes('Leave balance'));assert.ok(!r.html.includes('My approved leave'));assert.ok(r.html.includes('Manage employee leave'));assert.ok(r.html.includes('Leave requests'));
 });
 test('employee keeps own performance and own Asana endpoint',async()=>{
  const r=await render(false);assert.ok(r.html.includes('My performance'));assert.ok(!r.html.includes('Needs your attention'));assert.ok(r.requests.includes('/asana/my-tasks'));assert.ok(!r.requests.includes('/asana/admin-work'));assert.ok(!r.requests.includes('/operations'));
+ assert.ok(r.requests.includes('/leaves/mine'));assert.ok(r.html.includes('Leave balance'));assert.ok(!r.html.includes('Manage employee leave'));
+});
+test('leave page gives admins employee management and employees their own requests',async()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../public/js/app.js'),'utf8');
+ const view=source.slice(source.indexOf('  VIEWS.leaves ='),source.indexOf('  const daysLabel ='));
+ for(const admin of [true,false]){
+  let html='',personalReads=0;const actions=[],loads=[];
+  const c={VIEWS:{},isAdmin:()=>admin,setMain:(_title,_sub,body)=>{html=body;},$:s=>{assert.ok(html.includes(`id="${s.slice(1)}"`),`Missing control ${s}`);return {addEventListener:()=>actions.push(s)};},openMarkLeaveModal(){},openApplyLeave(){},loadAdminLeaves:()=>loads.push('approvals'),loadOnLeave:()=>loads.push('upcoming'),loadLeaveSummary:()=>loads.push('balances'),loadMyLeaves:()=>personalReads++};
+  vm.createContext(c);vm.runInContext(view,c);await c.VIEWS.leaves();
+  if(admin){assert.doesNotMatch(html,/My requests|Apply for leave|leaveBalanceCards|myLeaves/);assert.ok(html.includes('Mark leave for an employee'));assert.deepEqual(loads,['approvals','upcoming','balances']);assert.equal(personalReads,0);}
+  else {assert.ok(html.includes('My requests'));assert.ok(html.includes('Apply for leave'));assert.ok(actions.includes('#applyBtn'));assert.equal(personalReads,1);assert.deepEqual(loads,[]);}
+ }
 });
 test('failed admin work read is not displayed as no open work',async()=>{
  const r=await render(true,true);assert.ok(r.html.includes('Unable to load work'));assert.ok(!r.html.includes('No open work.'));
