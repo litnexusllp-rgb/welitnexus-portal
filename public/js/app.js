@@ -247,10 +247,44 @@
     } catch (err) { $('#loginErr').textContent = err.message; }
   });
 
-  $('#logoutBtn').addEventListener('click', async () => {
-    try { await api.post('/auth/logout'); } catch (_e) {}
-    ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
-  });
+  // Confirm both end-of-day updates on every sign-out attempt, for every role.
+  let signingOut = false;
+  function confirmSignOut(step = 0) {
+    if (signingOut) return;
+    const prompts = [
+      'I have updated management on all pending files.',
+      'I have updated my timesheet.'
+    ];
+    modal(`<h3>Before you sign out — ${step + 1} of 2</h3>
+      <p style="color:var(--slate);margin:0 0 18px;">Tick the confirmation to continue.</p>
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;line-height:1.5;">
+        <input type="checkbox" id="signOutCheck" style="margin-top:4px;"> <span>${prompts[step]}</span>
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="signOutCancel">Cancel</button>
+        <button class="btn btn-primary" id="signOutContinue" disabled>${step === 0 ? 'Next' : 'Sign out'}</button>
+      </div>`);
+    const check = $('#signOutCheck');
+    const proceed = $('#signOutContinue');
+    const cancel = $('#signOutCancel');
+    check.addEventListener('change', () => { proceed.disabled = !check.checked; });
+    cancel.addEventListener('click', closeModal);
+    proceed.addEventListener('click', async () => {
+      if (!check.checked || signingOut) return;
+      if (step === 0) return confirmSignOut(1);
+      signingOut = true;
+      proceed.disabled = true; cancel.disabled = true; check.disabled = true;
+      try {
+        await api.post('/auth/logout');
+        closeModal();
+        ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
+      } catch (e) {
+        toast(e.message || 'Unable to sign out. Please try again.', true);
+        proceed.disabled = false; cancel.disabled = false; check.disabled = false;
+      } finally { signingOut = false; }
+    });
+  }
+  $('#logoutBtn').addEventListener('click', () => confirmSignOut());
 
   $('#myProfileBtn').addEventListener('click', openMyProfile);
   $('#changePwBtn').addEventListener('click', openChangePassword);
