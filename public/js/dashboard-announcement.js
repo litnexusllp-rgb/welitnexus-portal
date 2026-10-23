@@ -133,7 +133,7 @@
           <div class="dc-card"><div class="dc-head"><h2>Upcoming</h2><button class="dc-link" data-go="calendar">Holidays</button></div>
             <div class="dc-list">
               ${nextOwnLeave ? `<div class="dc-list-item"><span>My approved leave</span><strong>${esc(nextOwnLeave.start_date === nextOwnLeave.end_date ? fmtDate(nextOwnLeave.start_date) : `${fmtDate(nextOwnLeave.start_date)}–${fmtDate(nextOwnLeave.end_date)}`)}</strong></div>` : ''}
-              ${holidays.length ? holidays.map((h) => `<div class="dc-list-item"><span>${esc(h.name)}</span><strong>${esc(fmtDate(h.date))}</strong></div>`).join('') : '<div class="dc-empty">No upcoming holidays published.</div>'}
+              ${holidays.length ? holidays.map((h) => `<div class="dc-list-item"><span>${esc(h.name)} · ${h.duration === 'HALF' ? 'Half day' : 'Full day'}</span><strong>${esc(fmtDate(h.date))}</strong></div>`).join('') : '<div class="dc-empty">No upcoming holidays published.</div>'}
             </div>
           </div>
           <div class="dc-card dc-section-gap"><div class="dc-head"><h2>Quick access</h2></div><div class="dc-list">
