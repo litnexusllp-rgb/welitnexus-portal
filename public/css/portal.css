@@ -245,6 +245,13 @@ tbody tr:hover { background: #eef5fb; }
 .leave-policy-note { margin: 0 0 12px; }
 .leave-payment-preview { background: var(--mist); border: 1px solid var(--line); padding: 12px; border-radius: 9px; font-size: .85rem; line-height: 1.5; }
 .leave-payment-preview.error { color: var(--danger); border-color: var(--danger); }
+.leave-deduction-estimate { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.leave-deduction-estimate strong { display: block; color: var(--navy); margin-bottom: 5px; }
+.leave-deduction-estimate > div + div { margin-top: 5px; }
+.salary-admin-panel { padding: 14px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--mist); }
+.salary-admin-panel h4 { margin: 0 0 12px; color: var(--navy); }
+.salary-admin-panel .form-row { margin-bottom: 8px; }
+.salary-admin-panel details { margin-top: 12px; font-size: .85rem; }
 .leave-admin-toolbar { margin-top: 28px; }
 .leave-admin-toolbar .row-actions { flex-wrap: wrap; }
 .modal-bg { display: none; position: fixed; inset: 0; background: rgba(9,29,51,.55); z-index: 50; place-items: center; padding: 20px; }
