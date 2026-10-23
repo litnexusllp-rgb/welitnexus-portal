@@ -245,9 +245,16 @@ tbody tr:hover { background: #eef5fb; }
 .leave-policy-note { margin: 0 0 12px; }
 .leave-payment-preview { background: var(--mist); border: 1px solid var(--line); padding: 12px; border-radius: 9px; font-size: .85rem; line-height: 1.5; }
 .leave-payment-preview.error { color: var(--danger); border-color: var(--danger); }
-.leave-deduction-estimate { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-.leave-deduction-estimate strong { display: block; color: var(--navy); margin-bottom: 5px; }
-.leave-deduction-estimate > div + div { margin-top: 5px; }
+.leave-form-intro { color: var(--slate); margin: 0 0 16px; font-size: .85rem; }
+.leave-preview-heading, .leave-preview-deduction { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; }
+.leave-preview-heading strong { color: var(--navy); }
+.leave-preview-heading span, .leave-preview-deduction > span { color: var(--slate); }
+.leave-preview-deduction { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.leave-preview-deduction strong { color: var(--navy); font-size: 1.25rem; overflow-wrap: anywhere; }
+.leave-preview-note { margin: 8px 0 0; color: var(--slate); font-size: .8rem; }
+.leave-preview-details { margin-top: 12px; color: var(--slate); font-size: .8rem; }
+.leave-preview-details summary { cursor: pointer; color: var(--teal-dark); font-weight: 600; }
+.leave-preview-details p { margin: 8px 0 0; overflow-wrap: anywhere; }
 .salary-admin-panel { padding: 14px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--mist); }
 .salary-admin-panel h4 { margin: 0 0 12px; color: var(--navy); }
 .salary-admin-panel .form-row { margin-bottom: 8px; }
