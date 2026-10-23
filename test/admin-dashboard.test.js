@@ -1,10 +1,10 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const vm=require('node:vm');
 const dashboard=fs.readFileSync(path.join(__dirname,'../public/js/dashboard-announcement.js'),'utf8');
-async function render(admin,failWork=false){
+async function render(admin,failWork=false,holidays=[]){
  const requests=[];let root;const old={style:{},parentNode:{insertBefore(r){root=r;}}};const main={querySelector:s=>s==='#dashCards'?old:null};
  const document={body:{classList:{contains:()=>admin}},documentElement:{},querySelector:()=>({dataset:{view:'dashboard'}}),getElementById:id=>id==='main'?main:id==='dashboardControlStyles'?{}:null,createElement:()=>({innerHTML:'',isConnected:true,querySelectorAll:()=>[]})};
- const context={document,MutationObserver:class{observe(){}},setTimeout(){},console,api:{get:async p=>{requests.push(p);if(p==='/asana/admin-work'&&failWork)throw Error('offline');if(p==='/asana/status')return {enabled:true};if(p==='/asana/admin-work'||p==='/asana/my-tasks')return {tasks:[{name:'Assigned work',assignee:'Saurav',projects:['Other project'],url:'https://app.asana.com/0/0/1'}]};if(p==='/operations')return {approvals:[{kind:'Achievement'},{kind:'Leave'}],asana:{counts:{overdue:3,unassigned:2}}};if(p.startsWith('/kpi/me'))return {rows:[{tasksDone:8}]};return {};}}};vm.createContext(context);vm.runInContext(dashboard.replace('  setTimeout(renderDashboard, 0);','  globalThis.renderTest = renderDashboard;'),context);await context.renderTest();return {html:root.innerHTML,requests};
+ const context={document,MutationObserver:class{observe(){}},setTimeout(){},console,api:{get:async p=>{requests.push(p);if(p==='/holidays')return {holidays};if(p==='/asana/admin-work'&&failWork)throw Error('offline');if(p==='/asana/status')return {enabled:true};if(p==='/asana/admin-work'||p==='/asana/my-tasks')return {tasks:[{name:'Assigned work',assignee:'Saurav',projects:['Other project'],url:'https://app.asana.com/0/0/1'}]};if(p==='/operations')return {approvals:[{kind:'Achievement'},{kind:'Leave'}],asana:{counts:{overdue:3,unassigned:2}}};if(p.startsWith('/kpi/me'))return {rows:[{tasksDone:8}]};return {};}}};vm.createContext(context);vm.runInContext(dashboard.replace('  setTimeout(renderDashboard, 0);','  globalThis.renderTest = renderDashboard;'),context);await context.renderTest();return {html:root.innerHTML,requests};
 }
 test('admin replaces personal performance with review actions and shared owner work',async()=>{
  const r=await render(true);assert.ok(r.html.includes('Needs your attention'));assert.ok(!r.html.includes('My performance'));assert.ok(r.html.includes('Saurav'));assert.ok(r.html.includes('Other project'));assert.ok(r.requests.includes('/asana/admin-work'));assert.ok(!r.requests.some(p=>p.startsWith('/kpi/me')));
@@ -36,4 +36,14 @@ test('shared admin work uses verified identities across projects and rejects emp
  const auth=require('../src/auth');const express=require('express');const app=express();app.use(require('cookie-parser')(),auth.loadUser);app.use('/api/asana',require('../src/routes/asana'));const add=role=>Number(db.prepare('INSERT INTO users(name,email,password_hash,role,created_ts) VALUES(?,?,?,?,0)').run(role,role+'@test.test','x',role).lastInsertRowid);const admin=add('ADMIN'),emp=add('EMPLOYEE');const cookie=id=>auth.COOKIE+'='+auth.issueToken(db.prepare('SELECT * FROM users WHERE id=?').get(id));
  const server=app.listen(0,'127.0.0.1');await new Promise((r,j)=>{server.once('listening',r);server.once('error',j);});t.after(async()=>{global.fetch=realFetch;await new Promise(r=>server.close(r));db.close();fs.rmSync(dir,{recursive:true,force:true});});const req=async session=>fetch(`http://127.0.0.1:${server.address().port}/api/asana/admin-work`,{headers:{cookie:session}});
  assert.equal((await req('')).status,401);assert.equal((await req(cookie(emp))).status,403);const response=await req(cookie(admin));assert.equal(response.status,200);assert.equal((await response.json()).tasks.length,2);
+});
+
+test('upcoming holidays show each stored duration for admins and employees',async()=>{
+ const holidays=[{date:'2099-11-06',name:'Diwali',duration:'HALF'},{date:'2099-11-09',name:'Diwali',duration:'FULL'},{date:'2099-12-25',name:'Christmas'}];
+ for(const admin of [true,false]){
+  const r=await render(admin,false,holidays);
+  assert.match(r.html,/Diwali · Half day<\/span><strong>6 Nov|Diwali · Half day<\/span><strong>Nov 6/);
+  assert.match(r.html,/Diwali · Full day/);
+  assert.match(r.html,/Christmas · Full day/);
+ }
 });
