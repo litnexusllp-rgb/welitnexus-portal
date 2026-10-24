@@ -28,7 +28,7 @@ function audit(id, month, action, before, admin) {
 }
 const reportError = (res,error) => res.status(error.status || 500).json({ error:error.status ? error.message : 'Could not save the salary review. Please try again.' });
 
-router.post('/:id/review', (req,res) => {
+router.post('/:id/review', require('../requestValidation').validateParams, (req,res) => {
   try {
     const amount = String(req.body.amount ?? '').trim(), note = typeof req.body.note === 'string' ? req.body.note.trim() : '';
     if (!/^(?:0|[1-9]\d{0,7})(?:\.\d{1,2})?$/.test(amount)) fail('Enter a non-negative salary-to-pay amount with up to 2 decimal places.');
@@ -52,7 +52,7 @@ router.post('/:id/review', (req,res) => {
   } catch (error) { reportError(res,error); }
 });
 
-router.post('/:id/review/reopen', (req,res) => {
+router.post('/:id/review/reopen', require('../requestValidation').validateParams, (req,res) => {
   try {
     db.transaction(() => {
       const row = target(req), month = req.body.month;

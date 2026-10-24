@@ -80,7 +80,7 @@ router.post('/', requireAuth, (req, res) => {
 });
 
 // ADMIN: approve or reject a proposed client.
-router.post('/:id/approval', requireAdmin, (req, res) => {
+router.post('/:id/approval', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const decision = String(req.body.decision || '').toUpperCase();
   if (!['APPROVED', 'REJECTED'].includes(decision)) return res.status(400).json({ error: 'decision must be APPROVED or REJECTED' });
   const c = getOne.get(Number(req.params.id));
@@ -89,7 +89,7 @@ router.post('/:id/approval', requireAdmin, (req, res) => {
   res.json({ client: getOne.get(c.id) });
 });
 
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const c = getOne.get(Number(req.params.id));
   if (!c) return res.status(404).json({ error: 'Not found' });
   updateClient.run({
@@ -106,7 +106,7 @@ router.put('/:id', requireAdmin, (req, res) => {
   res.json({ client: getOne.get(c.id) });
 });
 
-router.post('/:id/active', requireAdmin, (req, res) => {
+router.post('/:id/active', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   setActive.run(req.body.active ? 1 : 0, Number(req.params.id));
   res.json({ client: getOne.get(Number(req.params.id)) });
 });

@@ -78,7 +78,13 @@ async function sendBackup(kind = 'Manual', toOverride) {
 
   const stamp = now().toFormat('yyyy-LL-dd');
   const attachments = buildCsvAttachments();
-  attachments.push({ filename: `litnexus-portal-${stamp}.db`, content: db.serialize() }); // full-fidelity restore file
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const tmp = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'wln-email-backup-'));
+  const snapshot = path.join(tmp, 'portal.db');
+  try { await db.backup(snapshot); }
+  catch (error) { await fs.rm(tmp, { recursive: true, force: true }); throw error; }
+  attachments.push({ filename: `litnexus-portal-${stamp}.db`, path: snapshot });
 
   const transporter = nodemailer.createTransport({
     host: c.host, port: c.port, secure: c.port === 465, auth: { user: c.user, pass: c.pass },
@@ -95,30 +101,42 @@ async function sendBackup(kind = 'Manual', toOverride) {
     return { ok: true, to, files: attachments.length, message: `Backup emailed to ${to}.` };
   } catch (e) {
     return { ok: false, error: e.message, message: 'Email send failed — check the SMTP settings (host/port/user/app password).' };
+  } finally {
+    transporter.close();
+    await fs.rm(tmp, { recursive: true, force: true });
   }
 }
 
 // Daily tick at BACKUP_EMAIL_HOUR: send Weekly on the chosen weekday and Monthly
 // on the 1st (both can fire on the same day).
+let stopScheduler;
 function startBackupScheduler() {
+  if (stopScheduler) return stopScheduler;
+  let timer, stopped = false, pending = Promise.resolve();
+  stopScheduler = async () => { stopped = true; clearTimeout(timer); await pending; stopScheduler = null; };
   if (!enabled()) { console.log('Backup email: disabled (SMTP not configured).'); return; }
   const hour = Math.min(23, Math.max(0, Number(process.env.BACKUP_EMAIL_HOUR ?? 6)));
   const weeklyDow = Math.min(7, Math.max(1, Number(process.env.BACKUP_WEEKLY_DOW ?? 1))); // 1=Mon..7=Sun
+  if (!Number.isInteger(hour)) throw new Error('Scheduler hour must be an integer');
   const scheduleNext = () => {
+    if (stopped) return;
     const n = now();
     let next = n.set({ hour, minute: 0, second: 0, millisecond: 0 });
     if (next <= n) next = next.plus({ days: 1 });
-    setTimeout(async () => {
+    timer = setTimeout(() => {
+      pending = (async () => {
       try {
         const d = now();
         if (d.weekday === weeklyDow) { const r = await sendBackup('Weekly'); console.log('Backup email (weekly):', JSON.stringify(r)); }
         if (d.day === 1) { const r = await sendBackup('Monthly'); console.log('Backup email (monthly):', JSON.stringify(r)); }
       } catch (e) { console.error('Backup email run failed:', e.message); }
       scheduleNext();
+      })();
     }, next.toMillis() - n.toMillis()).unref();
     console.log(`Backup email scheduled for ${next.toFormat('yyyy-LL-dd HH:mm')} (${ZONE}); weekly on day ${weeklyDow}, monthly on the 1st.`);
   };
   scheduleNext();
+  return stopScheduler;
 }
 
 module.exports = { sendBackup, startBackupScheduler, enabled, buildCsvAttachments };

@@ -14,34 +14,34 @@ const router = express.Router();
 router.get('/status', requireAuth, (_req, res) => res.json({ enabled: enabled() }));
 
 // Admin-only combined work across accessible projects for verified owners.
-router.get('/admin-work', requireAdmin, async (_req, res) => {
+router.get('/admin-work', requireAdmin, require('../asyncRoute')(async (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json(await adminWork()); }
   catch (_e) { res.status(502).json({ error: 'Could not load Abhey and Saurav’s Asana work. Please retry shortly.' }); }
-});
+}));
 
 // My open Asana tasks.
-router.get('/my-tasks', requireAuth, async (req, res) => {
+router.get('/my-tasks', requireAuth, require('../asyncRoute')(async (req, res) => {
   if (!enabled()) return res.json({ enabled: false, tasks: [] });
   try {
     res.json({ enabled: true, tasks: await myTasks(req.user.id) });
   } catch (e) {
     res.status(502).json({ error: `Could not reach Asana: ${e.message}` });
   }
-});
+}));
 
 // ADMIN: the whole team's pending tasks, grouped by person.
-router.get('/team-tasks', requireAdmin, async (_req, res) => {
+router.get('/team-tasks', requireAdmin, require('../asyncRoute')(async (_req, res) => {
   if (!enabled()) return res.json({ enabled: false, groups: [], totalPending: 0, totalOverdue: 0 });
   try {
     res.json({ enabled: true, ...(await teamTasks()) });
   } catch (e) {
     res.status(502).json({ error: `Could not reach Asana: ${e.message}` });
   }
-});
+}));
 
 // ADMIN: connection test — also reports which Asana people aren't matching an
 // employee, which is the usual reason someone's tasks look missing.
-router.post('/test', requireAdmin, async (_req, res) => res.json(await diagnose()));
+router.post('/test', requireAdmin, require('../asyncRoute')(async (_req, res) => res.json(await diagnose())));
 
 module.exports = router;

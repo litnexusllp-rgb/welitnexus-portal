@@ -9,17 +9,11 @@ const rateLimit = require('express-rate-limit');
 const { db } = require('./db');
 const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
-const { startRecurringScheduler } = require('./recurring');
-const { startAbsenceScheduler } = require('./autoAbsence');
-const { startBackupScheduler } = require('./backupMailer');
-const { startBirthdayScheduler } = require('./birthdays');
-const { getScheduler } = require('./eodScheduler');
+const { startBackgroundWorker } = require('./backgroundWorker');
 
-bootstrapAdmin(); // create first admin on a fresh database
-require('./leavePolicy').syncAllBalances();
 
 const app = express();
-app.set('trust proxy', 1); // Railway terminates TLS in front of us; needed for rate-limit + secure cookies
+app.set('trust proxy', require('./proxyConfig').trustProxy());
 
 // Security headers. CSP is tuned for this app: inline styles + Google Fonts
 // are used by the frontend, scripts are loaded from same-origin files only.
@@ -54,12 +48,12 @@ const writeLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user ? `u:${req.user.id}` : req.ip),
-  validate: false, // custom keyGenerator with an IP fallback — skip the IPv6 check
+  keyGenerator: (req) => (req.user ? `u:${req.user.id}` : require('./rateLimitKey').ipKey(req)),
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
   message: { error: 'Too many requests. Please slow down and try again shortly.' },
 });
 app.use('/api', writeLimiter);
+app.use('/api', require('./requestValidation').validateRequest);
 
 // API routes
 app.use('/api/auth', require('./routes/auth'));
@@ -88,9 +82,11 @@ app.use('/api/eod', require('./routes/eod'));
 
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.
+let backgroundHealth = () => true;
 app.get('/api/health', (_req, res) => {
   try {
     db.prepare('SELECT 1').get();
+    if (!backgroundHealth()) return res.status(503).json({ ok: false, error: 'background worker unavailable', ts: Date.now() });
     res.json({ ok: true, ts: Date.now(), revision: process.env.RAILWAY_GIT_COMMIT_SHA || null });
   } catch (e) {
     res.status(503).json({ ok: false, error: 'database unavailable', ts: Date.now() });
@@ -109,18 +105,21 @@ app.get('*', (req, res, next) => {
 // Global error handler — keep API responses JSON and never leak stack traces.
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
-  console.error('Unhandled error:', err);
-  res.status(err.status || 500).json({ error: 'Something went wrong. Please try again.' });
+  if (res.headersSent) return _next(err);
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status <= 599 ? err.status : 500;
+  if (status >= 500) console.error('Unhandled error:', err);
+  res.status(status).json({ error: status < 500 ? (err.type === 'entity.parse.failed' ? 'Invalid JSON body' : err.message) : 'Something went wrong. Please try again.' });
 });
 
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`WeLitNexus portal running on http://localhost:${PORT}`);
-  startRecurringScheduler(); // generate recurring tasks on boot + every 6h
-  startAbsenceScheduler();   // daily: flag no-shows as pending leave for approval
-  startBackupScheduler();    // weekly + monthly data backup by email (if SMTP set)
-  startBirthdayScheduler();  // daily: admin heads-up for upcoming birthdays
-  getScheduler().start();    // cloud EOD capture at 03:00 IST, Slack at 03:15
-});
-
-require('./shutdown').installShutdown({ server, db });
+async function start() {
+  await bootstrapAdmin();
+  const stopBackground = startBackgroundWorker();
+  backgroundHealth = stopBackground.health || (() => true);
+  const PORT = process.env.PORT || 3000;
+  const server = app.listen(PORT, () => console.log(`WeLitNexus portal running on http://localhost:${server.address().port}`));
+  require('./shutdown').installShutdown({ server, db, stopBackground });
+  server.on('error', async error => { console.error('HTTP startup failed:', error); await stopBackground(); db.close(); process.exitCode = 1; });
+  return server;
+}
+if (require.main === module) start().catch(error => { console.error('Startup failed:', error); if (db.open) db.close(); process.exitCode = 1; });
+module.exports = { app, start };

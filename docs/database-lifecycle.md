@@ -31,3 +31,26 @@ normal leave ranges does not produce decimal rounding drift. Existing REAL
 columns and historical balances are preserved. If arbitrary fractional hours
 are introduced later, choose integer units and perform a separately reviewed
 data migration rather than rounding historical values at startup.
+
+## Application and background lifecycle
+
+Schema initialization now runs in one immediate transaction, serializing complete
+startup migrations between connections/processes and moving the achievement-column
+addition out of route construction. A failure rolls back and closes the connection.
+
+Import `app` from `src/server.js` for HTTP tests; call and await `bootstrapAdmin()`
+explicitly for fresh fixtures. `npm start` calls `start()`, which awaits bootstrap,
+starts HTTP and creates the background worker. Password operations use a bounded
+worker pool rather than blocking the HTTP thread. Bulk leave balance refreshes
+yield between employees; the initial complete refresh runs in the scheduler worker.
+
+The background worker holds a reserved lock in `<DB_PATH>.scheduler-lock` for its
+lifetime. This is a separate SQLite file so it does not hold the business DB's
+write lock. Competing workers wait; OS/SQLite locking releases ownership on worker
+failure. Do not delete the companion file while any portal instance is running.
+Schedulers return cancellation functions and EOD exposes `stop()`; shutdown waits
+for active background work as well as HTTP before closing the main connection.
+An unexpected worker exit makes `/api/health` return 503.
+
+See `docs/reviews/2026-10-24-repository-review.md` for deployment assumptions,
+configuration, limits, and the complete file/issue map.

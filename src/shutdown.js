@@ -2,7 +2,7 @@
 
 // Drain HTTP requests before closing SQLite. The deadline prevents a stuck
 // connection from holding a deployment open indefinitely.
-function installShutdown({ server, db, processRef = process, logger = console, timeoutMs = 10000 }) {
+function installShutdown({ server, db, processRef = process, logger = console, timeoutMs = 10000, stopBackground }) {
   let stopping = false, finished = false, deadline;
   function finish(error) {
     if (finished) return;
@@ -23,7 +23,10 @@ function installShutdown({ server, db, processRef = process, logger = console, t
       finish(new Error('Shutdown deadline exceeded'));
     }, timeoutMs);
     deadline.unref?.();
-    server.close(finish);
+    let httpDone = false, backgroundDone = !stopBackground, failure;
+    const drained = error => { if (error) failure = error; if (httpDone && backgroundDone) finish(failure); };
+    server.close(error => { httpDone = true; drained(error); });
+    if (stopBackground) Promise.resolve().then(stopBackground).then(() => { backgroundDone = true; drained(); }, error => { backgroundDone = true; drained(error); });
   }
   processRef.once('SIGINT', () => stop('SIGINT'));
   processRef.once('SIGTERM', () => stop('SIGTERM'));

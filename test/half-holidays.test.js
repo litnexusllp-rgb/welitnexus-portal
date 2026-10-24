@@ -15,9 +15,11 @@ test('half-day holidays persist, can be edited and feed attendance and absence f
   const legacy = new Database(process.env.DB_PATH);
   legacy.exec("CREATE TABLE holidays(id INTEGER PRIMARY KEY,date TEXT UNIQUE,name TEXT,type TEXT,created_by INTEGER,created_ts INTEGER); INSERT INTO holidays VALUES(1,'2026-01-01','Existing','PUBLIC',NULL,0)");
   legacy.close();
-  const express = require('express'); const listen = express.application.listen; let app;
-  express.application.listen = function () { app = this; };
-  try { require('../src/server'); } finally { express.application.listen = listen; }
+  const express = require('express');
+  const listen = express.application.listen;
+  const originalListen = listen;
+  const { app } = require('../src/server');
+  await require('../src/bootstrap').bootstrapAdmin();
   const { db } = require('../src/db'); const { COOKIE, issueToken } = require('../src/auth');
   const admin = db.prepare("SELECT * FROM users WHERE role='ADMIN'").get();
   const empId = db.prepare("INSERT INTO users(name,email,password_hash,role,created_ts) VALUES('Test person','half@example.test','unused','EMPLOYEE',0)").run().lastInsertRowid;

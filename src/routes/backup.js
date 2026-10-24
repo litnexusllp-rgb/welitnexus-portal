@@ -15,30 +15,35 @@ const { sendBackup } = require('../backupMailer');
 const router = express.Router();
 
 // ADMIN: email a backup right now (test the scheduled email delivery).
-router.post('/email', requireAdmin, async (req, res) => {
+router.post('/email', requireAdmin, require('../asyncRoute')(async (req, res) => {
   const result = await sendBackup('Test');
   res.json(result);
-});
+}));
 
 function allow(req, res, next) {
-  const tokenOk = process.env.BACKUP_TOKEN && req.query.token === process.env.BACKUP_TOKEN;
+  const expected = process.env.BACKUP_TOKEN;
+  const presented = req.get('authorization')?.replace(/^Bearer /i, '') || req.query.token;
+  const tokenOk = typeof expected === 'string' && expected.length > 0 && typeof presented === 'string' && Buffer.byteLength(expected) === Buffer.byteLength(presented) && require('node:crypto').timingSafeEqual(Buffer.from(expected), Buffer.from(presented));
   const adminOk = req.user && req.user.role === 'ADMIN';
   if (tokenOk || adminOk) return next();
   return res.status(403).json({ error: 'Admins only (or a valid backup token)' });
 }
 
-router.get('/', allow, async (req, res) => {
+router.get('/', allow, require('../asyncRoute')(async (req, res) => {
   // db.backup() takes a consistent snapshot even while the app is running (WAL-safe).
-  const tmp = path.join(os.tmpdir(), `wln-backup-${process.pid}-${Date.now()}.db`);
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wln-backup-'));
+  const tmp = path.join(dir, 'portal.db');
+  const cleanup = () => fs.promises.rm(dir, { recursive: true, force: true }).catch(error => console.error('Backup cleanup failed:', error.message));
+  res.set('Cache-Control', 'no-store');
   try {
     await db.backup(tmp);
     const stamp = now().toFormat('yyyy-LL-dd-HHmm');
-    res.download(tmp, `litnexus-portal-${stamp}.db`, () => fs.unlink(tmp, () => {}));
+    res.download(tmp, `litnexus-portal-${stamp}.db`, () => { cleanup(); });
   } catch (e) {
     console.error('Backup failed:', e.message);
-    fs.unlink(tmp, () => {});
+    await cleanup();
     res.status(500).json({ error: 'Backup failed' });
   }
-});
+}));
 
 module.exports = router;

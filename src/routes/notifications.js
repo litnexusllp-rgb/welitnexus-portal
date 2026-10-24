@@ -23,7 +23,7 @@ router.get('/', requireAuth, (req, res) => {
 router.get('/count', requireAuth, (req, res) => res.json({ unread: unreadCount.get(req.user.id).c }));
 
 // Mark one as read.
-router.post('/:id/read', requireAuth, (req, res) => {
+router.post('/:id/read', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   markOneRead.run(Number(req.params.id), req.user.id);
   res.json({ unread: unreadCount.get(req.user.id).c });
 });

@@ -7,7 +7,13 @@ const { now } = require('../time');
 const { generateDueTasks } = require('../recurring');
 
 const router = express.Router();
+const { validateReferences } = require('../requestValidation');
+router.use(requireAuth);
+router.use((req, res, next) => { const error = validateReferences(req.body, db); if (error) return res.status(400).json({ error }); next(); });
 
+function configError(r) {
+  return !r.title || !require('../requestValidation').day(r.next_due) || !Number.isInteger(r.step) || !Number.isInteger(r.lead_days) || r.lead_days < 0 ? 'A title, valid first due date, and whole-number recurrence settings are required' : null;
+}
 const FREQ = ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
 
@@ -67,6 +73,7 @@ router.get('/mine', requireAuth, (req, res) => res.json({ recurring: listMine.al
 router.post('/', requireAuth, (req, res) => {
   const admin = req.user.role === 'ADMIN';
   const r = clean(req.body);
+  const error = configError(r); if (error) return res.status(400).json({ error });
   if (!admin) {
     r.assignee_id = req.user.id;
     if (!r.client_id) return res.status(400).json({ error: 'Please choose a client' });
@@ -79,17 +86,18 @@ router.post('/', requireAuth, (req, res) => {
   res.json({ recurring: listFor(req) });
 });
 
-router.put('/:id', requireAuth, (req, res) => {
+router.put('/:id', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
   if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });
   const patch = clean(req.body, existing);
+  const error = configError(patch); if (error) return res.status(400).json({ error });
   if (req.user.role !== 'ADMIN') patch.assignee_id = existing.assignee_id; // employees can't reassign
   updateRec.run({ id: existing.id, ...patch });
   res.json({ recurring: listFor(req) });
 });
 
-router.post('/:id/active', requireAuth, (req, res) => {
+router.post('/:id/active', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
   if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });
@@ -97,7 +105,7 @@ router.post('/:id/active', requireAuth, (req, res) => {
   res.json({ recurring: listFor(req) });
 });
 
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
   if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });

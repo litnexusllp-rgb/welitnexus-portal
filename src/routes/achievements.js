@@ -18,13 +18,6 @@ const ACHIEVEMENT_CATEGORIES = new Set([
   'OTHER',
 ]);
 
-// Backward-compatible migration kept next to the feature that uses it. Existing
-// rows become OTHER; no achievement, review status, or points are changed.
-const achievementColumns = db.prepare(`PRAGMA table_info(achievements)`).all();
-if (!achievementColumns.some((c) => c.name === 'category')) {
-  db.exec(`ALTER TABLE achievements ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'`);
-}
-
 const insertAch = db.prepare(
   `INSERT INTO achievements (user_id, date, category, title, description, created_ts)
    VALUES (?, ?, ?, ?, ?, ?)`
@@ -74,7 +67,7 @@ router.post('/', requireAuth, (req, res) => {
 router.get('/mine', requireAuth, (req, res) => res.json({ achievements: mine.all(req.user.id) }));
 
 // Employee deletes their own pending entry.
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const a = getAch.get(Number(req.params.id));
   if (!a) return res.status(404).json({ error: 'Not found' });
   const ownPending = a.user_id === req.user.id && a.status === 'PENDING';
@@ -86,14 +79,14 @@ router.delete('/:id', requireAuth, (req, res) => {
 });
 
 // ADMIN: all achievements in a month (yyyy-mm), pending first.
-router.get('/month/:month', requireAdmin, (req, res) => {
+router.get('/month/:month', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const m = String(req.params.month);
   if (!/^\d{4}-\d{2}$/.test(m)) return res.status(400).json({ error: 'Month must be yyyy-mm' });
   res.json({ achievements: (req.query.include_pending === '1' ? forReview : forMonth).all(`${m}-01`, `${m}-31`) });
 });
 
 // ADMIN: review — acknowledge with points, or decline.
-router.post('/:id/review', requireAdmin, (req, res) => {
+router.post('/:id/review', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const a = getAch.get(Number(req.params.id));
   if (!a) return res.status(404).json({ error: 'Not found' });
   const status = String(req.body.status || '').toUpperCase();

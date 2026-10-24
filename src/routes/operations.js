@@ -6,7 +6,7 @@ const asana = require('../asana');
 const { now, DateTime, ZONE } = require('../time');
 
 router.use(requireAdmin);
-router.get('/', async (_req, res) => {
+router.get('/', require('../asyncRoute')(async (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const observedAt = now(); const today = observedAt.toISODate();
   // Deliberately read only: decisions continue through their existing validated routes.
@@ -38,5 +38,5 @@ router.get('/', async (_req, res) => {
     } catch (_e) { result.asana = { ...result.asana, state:'error', ...asana.syncStatus(), error:'Asana data unavailable. Counts are unknown; please retry after the displayed retry time.' }; }
   }
   res.json(result);
-});
+}));
 module.exports = router;

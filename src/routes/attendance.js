@@ -158,7 +158,7 @@ router.post('/admin/event', requireAdmin, (req, res) => {
 });
 
 // ADMIN: edit a punch's type/time.
-router.put('/admin/event/:id', requireAdmin, (req, res) => {
+router.put('/admin/event/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const ev = getEvent.get(Number(req.params.id));
   if (!ev) return res.status(404).json({ error: 'Punch not found' });
   const type = req.body.type ? String(req.body.type).toUpperCase() : ev.type;
@@ -174,7 +174,7 @@ router.put('/admin/event/:id', requireAdmin, (req, res) => {
 });
 
 // ADMIN: delete a punch.
-router.delete('/admin/event/:id', requireAdmin, (req, res) => {
+router.delete('/admin/event/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const ev = getEvent.get(Number(req.params.id));
   if (!ev) return res.status(404).json({ error: 'Punch not found' });
   try { changeAttendance(ev.user_id, [ev.day], () => { snapshot(getUserName.get(ev.user_id), ev.day); return deleteEvent.run(ev.id); }); }

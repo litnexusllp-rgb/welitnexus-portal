@@ -2,14 +2,21 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin, hashPassword } = require('../auth');
+const { requireAuth, requireAdmin } = require('../auth');
 const { now } = require('../time');
 const { IANAZone } = require('luxon');
 const { currentSession, snapshot } = require('../attendanceSession');
 const { employmentError } = require('../employment');
-const { syncBalance, syncAllBalances } = require('../leavePolicy');
+const { syncBalance, syncAllBalancesAsync } = require('../leavePolicy');
 const { validateSalary, saveSalary, salaryHistory } = require('../salaryDeduction');
 
+const { hashPasswordAsync } = require('../passwords');
+const asyncRoute = require('../asyncRoute');
+function adminStillAuthorized(req, res) {
+  const actor = db.prepare('SELECT role,active,session_version FROM users WHERE id=?').get(req.user.id);
+  if (actor?.active && actor.role === 'ADMIN' && actor.session_version === req.user.session_version) return true;
+  res.status(401).json({ error: 'Account changed. Please sign in again.' }); return false;
+}
 const router = express.Router();
 
 const PUBLIC_COLS = `id, name, email, emp_code, role, department, title, phone, shift_start, attendance_timezone, attendance_cutover, join_date, exit_date, birthday, asana_email, created_ts, active`;
@@ -42,11 +49,11 @@ const otherActiveAdmins = db.prepare(
 router.get('/', requireAuth, (_req, res) => res.json({ users: listAll.all() }));
 
 // ADMIN: full list (used for assigning tasks, managing people).
-router.get('/manage', requireAdmin, (_req, res) => { syncAllBalances(); res.json({ users: listAllIncInactive.all() }); });
+router.get('/manage', requireAdmin, require('../asyncRoute')(async (_req, res) => { await syncAllBalancesAsync(); res.json({ users: listAllIncInactive.all() }); }));
 
 // Compensation is never included in the shared employee directory or auth
 // payloads. Only admins can read or edit another employee's salary history.
-router.get('/:id/salary', requireAdmin, (req, res) => {
+router.get('/:id/salary', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   res.set('Cache-Control', 'no-store');
   const user = getOne.get(Number(req.params.id));
   if (!user) return res.status(404).json({ error: 'Employee not found' });
@@ -59,13 +66,15 @@ function salaryError(body) {
 }
 
 function configError(body) {
+  if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) return 'Name cannot be empty';
+  if (body.email !== undefined && (typeof body.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()))) return 'Use a valid email address';
   if (body.attendance_timezone != null && body.attendance_timezone !== '' && (typeof body.attendance_timezone !== 'string' || !IANAZone.isValidZone(body.attendance_timezone))) return 'Use a valid IANA attendance timezone.';
   if (body.attendance_cutover != null && (!Number.isInteger(body.attendance_cutover) || body.attendance_cutover < 0 || body.attendance_cutover > 23)) return 'Attendance cutover must be an integer hour from 0 to 23, or null for the office default.';
   return null;
 }
 
 // ADMIN: create employee.
-router.post('/', requireAdmin, (req, res) => {
+router.post('/', requireAdmin, asyncRoute(async (req, res) => {
   const se = salaryError(req.body); if (se) return res.status(400).json({ error: se });
   const ce = configError(req.body); if (ce) return res.status(400).json({ error: ce });
   const name = String(req.body.name || '').trim();
@@ -79,10 +88,14 @@ router.post('/', requireAdmin, (req, res) => {
   if (datesError) return res.status(400).json({ error: datesError });
   const empCode = String(req.body.emp_code || '').trim();
   if (empCode && findByCode.get(empCode)) return res.status(409).json({ error: 'Employee code already in use' });
+  const passwordHash = await hashPasswordAsync(password);
+  if (!adminStillAuthorized(req, res)) return;
+  // Recheck identity after asynchronous hashing before inserting atomically.
+  if (findByEmail.get(email) || (empCode && findByCode.get(empCode))) return res.status(409).json({ error: 'Email or employee code already in use' });
   const info = db.transaction(() => {
     const created = insertUser.run({
       name, email,
-      password_hash: hashPassword(password),
+      password_hash: passwordHash,
       emp_code: empCode,
       role: String(req.body.role || 'EMPLOYEE').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE',
       department: String(req.body.department || ''),
@@ -103,7 +116,7 @@ router.post('/', requireAdmin, (req, res) => {
     return created;
   }).immediate();
   res.json({ user: getOne.get(info.lastInsertRowid) });
-});
+}));
 
 // Self-service: update your OWN basic personal details.
 // Deliberately narrow — only name, phone and birthday. Everything else
@@ -128,7 +141,7 @@ router.put('/me', requireAuth, (req, res) => {
 });
 
 // ADMIN: update employee profile.
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const se = salaryError(req.body); if (se) return res.status(400).json({ error: se });
   const existing = getOne.get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: 'Not found' });
@@ -184,15 +197,17 @@ router.put('/:id', requireAdmin, (req, res) => {
 });
 
 // ADMIN: reset a password.
-router.post('/:id/password', requireAdmin, (req, res) => {
+router.post('/:id/password', require('../requestValidation').validateParams, requireAdmin, asyncRoute(async (req, res) => {
   const pw = String(req.body.password || '');
   if (pw.length < 6) return res.status(400).json({ error: 'Password must be 6+ chars' });
-  setPassword.run(hashPassword(pw), Number(req.params.id));
+  const hashed = await hashPasswordAsync(pw);
+  if (!adminStillAuthorized(req, res)) return;
+  if (!setPassword.run(hashed, Number(req.params.id)).changes) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
-});
+}));
 
 // ADMIN: deactivate / reactivate.
-router.post('/:id/active', requireAdmin, (req, res) => {
+router.post('/:id/active', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   const target = getOne.get(id);
   if (!target) return res.status(404).json({ error: 'Not found' });

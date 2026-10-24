@@ -17,6 +17,8 @@ db.pragma('busy_timeout = 5000');
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON'); // enforce the FK constraints declared below
 
+try {
+db.exec('BEGIN IMMEDIATE');
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,4 +399,10 @@ CREATE TABLE IF NOT EXISTS salary_month_review_events (
   changed_ts INTEGER NOT NULL
 );`);
 
+if (!db.pragma('table_info(achievements)').some(c => c.name === 'category')) db.exec("ALTER TABLE achievements ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'");
+db.exec('COMMIT');
+} catch (error) {
+  try { if (db.inTransaction) db.exec('ROLLBACK'); } finally { db.close(); }
+  throw error;
+}
 module.exports = { db, DB_PATH };

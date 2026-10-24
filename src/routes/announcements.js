@@ -32,7 +32,7 @@ router.post('/', requireAdmin, (req, res) => {
 });
 
 // ADMIN: edit a notice.
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const a = getOne.get(Number(req.params.id));
   if (!a) return res.status(404).json({ error: 'Not found' });
   updateA.run(
@@ -45,7 +45,7 @@ router.put('/:id', requireAdmin, (req, res) => {
 });
 
 // ADMIN: delete a notice.
-router.delete('/:id', requireAdmin, (req, res) => {
+router.delete('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   deleteA.run(Number(req.params.id));
   res.json({ ok: true });
 });
