@@ -359,7 +359,7 @@
   function navigate(view, fromAddress = false) {
     if (!ME) return;
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
-    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview'];
+    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'salaries'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
     const hash = '#/' + view;
     if (window.location.hash !== hash) {
@@ -387,6 +387,12 @@
   //  VIEWS
   // ====================================================================
   const VIEWS = {};
+
+  VIEWS.salaries = async () => {
+    if (!isAdmin()) return;
+    setMain('Salaries', 'Monthly gross, approved leave deductions and salary to pay.', '<div id="salariesRoot"></div>');
+    await window.Salaries.mount($('#salariesRoot'), { api, onManage: () => navigate('admin') });
+  };
 
   VIEWS.taskreview = async () => {
     if (!isAdmin()) return;
