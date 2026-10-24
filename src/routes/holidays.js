@@ -33,7 +33,7 @@ router.post('/', requireAdmin, (req, res) => {
   res.json({ holidays: listHolidays.all() });
 });
 
-router.delete('/:id', requireAdmin, (req, res) => {
+router.delete('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   deleteHoliday.run(Number(req.params.id));
   res.json({ holidays: listHolidays.all() });
 });

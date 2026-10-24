@@ -121,11 +121,14 @@ function createScheduler({ db, config, api = createApi(config), clock = Date.now
       reports: db.prepare('SELECT day,status,captured_at,error FROM eod_reports ORDER BY day DESC LIMIT 14').all() };
   }
 
+  let timer, pending = Promise.resolve();
   function start() {
+    if (timer) return timer;
     activate();
     if (!config.enabled || config.error) { log.info('[EOD] Disabled or missing configuration'); return; }
-    tick();
-    const timer = setInterval(tick, 30000); timer.unref();
+    const run = () => { if (busy) return; pending = tick().catch(error => log.error('[EOD] Tick failed: ' + error.message)); };
+    run();
+    timer = setInterval(run, 30000); timer.unref();
     log.info('[EOD] Daily capture 03:00 IST; Slack delivery 03:15 IST');
     return timer;
   }
@@ -138,7 +141,8 @@ function createScheduler({ db, config, api = createApi(config), clock = Date.now
     const report = buildReport(tasks, w, { startedAt, finishedAt: clock(), projects, warnings }, map);
     return { preview: true, message: 'Live read only; not sent, not an historical cutoff snapshot.', report, messages: renderReport(report) };
   };
-  return { start, tick, status, check, preview, activate };
+  const stop = async () => { clearInterval(timer); timer = null; await pending; };
+  return { start, stop, tick, status, check, preview, activate };
 }
 
 let singleton;

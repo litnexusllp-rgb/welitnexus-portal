@@ -63,7 +63,7 @@ function overlapDays(aStart, aEnd, bStart, bEnd) {
 // Build the KPI payload for a month. Shared by the admin worksheet and the
 // employee's own "My performance" view (which filters to just their row).
 async function buildKpi(req) {
-  require('../leavePolicy').syncAllBalances();
+  await require('../leavePolicy').syncAllBalancesAsync();
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : now().toFormat('yyyy-LL');
   const start = `${month}-01`;
   const end = DateTime.fromISO(start, { zone: ZONE }).endOf('month').toFormat('yyyy-LL-dd');
@@ -192,15 +192,15 @@ async function buildKpi(req) {
 }
 
 // ADMIN: the whole-team bonus worksheet.
-router.get('/', requireAdmin, async (req, res) => res.json(await buildKpi(req)));
+router.get('/', requireAdmin, require('../asyncRoute')(async (req, res) => res.json(await buildKpi(req))));
 
 // One person's KPI row. Employees always get their own; admins may pass
 // ?user_id= to review any employee.
-router.get('/me', requireAuth, async (req, res) => {
+router.get('/me', requireAuth, require('../asyncRoute')(async (req, res) => {
   const asked = Number(req.query.user_id);
   const targetId = (req.user.role === 'ADMIN' && asked) ? asked : req.user.id;
   const data = await buildKpi(req);
   res.json({ ...data, rows: data.rows.filter((r) => r.id === targetId), viewingUserId: targetId });
-});
+}));
 
 module.exports = router;

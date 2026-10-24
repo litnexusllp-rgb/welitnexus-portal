@@ -8,6 +8,9 @@ const { notify } = require('../notify');
 const { generateDueTasks } = require('../recurring');
 
 const router = express.Router();
+const { validateReferences } = require('../requestValidation');
+router.use(requireAuth);
+router.use((req, res, next) => { const error = validateReferences(req.body, db); if (error) return res.status(400).json({ error }); next(); });
 
 const TASK_SELECT = `SELECT t.*, a.name AS assignee_name, b.name AS assigner_name, c.name AS client_name, pc.name AS client_parent_name, pc.id AS client_parent_id
    FROM tasks t JOIN users a ON a.id = t.assignee_id JOIN users b ON b.id = t.assigned_by
@@ -137,18 +140,15 @@ router.post('/bulk', requireAdmin, (req, res) => {
   // Resolve the client: an existing id, or a name (reused if it exists, else created).
   let clientId = req.body.client_id ? Number(req.body.client_id) : null;
   const clientName = String(req.body.client_name || '').trim();
-  if (!clientId && clientName) {
-    const existing = findClientByName.get(clientName);
-    clientId = existing ? existing.id : insertClientBulk.run(clientName.slice(0, 120), req.user.id, now().toMillis()).lastInsertRowid;
-  }
   if (clientId && !clientExists.get(clientId)) return res.status(400).json({ error: 'Unknown client' });
-  if (!clientId) return res.status(400).json({ error: 'Pick or name a client' });
+  if (!clientId && !clientName) return res.status(400).json({ error: 'Pick or name a client' });
 
   const defaultAssignee = Number(req.body.default_assignee_id);
   if (!defaultAssignee || !activeUserExists.get(defaultAssignee)) return res.status(400).json({ error: 'A valid default assignee is required' });
 
   const items = (Array.isArray(req.body.items) ? req.body.items : []).slice(0, 500);
   if (!items.length) return res.status(400).json({ error: 'No tasks to import' });
+  if (items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) return res.status(400).json({ error: 'Each imported task must be an object' });
 
   const users = activeUsersForMatch.all();
   const matchOwner = (name) => {
@@ -162,6 +162,10 @@ router.post('/bulk', requireAdmin, (req, res) => {
   let schedules = 0; let tasks = 0; const skipped = [];
 
   const run = db.transaction(() => {
+  if (!clientId && clientName) {
+    const existing = findClientByName.get(clientName);
+    clientId = existing ? existing.id : insertClientBulk.run(clientName.slice(0, 120), req.user.id, now().toMillis()).lastInsertRowid;
+  }
     for (const it of items) {
       const title = String(it.title || '').trim().slice(0, 200);
       if (!title) continue;
@@ -180,8 +184,8 @@ router.post('/bulk', requireAdmin, (req, res) => {
       }
     }
   });
-  run();
-  if (schedules) { try { generateDueTasks(); } catch (_e) { /* first instances will still generate on the next scheduler run */ } }
+  run.immediate();
+  if (schedules) { try { generateDueTasks(); } catch (error) { console.error('Bulk recurring generation failed:', error); } }
   res.json({ ok: true, client_id: clientId, schedulesCreated: schedules, tasksCreated: tasks, skipped });
 });
 
@@ -189,7 +193,8 @@ router.post('/bulk', requireAdmin, (req, res) => {
 // Body: { ids: [taskId, ...] } in the desired display order.
 const setSortOrder = db.prepare(`UPDATE tasks SET sort_order = ? WHERE id = ?`);
 router.post('/reorder', requireAdmin, (req, res) => {
-  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean).slice(0, 500);
+  if (!Array.isArray(req.body.ids) || req.body.ids.length > 500 || req.body.ids.some(id => !require('../requestValidation').id(id))) return res.status(400).json({ error: 'ids must be a list of up to 500 positive integers' });
+  const ids = req.body.ids.map(Number);
   if (!ids.length) return res.status(400).json({ error: 'ids required' });
   const apply = db.transaction(() => { ids.forEach((id, i) => setSortOrder.run(i, id)); });
   apply();
@@ -197,7 +202,7 @@ router.post('/reorder', requireAdmin, (req, res) => {
 });
 
 // Assignee (or admin) adds a checklist item to an existing task.
-router.post('/:id/checklist', requireAuth, (req, res) => {
+router.post('/:id/checklist', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const task = loadManageableTask(req, res); if (!task) return;
   const text = String(req.body.text || '').trim().slice(0, 200);
   if (!text) return res.status(400).json({ error: 'Item text is required' });
@@ -206,7 +211,7 @@ router.post('/:id/checklist', requireAuth, (req, res) => {
 });
 
 // Assignee (or admin) ticks/unticks or renames a checklist item.
-router.post('/:id/checklist/:itemId', requireAuth, (req, res) => {
+router.post('/:id/checklist/:itemId', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const task = loadManageableTask(req, res); if (!task) return;
   const item = getChecklistItem.get(Number(req.params.itemId), task.id);
   if (!item) return res.status(404).json({ error: 'Checklist item not found' });
@@ -219,7 +224,7 @@ router.post('/:id/checklist/:itemId', requireAuth, (req, res) => {
 });
 
 // Assignee (or admin) removes a checklist item.
-router.delete('/:id/checklist/:itemId', requireAuth, (req, res) => {
+router.delete('/:id/checklist/:itemId', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const task = loadManageableTask(req, res); if (!task) return;
   const item = getChecklistItem.get(Number(req.params.itemId), task.id);
   if (!item) return res.status(404).json({ error: 'Checklist item not found' });
@@ -228,7 +233,7 @@ router.delete('/:id/checklist/:itemId', requireAuth, (req, res) => {
 });
 
 // Assignee (or admin) updates status. Can't mark DONE with open checklist items.
-router.post('/:id/status', requireAuth, (req, res) => {
+router.post('/:id/status', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const status = String(req.body.status || '').toUpperCase();
   if (!STATUS.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const task = getTask.get(Number(req.params.id));
@@ -244,7 +249,7 @@ router.post('/:id/status', requireAuth, (req, res) => {
 });
 
 // ADMIN: edit task.
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const task = getTask.get(Number(req.params.id));
   if (!task) return res.status(404).json({ error: 'Not found' });
   updateTask.run({
@@ -270,7 +275,7 @@ router.put('/:id', requireAdmin, (req, res) => {
 });
 
 // ADMIN: delete task.
-router.delete('/:id', requireAdmin, (req, res) => {
+router.delete('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   deleteTask.run(Number(req.params.id));
   res.json({ ok: true });
 });

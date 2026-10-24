@@ -61,6 +61,7 @@ function notifyAdminsOfBirthdays() {
   if (!enabled()) return 0;
   const ts = now().toMillis();
   let sent = 0;
+  db.transaction(() => {
   for (const b of upcoming(LEAD_DAYS)) {
     if (b.daysUntil !== LEAD_DAYS && b.daysUntil !== 0) continue; // only the heads-up and the day itself
     // Skip if we already told them about this person's birthday today.
@@ -77,25 +78,33 @@ function notifyAdminsOfBirthdays() {
     markSent.run(b.id, now().toFormat('yyyy-LL-dd'), String(b.id), ts);
     sent += 1;
   }
+  }).immediate();
   if (sent) console.log(`Birthdays: sent ${sent} admin heads-up notification(s).`);
   return sent;
 }
 
 // Run once a day at BIRTHDAY_CHECK_HOUR (office zone).
+let stopScheduler;
 function startBirthdayScheduler() {
+  if (stopScheduler) return stopScheduler;
+  let timer, stopped = false, pending = Promise.resolve();
+  stopScheduler = async () => { stopped = true; clearTimeout(timer); await pending; stopScheduler = null; };
   if (!enabled()) { console.log('Birthdays: disabled (BIRTHDAYS=off).'); return; }
   const hour = Math.min(23, Math.max(0, Number(process.env.BIRTHDAY_CHECK_HOUR ?? 9)));
+  if (!Number.isInteger(hour)) throw new Error('Scheduler hour must be an integer');
   const scheduleNext = () => {
+    if (stopped) return;
     const n = now();
     let next = n.set({ hour, minute: 0, second: 0, millisecond: 0 });
     if (next <= n) next = next.plus({ days: 1 });
-    setTimeout(() => {
+    timer = setTimeout(() => {
       try { notifyAdminsOfBirthdays(); } catch (e) { console.error('Birthday check failed:', e.message); }
       scheduleNext();
     }, next.toMillis() - n.toMillis()).unref();
     console.log(`Birthday check scheduled for ${next.toFormat('yyyy-LL-dd HH:mm')} (${ZONE}); ${LEAD_DAYS}-day heads-up.`);
   };
   scheduleNext();
+  return stopScheduler;
 }
 
 module.exports = { upcoming, isBirthdayToday, notifyAdminsOfBirthdays, startBirthdayScheduler, LEAD_DAYS };

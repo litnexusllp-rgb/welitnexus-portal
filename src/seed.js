@@ -5,6 +5,7 @@
 // Safe to re-run: it skips anything that already exists.
 
 require('dotenv').config();
+if (process.env.NODE_ENV === 'production') throw new Error('Demo seed is disabled in production. Use ADMIN_EMAIL and ADMIN_PASSWORD bootstrap.');
 const { db } = require('./db');
 const { hashPassword } = require('./auth');
 const { now } = require('./time');
@@ -20,7 +21,7 @@ function ensureUser(u) {
   const existing = findByEmail.get(u.email);
   if (existing) { console.log(`= exists: ${u.email}`); return existing.id; }
   const info = insertUser.run({ leave_balance: 20, department: '', title: '', phone: '', ...u, password_hash: hashPassword(u.password), created_ts: ts });
-  console.log(`+ created ${u.role}: ${u.email}  (password: ${u.password})`);
+  console.log(`+ created ${u.role}: ${u.email}`);
   return info.lastInsertRowid;
 }
 
@@ -57,4 +58,4 @@ if (taskCount === 0) {
 }
 
 console.log('\nSeed complete. Log in at http://localhost:3000');
-console.log('Admin: saurav@welitnexus.com / Welit@2026');
+db.close();

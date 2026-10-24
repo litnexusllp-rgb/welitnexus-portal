@@ -39,7 +39,7 @@ router.post('/', (req, res) => {
   }
 });
 
-router.post('/:id/void', (req, res) => {
+router.post('/:id/void', require('../requestValidation').validateParams, (req, res) => {
   const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
   if (!reason || reason.length > 1000) return res.status(400).json({ error: 'Give a correction reason (up to 1,000 characters)' });
   const result = db.prepare('UPDATE bonuses SET voided_by=?,voided_ts=?,void_reason=? WHERE id=? AND voided_ts IS NULL').run(req.user.id,Date.now(),reason,req.params.id);

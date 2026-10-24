@@ -76,6 +76,13 @@ function syncAllBalances() {
   for (const u of db.prepare('SELECT id FROM users').all()) syncBalance(u.id);
 }
 
+async function syncAllBalancesAsync() {
+  for (const u of db.prepare('SELECT id FROM users').all()) {
+    syncBalance(u.id);
+    await new Promise(resolve => setImmediate(resolve));
+  }
+}
+
 function normalizeLeave(body, { allowPast = false, requireReason = true } = {}) {
   const start_date = String(body.start_date || ''), kind = String(body.kind || 'FULL').toUpperCase();
   const end_date = kind === 'HALF' ? start_date : String(body.end_date || start_date);
@@ -108,4 +115,4 @@ function assertAvailable(userId, leave, excludeRequestId = null) {
   }
 }
 
-module.exports = { EFFECTIVE, ENTITLEMENT, CATEGORIES, periodFor, describeLeave, balances, syncBalance, syncAllBalances, normalizeLeave, assertAvailable };
+module.exports = { EFFECTIVE, ENTITLEMENT, CATEGORIES, periodFor, describeLeave, balances, syncBalance, syncAllBalances, syncAllBalancesAsync, normalizeLeave, assertAvailable };

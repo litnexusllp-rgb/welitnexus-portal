@@ -54,6 +54,9 @@ function generateDueTasks() {
 
   const run = db.transaction(() => {
     for (const t of activeTemplates.all()) {
+      if (!require('./requestValidation').day(t.next_due) || !Number.isInteger(t.step) || t.step < 1 || !Number.isInteger(t.lead_days) || t.lead_days < 0) {
+        console.error(`Recurring: skipping invalid template ${t.id}`); continue;
+      }
       let nextDue = t.next_due;
       let guard = 0;
       // Create instances whose due date is within today + lead_days.
@@ -81,17 +84,22 @@ function generateDueTasks() {
       if (nextDue !== t.next_due) advanceTemplate.run(nextDue, now().toMillis(), t.id);
     }
   });
-  run();
+  run.immediate();
   if (created) console.log(`Recurring: generated ${created} task(s).`);
   return created;
 }
 
 // Boot the generator: run once now, then every 6 hours.
+let stopScheduler;
 function startRecurringScheduler() {
+  if (stopScheduler) return stopScheduler;
   try { generateDueTasks(); } catch (e) { console.error('Recurring generate failed:', e.message); }
-  setInterval(() => {
+  const timer = setInterval(() => {
     try { generateDueTasks(); } catch (e) { console.error('Recurring generate failed:', e.message); }
-  }, 6 * 60 * 60 * 1000).unref();
+  }, 6 * 60 * 60 * 1000);
+  timer.unref();
+  stopScheduler = () => { clearInterval(timer); stopScheduler = null; };
+  return stopScheduler;
 }
 
 module.exports = { generateDueTasks, startRecurringScheduler, advance };

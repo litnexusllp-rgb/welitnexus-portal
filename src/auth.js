@@ -17,6 +17,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-insecure-secret-change-me
 const COOKIE = 'wln_session';
 const TOKEN_TTL = '7d';
 
+// Synchronous helpers are reserved for offline seed/test fixtures; HTTP uses passwords.js.
 function hashPassword(plain) {
   return bcrypt.hashSync(plain, 10);
 }

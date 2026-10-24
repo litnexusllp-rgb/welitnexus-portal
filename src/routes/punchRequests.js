@@ -112,7 +112,7 @@ router.get('/events', requireAuth, (req, res) => {
 router.get('/mine', requireAuth, (req, res) => res.json({ requests: mineReqs.all(req.user.id).map(withOriginalTime) }));
 
 // Employee: cancel my own pending request.
-router.post('/:id/cancel', requireAuth, (req, res) => {
+router.post('/:id/cancel', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   const r = getReq.get(Number(req.params.id));
   if (!r || r.user_id !== req.user.id) return res.status(404).json({ error: 'Not found' });
   if (r.status !== 'PENDING') return res.status(409).json({ error: 'Only pending requests can be cancelled' });
@@ -125,7 +125,7 @@ router.get('/pending', requireAdmin, (_req, res) => res.json({ requests: pending
 router.get('/all', requireAdmin, (_req, res) => res.json({ requests: recentReqs.all().map(withOriginalTime) }));
 
 // ADMIN: decide and apply exactly once, with validation and audit in one write lock.
-router.post('/:id/decide', requireAdmin, (req, res) => {
+router.post('/:id/decide', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const decision = String(req.body.decision || '').toUpperCase();
   const note = String(req.body.note || '').slice(0, 300);
   if (!['APPROVED', 'REJECTED'].includes(decision)) return res.status(400).json({ error: 'decision must be APPROVED or REJECTED' });

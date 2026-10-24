@@ -33,7 +33,7 @@ router.post('/', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', requireAdmin, (req, res) => {
+router.delete('/:id', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   remove.run(Number(req.params.id));
   res.json({ ok: true });
 });

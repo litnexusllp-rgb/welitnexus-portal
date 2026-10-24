@@ -73,7 +73,7 @@ function flagAbsences(dayStr) {
       created.push(u.name);
     }
   });
-  run();
+  run.immediate();
 
   if (created.length) {
     notifyAdmins({
@@ -89,23 +89,30 @@ function flagAbsences(dayStr) {
 
 // Run once a day at ABSENCE_CHECK_HOUR (office zone; default 10 AM, safely after
 // the 8 AM shift cutover), checking the shift that just completed.
+let stopScheduler;
 function startAbsenceScheduler() {
+  if (stopScheduler) return stopScheduler;
+  let timer, stopped = false, pending = Promise.resolve();
+  stopScheduler = async () => { stopped = true; clearTimeout(timer); await pending; stopScheduler = null; };
   if (String(process.env.AUTO_ABSENCE || 'on').toLowerCase() === 'off') {
     console.log('Auto-absence flagging: disabled (AUTO_ABSENCE=off).');
     return;
   }
   const hour = Math.min(23, Math.max(0, Number(process.env.ABSENCE_CHECK_HOUR ?? 10)));
+  if (!Number.isInteger(hour)) throw new Error('Scheduler hour must be an integer');
   const scheduleNext = () => {
+    if (stopped) return;
     const n = now();
     let next = n.set({ hour, minute: 0, second: 0, millisecond: 0 });
     if (next <= n) next = next.plus({ days: 1 });
-    setTimeout(() => {
+    timer = setTimeout(() => {
       try { flagAbsences(); } catch (e) { console.error('Auto-absence run failed:', e.message); }
       scheduleNext();
     }, next.toMillis() - n.toMillis()).unref();
     console.log(`Auto-absence flagging scheduled for ${next.toFormat('yyyy-LL-dd HH:mm')} (${ZONE}).`);
   };
   scheduleNext();
+  return stopScheduler;
 }
 
 module.exports = { flagAbsences, startAbsenceScheduler, lastCompletedAttendanceDay };

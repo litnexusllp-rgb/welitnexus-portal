@@ -6,7 +6,7 @@ const { requireAuth, requireAdmin } = require('../auth');
 const { now, todayStr, inclusiveDays } = require('../time');
 const { notify } = require('../notify');
 const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
-const { CATEGORIES, describeLeave, syncBalance, syncAllBalances, normalizeLeave, assertAvailable } = require('../leavePolicy');
+const { CATEGORIES, describeLeave, syncBalance, syncAllBalancesAsync, normalizeLeave, assertAvailable } = require('../leavePolicy');
 const { estimateDeduction, savedDeduction } = require('../salaryDeduction');
 
 const router = express.Router();
@@ -79,7 +79,7 @@ router.get('/mine', requireAuth, (req, res) => {
 });
 
 // Employee cancels their own pending request.
-router.post('/:id/cancel', requireAuth, (req, res) => {
+router.post('/:id/cancel', require('../requestValidation').validateParams, requireAuth, (req, res) => {
   try {
     const leave = db.transaction(() => {
       const existing = getLeave.get(Number(req.params.id));
@@ -125,16 +125,16 @@ router.post('/admin', requireAdmin, (req, res) => {
 
 // ADMIN: run the no-show check now (normally runs daily on a schedule).
 // Optional ?day=yyyy-mm-dd, else the most recently completed shift day.
-router.post('/flag-absences', requireAdmin, (req, res) => {
+router.post('/flag-absences', requireAdmin, require('../asyncRoute')(async (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day)) ? String(req.query.day) : lastCompletedAttendanceDay();
   const created = flagAbsences(day);
-  syncAllBalances();
+  await syncAllBalancesAsync();
   res.json({ day, created, leaves: present(allPending.all()) });
-});
+}));
 
 // ADMIN: list pending + recent.
-router.get('/pending', requireAdmin, (_req, res) => { syncAllBalances(); res.json({ leaves: present(allPending.all()) }); });
-router.get('/all', requireAdmin, (_req, res) => { syncAllBalances(); res.json({ leaves: present(allLeaves.all()) }); });
+router.get('/pending', requireAdmin, require('../asyncRoute')(async (_req, res) => { await syncAllBalancesAsync(); res.json({ leaves: present(allPending.all()) }); }));
+router.get('/all', requireAdmin, require('../asyncRoute')(async (_req, res) => { await syncAllBalancesAsync(); res.json({ leaves: present(allLeaves.all()) }); }));
 
 // ADMIN: who is on leave now or upcoming (approved leaves ending today or later).
 const upcomingApproved = db.prepare(
@@ -162,8 +162,8 @@ function takenInWindow(winStart, winEnd) {
   }
   return m;
 }
-router.get('/summary', requireAdmin, (_req, res) => {
-  syncAllBalances();
+router.get('/summary', requireAdmin, require('../asyncRoute')(async (_req, res) => {
+  await syncAllBalancesAsync();
   const today = todayStr();
   const win0 = now().minus({ days: 29 }).toFormat('yyyy-LL-dd');
   const yearStart = now().startOf('year').toFormat('yyyy-LL-dd');
@@ -175,17 +175,17 @@ router.get('/summary', requireAdmin, (_req, res) => {
     balance: u.leave_balance, balances: syncBalance(u.id), taken30: taken30[u.id] || 0, takenYear: takenYear[u.id] || 0,
   }));
   res.json({ rows });
-});
+}));
 
 // ADMIN: one employee's full leave history (for the balance breakdown).
 const leavesForEmployee = db.prepare(
   `SELECT l.*, u.name FROM leaves l JOIN users u ON u.id = l.user_id
    WHERE l.user_id = ? ORDER BY l.start_date DESC LIMIT 100`
 );
-router.get('/for/:userId', requireAdmin, (req, res) => res.json({ leaves: present(leavesForEmployee.all(Number(req.params.userId))) }));
+router.get('/for/:userId', require('../requestValidation').validateParams, requireAdmin, (req, res) => res.json({ leaves: present(leavesForEmployee.all(Number(req.params.userId))) }));
 
 // ADMIN: approve / reject. Deducts balance on approval.
-router.post('/:id/decide', requireAdmin, (req, res) => {
+router.post('/:id/decide', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const decision = String(req.body.decision || '').toUpperCase();
   const note = String(req.body.note || '').slice(0, 300);
   if (!['APPROVED', 'REJECTED'].includes(decision)) {

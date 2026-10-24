@@ -17,10 +17,10 @@ test('invoice removal preserves clients, backups and legacy records', async (t) 
 
   // Capture the real server application without starting background schedulers.
   const express = require('express');
-  const originalListen = express.application.listen;
-  let app;
-  express.application.listen = function () { app = this; };
-  try { require('../src/server'); } finally { express.application.listen = originalListen; }
+  const listen = express.application.listen;
+  const originalListen = listen;
+  const { app } = require('../src/server');
+  await require('../src/bootstrap').bootstrapAdmin();
   const { db } = require('../src/db');
   const server = originalListen.call(app, 0, '127.0.0.1');
   t.after(async () => {

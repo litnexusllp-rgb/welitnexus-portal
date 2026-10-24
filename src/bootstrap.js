@@ -5,10 +5,10 @@
 // immediately — no seeding step required on Railway.
 
 const { db } = require('./db');
-const { hashPassword } = require('./auth');
+const { hashPasswordAsync } = require('./passwords');
 const { now } = require('./time');
 
-function bootstrapAdmin() {
+async function bootstrapAdmin() {
   const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (count > 0) return; // already set up — do nothing
 
@@ -22,12 +22,18 @@ function bootstrapAdmin() {
   const email = (process.env.ADMIN_EMAIL || 'admin@welitnexus.com').toLowerCase();
   const password = process.env.ADMIN_PASSWORD || 'ChangeMe@2026';
 
-  db.prepare(
+  const passwordHash = await hashPasswordAsync(password);
+  // Another process may have bootstrapped during hashing.
+  const created = db.transaction(() => {
+    if (db.prepare('SELECT COUNT(*) AS c FROM users').get().c) return false;
+    db.prepare(
     `INSERT INTO users (name, email, password_hash, role, department, title, leave_balance, active, created_ts)
      VALUES (?, ?, ?, 'ADMIN', 'Leadership', 'Partner', 20, 1, ?)`
-  ).run(name, email, hashPassword(password), now().toMillis());
+    ).run(name, email, passwordHash, now().toMillis());
+    return true;
+  }).immediate();
 
-  console.log(`Bootstrap: created first admin ${email}. Log in and change the password.`);
+  if (created) console.log(`Bootstrap: created first admin ${email}. Log in and change the password.`);
 }
 
 module.exports = { bootstrapAdmin };
