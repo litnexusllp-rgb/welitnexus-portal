@@ -8,15 +8,24 @@
   const range = (from, to) => from === to ? date(from) : `${date(from)} – ${date(to)}`;
 
   function calculation(row) {
+    const confirmed = row.status === 'REVIEWED';
+    const automatic = (row.calculation_status || row.status) === 'CALCULATED';
     return `<div class="salary-calculation">
-      ${row.review_reasons.length ? `<div class="salary-review"><strong>Review before payment</strong><ul>${row.review_reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></div>` : ''}
+      ${row.review ? `<div class="salary-confirmation"><strong>${confirmed ? 'Confirmed salary to pay' : 'Previous confirmation'}: ${money(row.review.amount_paise)}</strong><p>${esc(row.review.note)}</p><p class="salary-muted">${esc(row.review.reviewer_name)} · ${esc(new Date(row.review.reviewed_ts).toLocaleString())}${!confirmed ? ' · Not included in the current total' : ''}</p></div>` : ''}
+      ${row.review_reasons.length ? `<div class="salary-review"><strong>${confirmed ? 'Reasons reviewed' : 'Review before payment'}</strong><ul>${row.review_reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></div>` : ''}
+      ${row.status !== 'CALCULATED' ? `<form class="salary-resolution" data-salary-form="${row.id}">
+        <div class="field"><label for="salaryAmount${row.id}">Confirmed salary to pay (INR)</label><input id="salaryAmount${row.id}" name="amount" inputmode="decimal" value="${confirmed ? (row.review.amount_paise / 100).toFixed(2) : ''}" placeholder="Enter the final amount" required></div>
+        <div class="field"><label for="salaryNote${row.id}">Calculation or reason</label><textarea id="salaryNote${row.id}" name="note" maxlength="1000" placeholder="Explain the amount or part-month calculation" required>${confirmed ? esc(row.review.note) : ''}</textarea></div>
+        <p class="salary-muted">Enter the final amount after leave deductions for this month. Your confirmation is included in the total; it does not record a payment.</p>
+        <p class="salary-form-status" role="alert"></p><div class="row-actions"><button class="btn btn-primary" type="submit">${confirmed ? 'Update confirmation' : 'Confirm salary'}</button>${row.review && row.review.state !== 'REOPENED' ? `<button class="btn btn-ghost" type="button" data-salary-reopen="${row.id}">Reopen review</button>` : ''}</div>
+      </form>` : ''}
       <p>Employment this month: ${esc(range(row.employed_from, row.employed_to))} · ${days(row.employed_calendar_days)}.</p>
       <h3>Salary rates</h3>
       ${row.rate_lines.length ? row.rate_lines.map(line => `<p>${esc(range(line.from, line.to))} · ${days(line.calendar_days)}<br>Monthly gross ${money(line.monthly_gross_paise)} ÷ 30 = ${money(line.monthly_gross_paise / 30)} per day</p>`).join('') : '<p>Add the applicable salary in Admin → Employees.</p>'}
       <h3>Approved unpaid leave deduction</h3>
       ${row.deduction_lines.map(line => `<p>${money(line.monthly_gross_paise)} ÷ 30 × ${days(line.unpaid_days)} unpaid<br><span class="salary-muted">${line.dates.map(date).map(esc).join(', ')}</span></p>`).join('')}
       <p><strong>${money(row.deduction_paise)}</strong>${row.deduction_paise === null ? ' · Cannot calculate the complete deduction until missing records are resolved.' : row.unpaid_leave_days ? ' · Total rounded once to the nearest paise.' : ' · No approved unpaid leave this month.'}</p>
-      ${row.status === 'CALCULATED' ? `<p class="salary-equation">${money(row.monthly_gross_paise)} gross − ${money(row.deduction_paise)} leave deduction = <strong>${money(row.salary_to_pay_paise)}</strong></p>` : row.full_month_reference_after_leave_paise !== null ? `<p class="salary-equation">Full-month reference: ${money(row.monthly_gross_paise)} − ${money(row.deduction_paise)} = <strong>${money(row.full_month_reference_after_leave_paise)}</strong><br><span class="salary-muted">Before any part-month adjustment. For review only; excluded from the salary-to-pay total.</span></p>` : '<p class="salary-muted">Daily-rate calculations are shown above. No prorated monthly gross is assumed; salary to pay needs review.</p>'}
+      ${automatic ? `<p class="salary-equation">Automatic calculation: ${money(row.monthly_gross_paise)} gross − ${money(row.deduction_paise)} leave deduction = <strong>${money(row.calculated_salary_to_pay_paise ?? row.salary_to_pay_paise)}</strong></p>` : row.full_month_reference_after_leave_paise !== null ? `<p class="salary-equation">Full-month reference: ${money(row.monthly_gross_paise)} − ${money(row.deduction_paise)} = <strong>${money(row.full_month_reference_after_leave_paise)}</strong><br><span class="salary-muted">Before any part-month adjustment. ${confirmed ? 'The confirmed amount above is used in the total.' : 'For review only; excluded from the salary-to-pay total.'}</span></p>` : '<p class="salary-muted">No prorated monthly gross is assumed. Use the available calculations above to review the final amount.</p>'}
       ${row.pending_requests ? `<p>${row.pending_requests} pending leave request(s) are not deducted.</p>` : ''}
       ${row.approved_leaves.length ? `<details><summary>Approved leave records (${row.approved_leaves.length})</summary><div class="table-wrap"><table><thead><tr><th>Dates</th><th>Paid days</th><th>Unpaid days</th></tr></thead><tbody>${row.approved_leaves.map(leave => `<tr><td>${esc(range(leave.start_date, leave.end_date))}</td><td>${leave.paid_days}</td><td>${leave.unpaid_days}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       <p class="salary-muted">Daily rates are displayed rounded. Deductions use exact salary amounts and half-day units, then round once for the month. Only leave on the 1st–12th, from October 2026, is unpaid.</p>
@@ -27,18 +36,18 @@
     const total = report.totals;
     return `<p class="salary-scope">${esc(report.scope)}</p>
       ${report.period_state !== 'ENDED' ? `<p class="salary-notice">${report.period_state === 'IN_PROGRESS' ? 'This month is still in progress.' : 'This is a future-month projection.'} Salaries and approved leave may change.</p>` : ''}
-      ${total.review ? `<p class="salary-review" role="status">${total.review} employee(s) need review and are excluded from the calculated total. Open their calculation below.</p>` : ''}
+      ${total.review ? `<p class="salary-review" role="status">${total.review} employee(s) need review and are excluded from the total. Select Resolve review, enter the confirmed amount and add your calculation.</p>` : ''}
       ${total.pending_requests ? `<p class="salary-notice">${total.pending_requests} pending leave request(s) are not deducted. Review approvals before paying.</p>` : ''}
       <div class="cards salary-stats">
-        <div class="card stat"><div class="label">${total.review ? 'Salary to pay · calculated subtotal' : 'Salary to pay'}</div><div class="value small">${total.calculated ? money(total.salary_to_pay_paise) : '—'}</div><div class="salary-muted">${total.calculated} of ${total.employees} employees calculated</div></div>
-        <div class="card stat"><div class="label">Leave deductions · calculated employees</div><div class="value small">${total.calculated ? money(total.deduction_paise) : '—'}</div></div>
+        <div class="card stat"><div class="label">${total.review ? 'Salary to pay · calculated subtotal' : 'Salary to pay'}</div><div class="value small">${(total.included ?? total.calculated) ? money(total.salary_to_pay_paise) : '—'}</div><div class="salary-muted">${total.calculated} calculated · ${total.reviewed || 0} reviewed · ${total.review} need review</div></div>
+        <div class="card stat"><div class="label">Leave deductions · automatic rows</div><div class="value small">${total.calculated ? money(total.deduction_paise) : '—'}</div><div class="salary-muted">Confirmed amounts already include leave deductions.</div></div>
         <div class="card stat"><div class="label">Needs review</div><div class="value small">${total.review}</div></div>
       </div>
       ${report.rows.length ? `<div class="table-wrap salary-table-wrap"><table class="salary-table"><thead><tr><th>Employee</th><th>Monthly gross</th><th>Unpaid leave</th><th>Deduction</th><th>Salary to pay</th><th></th></tr></thead><tbody>
         ${report.rows.map(row => `<tr><td><strong>${esc(row.name)}</strong>${row.emp_code ? `<div class="salary-muted">${esc(row.emp_code)}</div>` : ''}${row.pending_requests ? `<div class="salary-muted">${row.pending_requests} pending leave request(s)</div>` : ''}</td>
           <td>${row.monthly_gross_paise === null ? 'Review rates' : money(row.monthly_gross_paise)}</td><td>${days(row.unpaid_leave_days)}</td><td>${money(row.deduction_paise)}</td>
-          <td>${row.status === 'CALCULATED' ? `<strong>${money(row.salary_to_pay_paise)}</strong>` : '<span class="badge b-pending">Needs review</span>'}</td>
-          <td><button class="btn btn-ghost btn-sm" data-salary-detail="${row.id}" aria-controls="salaryDetail${row.id}" aria-expanded="false">${row.status === 'CALCULATED' ? 'View calculation' : 'Review calculation'}</button></td></tr>
+          <td>${row.status !== 'REVIEW' ? `<strong>${money(row.salary_to_pay_paise)}</strong>${row.status === 'REVIEWED' ? '<div><span class="badge b-approved">Reviewed</span></div>' : ''}` : '<span class="badge b-pending">Needs review</span>'}</td>
+          <td><button class="btn btn-ghost btn-sm" data-salary-detail="${row.id}" aria-controls="salaryDetail${row.id}" aria-expanded="false">${row.status === 'CALCULATED' ? 'View calculation' : row.status === 'REVIEWED' ? 'Edit review' : 'Resolve review'}</button></td></tr>
           <tr id="salaryDetail${row.id}" hidden><td colspan="6">${calculation(row)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">No employees were employed during this month.</div>'}
       <p class="salary-muted">Calculated from current salary history and approved leave. Request-time deduction estimates may differ. Refresh after changing salaries or approvals. This page does not record payments.</p>`;
@@ -47,15 +56,16 @@
   function csv(report) {
     const cell = value => { let text = String(value ?? ''); if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text; return '"' + text.replace(/"/g, '""') + '"'; };
     const amount = value => value === null ? '' : (value / 100).toFixed(2);
-    const rows = [['Month','Employee','Code','Monthly gross INR','Approved paid leave days','Approved unpaid leave days','Leave deduction INR','Salary to pay before other adjustments INR','Full-month reference after leave INR - review only','Status','Review notes','Pending leave requests']];
-    report.rows.forEach(row => rows.push([report.month,row.name,row.emp_code,amount(row.monthly_gross_paise),row.paid_leave_days,row.unpaid_leave_days,amount(row.deduction_paise),amount(row.salary_to_pay_paise),amount(row.full_month_reference_after_leave_paise),row.status,row.review_reasons.join(' '),row.pending_requests]));
+    const rows = [['Month','Employee','Code','Monthly gross INR','Approved paid leave days','Approved unpaid leave days','Leave deduction INR','Salary to pay before other adjustments INR','Full-month reference after leave INR - review only','Status','Review notes','Pending leave requests','Confirmation state','Last confirmed amount INR','Confirmed by','Confirmed at','Calculation note']];
+    report.rows.forEach(row => rows.push([report.month,row.name,row.emp_code,amount(row.monthly_gross_paise),row.paid_leave_days,row.unpaid_leave_days,amount(row.deduction_paise),amount(row.salary_to_pay_paise),amount(row.full_month_reference_after_leave_paise),row.status,row.review_reasons.join(' '),row.pending_requests,row.review?.state || '',row.review ? amount(row.review.amount_paise) : '',row.review?.reviewer_name || '',row.review ? new Date(row.review.reviewed_ts).toISOString() : '',row.review?.note || '']));
     return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
   }
 
   async function mount(root, { api, onManage }) {
     root.innerHTML = `<div class="toolbar salary-controls"><div class="field"><label for="salaryMonth">Salary month</label><input type="month" id="salaryMonth"></div><button class="btn btn-primary" id="salaryRefresh">Calculate</button><button class="btn btn-ghost" id="salaryCsv" disabled>Download CSV</button><button class="btn btn-ghost" id="salaryManage">Manage salaries</button></div><p id="salaryStatus" role="status" aria-live="polite"></p><div id="salaryReport"></div>`;
     const $ = selector => root.querySelector(selector); let report = null, version = 0;
-    async function load() {
+    async function load(openId = null) {
+      if (typeof openId !== 'number') openId = null;
       const current = ++version, month = $('#salaryMonth').value;
       report = null; $('#salaryCsv').disabled = true; $('#salaryRefresh').disabled = true;
       $('#salaryReport').innerHTML = ''; $('#salaryStatus').textContent = 'Calculating salaries…';
@@ -69,6 +79,35 @@
           const detail = $('#salaryDetail' + button.dataset.salaryDetail); detail.hidden = !detail.hidden;
           button.setAttribute('aria-expanded', String(!detail.hidden));
         }));
+        root.querySelectorAll('[data-salary-form]').forEach(form => {
+          const row = result.rows.find(row => row.id === Number(form.dataset.salaryForm));
+          const status = form.querySelector('.salary-form-status');
+          const setBusy = value => form.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = value; });
+          form.addEventListener('submit', async event => {
+            event.preventDefault(); if (form.dataset.saving === '1') return;
+            const payload = { month:result.month,amount:form.querySelector('[name="amount"]').value,note:form.querySelector('[name="note"]').value,
+              source_fingerprint:row.source_fingerprint,expected_revision:row.review?.revision || 0 };
+            form.dataset.saving = '1'; setBusy(true); $('#salaryCsv').disabled = true; status.textContent = 'Saving confirmation…';
+            try {
+              await api.post(`/salaries/${row.id}/review`,payload);
+              if (root.isConnected && $('#salaryMonth').value === result.month) await load(row.id);
+            } catch (error) { if (form.isConnected) status.textContent = error.message; }
+            finally { form.dataset.saving = '0'; setBusy(false); }
+          });
+          form.querySelector('[data-salary-reopen]')?.addEventListener('click', async () => {
+            if (form.dataset.saving === '1') return;
+            form.dataset.saving = '1'; setBusy(true); $('#salaryCsv').disabled = true; status.textContent = 'Reopening review…';
+            try {
+              await api.post(`/salaries/${row.id}/review/reopen`,{ month:result.month,expected_revision:row.review.revision });
+              if (root.isConnected && $('#salaryMonth').value === result.month) await load(row.id);
+            } catch (error) { if (form.isConnected) status.textContent = error.message; }
+            finally { form.dataset.saving = '0'; setBusy(false); }
+          });
+        });
+        if (openId !== null) {
+          const detail = $('#salaryDetail' + openId), button = root.querySelector(`[data-salary-detail="${openId}"]`);
+          if (detail && button) { detail.hidden = false; button.setAttribute('aria-expanded','true'); }
+        }
       } catch (error) { if (current === version && root.isConnected) $('#salaryStatus').textContent = error.message; }
       finally { if (current === version && root.isConnected) $('#salaryRefresh').disabled = false; }
     }
