@@ -12,6 +12,8 @@ const DB_PATH = path.resolve(process.env.DB_PATH || path.join(__dirname, '..', '
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
+// Explicit lock wait; better-sqlite3 also defaults to five seconds.
+db.pragma('busy_timeout = 5000');
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON'); // enforce the FK constraints declared below
 
@@ -243,7 +245,7 @@ CREATE INDEX IF NOT EXISTS idx_reminder_acks_user ON reminder_acks(user_id, day)
 `);
 
 // --- Lightweight migrations for databases created before these columns existed.
-for (const stmt of [
+require('./schemaMigrations').applyColumnMigrations(db, [
   `ALTER TABLE tasks ADD COLUMN client_id INTEGER`,
   `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
   `ALTER TABLE users ADD COLUMN emp_code TEXT DEFAULT ''`,
@@ -263,9 +265,7 @@ for (const stmt of [
   `ALTER TABLE users ADD COLUMN birthday TEXT DEFAULT ''`, // yyyy-mm-dd; only day+month are ever shown
   `ALTER TABLE users ADD COLUMN asana_email TEXT DEFAULT ''`, // override for matching this person in Asana
   `ALTER TABLE holidays ADD COLUMN duration TEXT NOT NULL DEFAULT 'FULL' CHECK(duration IN ('FULL','HALF'))`,
-]) {
-  try { db.exec(stmt); } catch (_e) { /* column already exists — ignore */ }
-}
+]);
 // Index on the (possibly just-added) client_id column.
 // Security migration: unexpected failures must stop startup, not silently skip revocation.
 if (!db.pragma('table_info(users)').some(c => c.name === 'session_version')) {

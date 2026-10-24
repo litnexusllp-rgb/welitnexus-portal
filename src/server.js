@@ -113,7 +113,7 @@ app.use((err, req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`WeLitNexus portal running on http://localhost:${PORT}`);
   startRecurringScheduler(); // generate recurring tasks on boot + every 6h
   startAbsenceScheduler();   // daily: flag no-shows as pending leave for approval
@@ -121,3 +121,5 @@ app.listen(PORT, () => {
   startBirthdayScheduler();  // daily: admin heads-up for upcoming birthdays
   getScheduler().start();    // cloud EOD capture at 03:00 IST, Slack at 03:15
 });
+
+require('./shutdown').installShutdown({ server, db });
