@@ -371,4 +371,30 @@ if (!db.pragma('table_info(leaves)').some(c => c.name === 'deduction_quote_json'
   db.exec('ALTER TABLE leaves ADD COLUMN deduction_quote_json TEXT');
 }
 
+// Monthly review confirmations are separate from salary rates and payments.
+db.exec(`CREATE TABLE IF NOT EXISTS salary_month_reviews (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  month TEXT NOT NULL,
+  amount_paise INTEGER NOT NULL CHECK(amount_paise >= 0),
+  note TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL,
+  input_snapshot_json TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  reviewed_by INTEGER NOT NULL REFERENCES users(id),
+  reviewed_ts INTEGER NOT NULL,
+  reopened_by INTEGER REFERENCES users(id),
+  reopened_ts INTEGER,
+  PRIMARY KEY(user_id,month)
+);
+CREATE TABLE IF NOT EXISTS salary_month_review_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  month TEXT NOT NULL,
+  action TEXT NOT NULL,
+  before_json TEXT,
+  after_json TEXT NOT NULL,
+  changed_by INTEGER NOT NULL REFERENCES users(id),
+  changed_ts INTEGER NOT NULL
+);`);
+
 module.exports = { db, DB_PATH };
