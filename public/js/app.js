@@ -679,19 +679,39 @@
   }
 
   // Second confirmation for clocking out — people were hitting it by mistake
-  // when they meant to take a break. Focus lands on Cancel, not the red button.
+  // when they meant to take a break. Both work updates must be confirmed first.
   function confirmClockOut(status) {
+    let submitted = false;
     const canBreak = (status.allowed || []).includes('BREAK_START');
     modal(`<h3>End your shift?</h3>
       <p style="color:var(--slate);margin:0 0 18px;font-size:.92rem;line-height:1.55;">Clocking out ends your shift for the day and stops your worked-hours timer.${canBreak ? ' If you just want to pause, use <strong>Start Break</strong> instead.' : ''}</p>
+      <div style="display:grid;gap:14px;margin:0 0 18px;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;line-height:1.5;">
+          <input type="checkbox" id="coFiles" style="margin-top:4px;"> <span>I have updated management on all pending files.</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;line-height:1.5;">
+          <input type="checkbox" id="coTimesheet" style="margin-top:4px;"> <span>I have updated my timesheet.</span>
+        </label>
+      </div>
+      <p class="page-sub">Both confirmations are required before clocking out.</p>
       <div class="modal-actions" style="flex-wrap:wrap;gap:10px;">
         <button class="btn btn-ghost" id="coCancel">Cancel</button>
         ${canBreak ? '<button class="btn btn-primary" id="coBreak">☕ Start Break instead</button>' : ''}
-        <button class="btn btn-danger" id="coConfirm">⏹ Yes, clock out</button>
+        <button class="btn btn-danger" id="coConfirm" disabled>⏹ Yes, clock out</button>
       </div>`);
     $('#coCancel').addEventListener('click', closeModal);
     if (canBreak) $('#coBreak').addEventListener('click', () => { closeModal(); punch('BREAK_START'); });
-    $('#coConfirm').addEventListener('click', () => { closeModal(); punch('OUT'); });
+    const files = $('#coFiles');
+    const timesheet = $('#coTimesheet');
+    const confirm = $('#coConfirm');
+    const updateConfirm = () => { confirm.disabled = submitted || !files.checked || !timesheet.checked; };
+    files.addEventListener('change', updateConfirm);
+    timesheet.addEventListener('change', updateConfirm);
+    confirm.addEventListener('click', () => {
+      if (submitted || !files.checked || !timesheet.checked) return;
+      submitted = true; updateConfirm();
+      closeModal(); punch('OUT');
+    });
   }
 
   async function punch(type) {
