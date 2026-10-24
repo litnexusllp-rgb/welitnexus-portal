@@ -16,7 +16,7 @@ function harness(hash='#/myperf',admin=false){
   return {c,links,listeners,renders,history};
 }
 test('each sidebar section is a native link with a distinct address',()=>{
- const h=harness();assert.equal(h.links.length,16);for(const l of h.links)assert.ok(html.includes(`href="#/${l.dataset.view}"`));
+ const h=harness();assert.equal(h.links.length,17);for(const l of h.links)assert.ok(html.includes(`href="#/${l.dataset.view}"`));
  assert.match(app,/navigate\(viewFromAddress\(\), true\)/);
 });
 test('deep links, refresh and history restore the requested section',()=>{
@@ -37,4 +37,6 @@ test('unknown and admin-only routes fall back safely; signed-out links survive l
  h.c.ME=null;h.c.window.location.hash='#/myperf';h.listeners.hashchange();assert.equal(h.c.window.location.hash,'#/myperf');
  h.c.ME={role:'EMPLOYEE'};h.c.navigate(h.c.viewFromAddress(),true);assert.equal(h.renders.at(-1),'myperf');
  const a=harness('#/bonuses',true);a.c.navigate(a.c.viewFromAddress(),true);assert.equal(a.renders[0],'bonuses');
+ const salaries=harness('#/salaries');salaries.c.navigate(salaries.c.viewFromAddress(),true);assert.equal(salaries.renders[0],'dashboard');
+ const adminSalaries=harness('#/salaries',true);adminSalaries.c.navigate(adminSalaries.c.viewFromAddress(),true);assert.equal(adminSalaries.renders[0],'salaries');
 });
