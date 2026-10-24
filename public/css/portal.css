@@ -545,3 +545,7 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .salary-calculation p { margin: 8px 0; line-height: 1.5; }
 .salary-calculation summary { cursor: pointer; color: var(--teal-dark); }
 .salary-equation { background: var(--mist); padding: 12px; border-radius: 8px; }
+.salary-resolution, .salary-confirmation { padding: 14px; margin: 14px 0; border: 1px solid var(--line); border-radius: 9px; background: var(--white); }
+.salary-resolution .field { max-width: 540px; margin-bottom: 12px; }
+.salary-confirmation { border-left: 4px solid var(--teal); }
+.salary-form-status { color: var(--danger); }

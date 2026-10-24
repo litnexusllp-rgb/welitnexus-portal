@@ -1,6 +1,8 @@
 # Repository review — 24 October 2026
 
 Reviewed base: `fda3da66427b1a55b4a7c74d12a754a7295254a3` (upstream main at review start).
+Concurrent update incorporated: `d63f2e335513468eb7d0005bbab3e6530749fdca` (monthly salary review confirmations). Its schema additions remain inside the serialized initialization transaction; new salary route parameters receive the same validation.
+
 Scope: all backend modules and route families, frontend request/rendering patterns,
 package and lock manifests, deployment configuration, backup script, and existing tests.
 This is a source review with isolated regression tests, not a production load test,
@@ -61,7 +63,7 @@ are covered by local mail construction tests without SMTP delivery. A fresh
 
 ## Validation
 
-Final validation: 176 tests passed on Node 20.20.2; zero failures or skipped tests.
+Final validation: 186 tests passed on Node 20.20.2 after incorporating the concurrent salary-review feature; zero failures or skipped tests.
 
 Run the full Node 20 suite with `node --test`. Tests use temporary synthetic databases and
 local HTTP servers. Added cases exercise password responsiveness and queue limits,

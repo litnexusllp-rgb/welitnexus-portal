@@ -3,6 +3,7 @@
 const { DateTime, ZONE, now, todayStr } = require('./time');
 const { EFFECTIVE } = require('./leavePolicy');
 const { employmentError, overlapsEmployment } = require('./employment');
+const { createHash } = require('node:crypto');
 
 const validDay = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && DateTime.fromISO(value, { zone: ZONE }).isValid;
 function monthRange(month) {
@@ -11,7 +12,7 @@ function monthRange(month) {
   return { month, start: first.toISODate(), end: first.endOf('month').toISODate() };
 }
 
-// Read-only salary worksheet. Recalculate approved leave at the salary rate
+// Report reads never change data. Recalculate approved leave at the salary rate
 // effective on each leave date, never by adding stale request-time quotes.
 function buildSalaries(db, month = todayStr().slice(0, 7)) {
   const period = monthRange(month);
@@ -22,16 +23,41 @@ function buildSalaries(db, month = todayStr().slice(0, 7)) {
     const salaries = db.prepare('SELECT user_id,effective_from,monthly_gross_paise FROM employee_salary_rates WHERE effective_from<=? ORDER BY effective_from DESC').all(period.end);
     const leaves = db.prepare(`SELECT id,user_id,start_date,end_date,kind,category,status FROM leaves
       WHERE status IN ('APPROVED','PENDING') AND start_date<=? AND end_date>=? ORDER BY start_date,id`).all(period.end, period.start);
-    const rows = users.map(user => employeeSalary(user, period, salaries.filter(s => s.user_id === user.id), leaves.filter(l => l.user_id === user.id)));
+    const reviews = db.prepare(`SELECT r.*,u.name AS reviewer_name FROM salary_month_reviews r
+      JOIN users u ON u.id=r.reviewed_by WHERE r.month=?`).all(month);
+    const rows = users.map(user => {
+      const rates = salaries.filter(s => s.user_id === user.id), userLeaves = leaves.filter(l => l.user_id === user.id);
+      const row = employeeSalary(user, period, rates, userLeaves);
+      const inputs = { version:1, month, user:{ id:user.id, active:user.active, join_date:user.join_date, exit_date:user.exit_date }, rates, leaves:userLeaves };
+      row.source_fingerprint = createHash('sha256').update(JSON.stringify(inputs)).digest('hex');
+      row.calculation_status = row.status;
+      row.calculated_salary_to_pay_paise = row.salary_to_pay_paise;
+      row.review = null;
+      const saved = reviews.find(review => review.user_id === user.id);
+      if (saved) {
+        const state = saved.reopened_ts !== null ? 'REOPENED' : saved.source_fingerprint === row.source_fingerprint ? 'CONFIRMED' : 'STALE';
+        row.review = { amount_paise:saved.amount_paise, note:saved.note, revision:saved.revision, reviewed_by:saved.reviewed_by,
+          reviewer_name:saved.reviewer_name, reviewed_ts:saved.reviewed_ts, state };
+        if (state === 'CONFIRMED') { row.status = 'REVIEWED'; row.salary_to_pay_paise = saved.amount_paise; }
+        else {
+          row.status = 'REVIEW'; row.salary_to_pay_paise = null;
+          row.full_month_reference_after_leave_paise ??= row.calculated_salary_to_pay_paise;
+          row.review_reasons.unshift(state === 'STALE' ? 'Source records changed. Check and confirm the salary again.' : 'Review was reopened. Confirm a new amount.');
+        }
+      }
+      return row;
+    });
     const calculated = rows.filter(row => row.status === 'CALCULATED');
+    const reviewed = rows.filter(row => row.status === 'REVIEWED');
+    const included = [...calculated, ...reviewed];
     return { ...period, currency: 'INR', divisor: 30, basis: 'MONTHLY_GROSS', calculated_ts: now().toMillis(),
       period_state: month < todayStr().slice(0, 7) ? 'ENDED' : month === todayStr().slice(0, 7) ? 'IN_PROGRESS' : 'UPCOMING',
       scope: 'Monthly gross less approved unpaid leave only. Tax, bonuses, attendance penalties and other adjustments are not included.',
-      totals: { employees: rows.length, calculated: calculated.length, review: rows.length - calculated.length,
+      totals: { employees: rows.length, calculated: calculated.length, reviewed:reviewed.length, included:included.length, review: rows.length - included.length,
         pending_requests: rows.reduce((sum, row) => sum + row.pending_requests, 0),
         gross_paise: calculated.reduce((sum, row) => sum + row.monthly_gross_paise, 0),
         deduction_paise: calculated.reduce((sum, row) => sum + row.deduction_paise, 0),
-        salary_to_pay_paise: calculated.reduce((sum, row) => sum + row.salary_to_pay_paise, 0) }, rows };
+        salary_to_pay_paise: included.reduce((sum, row) => sum + row.salary_to_pay_paise, 0) }, rows };
   }).deferred();
 }
 
