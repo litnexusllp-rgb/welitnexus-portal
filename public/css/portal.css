@@ -566,3 +566,7 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .employee-info dt { font-size: .8rem; color: var(--slate); margin-bottom: 6px; }
 .employee-info dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
 .employee-leave-stats { margin-top: 18px; }
+
+.salary-slip-download { margin: 16px 0; }
+.salary-table [data-salary-slip] { margin-top: 8px; }
+[data-salary-slip][aria-disabled="true"] { opacity: .65; cursor: wait; }

@@ -14,7 +14,7 @@ build step. Branding matches the marketing site (navy / teal / gold, Inter).
 | Area | Employee | Admin |
 |------|----------|-------|
 | **Clock** | Punch In/Out, start/end breaks, live timer, 14-day timesheet | — |
-| **Employees** | Own performance, attendance calendar, leave balances/history/requests, personal information | Select a person; review performance, approve leave, calculate salary, edit profiles and manage access |
+| **Employees** | Own performance, attendance calendar, leave balances/history/requests, salary calculations and PDF slips, personal information | Select a person; review performance, approve leave, calculate salary, edit profiles and manage access |
 | **Tasks** | See assigned tasks, update status (To do / In progress / Done) | Assign to anyone, set priority + due date, edit, delete |
 | **Holidays** | View calendar + list | Publish / remove holidays |
 | **Directory** | Browse everyone's profile + contact info | (same) |
@@ -36,16 +36,15 @@ npm run seed                # creates admin + sample accounts (only once)
 npm start                   # http://localhost:3000
 ```
 
-### Seeded logins (change these!)
-| Role | Email | Password |
-|------|-------|----------|
-| Admin (you) | `saurav@welitnexus.com` | `Welit@2026` |
-| Admin (partner) | `partner@welitnexus.com` | `Welit@2026` |
-| Employee | `aanya@welitnexus.com` | `Welcome@123` |
-| Employee | `rohan@welitnexus.com` | `Welcome@123` |
+### Local sample accounts
 
-First thing: log in as admin → **Employees** → **Personal information** → reset passwords / add your real team,
-then delete the sample employees (Disable).
+`npm run seed` creates local sample accounts defined in `src/seed.js`. Demo
+seeding is disabled in production. Production administrator bootstrap uses
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables; keep real credentials
+out of documentation and source control.
+
+Manage employee accounts in **Employees -> Personal information** and disable
+local sample users when they are no longer needed.
 
 ---
 
@@ -68,9 +67,8 @@ then delete the sample employees (Disable).
 3. Add a **Volume** mounted at `/data`.
 4. Set variables: `JWT_SECRET` (long random), `DB_PATH=/data/portal.db`,
    `NODE_ENV=production`, `TZ_OFFICE=Asia/Kolkata`.
-5. Railway runs `npm start`. After first deploy, run `npm run seed` once
-   (Railway shell) to create the admin account — or register people via the
-   Admin tab after seeding just yourself.
+5. Railway runs `npm start`. Configure the administrator bootstrap variables
+   for the initial admin account, then add employees through **Employees**.
 
 The whole database is the single file at `DB_PATH`; back it up by copying that file.
 

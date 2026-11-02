@@ -1,4 +1,4 @@
-/* Admin monthly salary worksheet. All monetary calculations come from the server. */
+/* Monthly salary worksheet and employee self-service. All monetary calculations come from the server. */
 (function () {
   'use strict';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -7,13 +7,13 @@
   const date = iso => /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? new Date(iso + 'T00:00').toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : 'Unknown';
   const range = (from, to) => from === to ? date(from) : `${date(from)} – ${date(to)}`;
 
-  function calculation(row) {
+  function calculation(row, readOnly = false) {
     const confirmed = row.status === 'REVIEWED';
     const automatic = (row.calculation_status || row.status) === 'CALCULATED';
     return `<div class="salary-calculation">
-      ${row.review ? `<div class="salary-confirmation"><strong>${confirmed ? 'Confirmed salary to pay' : 'Previous confirmation'}: ${money(row.review.amount_paise)}</strong><p>${esc(row.review.note)}</p><p class="salary-muted">${esc(row.review.reviewer_name)} · ${esc(new Date(row.review.reviewed_ts).toLocaleString())}${!confirmed ? ' · Not included in the current total' : ''}</p></div>` : ''}
+      ${row.review && readOnly ? `<div class="salary-confirmation"><strong>Salary confirmed by admin: ${money(row.review.amount_paise)}</strong><p class="salary-muted">${esc(new Date(row.review.reviewed_ts).toLocaleDateString())}</p></div>` : row.review ? `<div class="salary-confirmation"><strong>${confirmed ? 'Confirmed salary to pay' : 'Previous confirmation'}: ${money(row.review.amount_paise)}</strong><p>${esc(row.review.note)}</p><p class="salary-muted">${esc(row.review.reviewer_name)} · ${esc(new Date(row.review.reviewed_ts).toLocaleString())}${!confirmed ? ' · Not included in the current total' : ''}</p></div>` : ''}
       ${row.review_reasons.length ? `<div class="salary-review"><strong>${confirmed ? 'Reasons reviewed' : 'Review before payment'}</strong><ul>${row.review_reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></div>` : ''}
-      ${row.status !== 'CALCULATED' ? `<form class="salary-resolution" data-salary-form="${row.id}">
+      ${!readOnly && row.status !== 'CALCULATED' ? `<form class="salary-resolution" data-salary-form="${row.id}">
         <div class="field"><label for="salaryAmount${row.id}">Confirmed salary to pay (INR)</label><input id="salaryAmount${row.id}" name="amount" inputmode="decimal" value="${confirmed ? (row.review.amount_paise / 100).toFixed(2) : ''}" placeholder="Enter the final amount" required></div>
         <div class="field"><label for="salaryNote${row.id}">Calculation or reason</label><textarea id="salaryNote${row.id}" name="note" maxlength="1000" placeholder="Explain the amount or part-month calculation" required>${confirmed ? esc(row.review.note) : ''}</textarea></div>
         <p class="salary-muted">Enter the final amount after leave deductions for this month. Your confirmation is included in the total; it does not record a payment.</p>
@@ -21,7 +21,7 @@
       </form>` : ''}
       <p>Employment this month: ${esc(range(row.employed_from, row.employed_to))} · ${days(row.employed_calendar_days)}.</p>
       <h3>Salary rates</h3>
-      ${row.rate_lines.length ? row.rate_lines.map(line => `<p>${esc(range(line.from, line.to))} · ${days(line.calendar_days)}<br>Monthly gross ${money(line.monthly_gross_paise)} ÷ ${row.divisor} = ${money(line.monthly_gross_paise / row.divisor)} per day</p>`).join('') : '<p>Add the applicable salary in Employees → Personal information.</p>'}
+      ${row.rate_lines.length ? row.rate_lines.map(line => `<p>${esc(range(line.from, line.to))} · ${days(line.calendar_days)}<br>Monthly gross ${money(line.monthly_gross_paise)} ÷ ${row.divisor} = ${money(line.monthly_gross_paise / row.divisor)} per day</p>`).join('') : (readOnly ? '<p>Ask an admin to record your salary for this month.</p>' : '<p>Add the applicable salary in Employees → Personal information.</p>')}
       <h3>Approved unpaid leave deduction</h3>
       ${row.deduction_lines.map(line => `<p>${money(line.monthly_gross_paise)} ÷ ${row.divisor} × ${days(line.unpaid_days)} unpaid<br><span class="salary-muted">${line.dates.map(date).map(esc).join(', ')}</span></p>`).join('')}
       <p><strong>${money(row.deduction_paise)}</strong>${row.deduction_paise === null ? ' · Cannot calculate the complete deduction until missing records are resolved.' : row.unpaid_leave_days ? ' · Total rounded once to the nearest paise.' : ' · No approved unpaid leave this month.'}</p>
@@ -32,7 +32,24 @@
     </div>`;
   }
 
-  function reportHtml(report) {
+  function employeeReportHtml(report) {
+    const row = report.rows[0];
+    if (!row) return '<p class="empty">No employment records for this month. Choose another month or contact an admin.</p>';
+    const ready = row.status === 'CALCULATED' || row.status === 'REVIEWED';
+    return `<h4>Salary calculation for ${esc(row.name)}</h4><p class="salary-scope">${esc(report.scope)} Daily rate: monthly gross ÷ ${report.divisor} calendar days in ${esc(report.month)}.</p>
+      ${report.period_state !== 'ENDED' ? `<p class="salary-notice">${report.period_state === 'IN_PROGRESS' ? 'This month is still in progress.' : 'This is a future-month projection.'} The calculation may change.</p>` : ''}
+      <div class="cards salary-stats">
+        <div class="card stat"><div class="label">Monthly gross</div><div class="value small">${money(row.monthly_gross_paise)}</div></div>
+        <div class="card stat"><div class="label">Approved unpaid leave</div><div class="value small">${days(row.unpaid_leave_days)}</div></div>
+        <div class="card stat"><div class="label">Your salary to pay</div><div class="value small">${ready ? money(row.salary_to_pay_paise) : 'Needs review'}</div>${row.status === 'REVIEWED' ? '<div class="salary-muted">Confirmed by admin</div>' : ''}</div>
+      </div>
+      <div class="salary-slip-download">${row.salary_slip?.available ? `<a class="btn btn-primary" href="${esc(row.salary_slip.url)}" data-salary-slip="${row.id}" download>Download salary slip (PDF)</a>` : `<p class="salary-muted">${esc(row.salary_slip?.reason || 'Contact an admin to complete this month’s salary review.')}</p>`}</div>
+      ${calculation(row, true)}
+      <p class="salary-muted">Salary slips reflect the calculation recorded in the portal and do not confirm payment. Contact an admin if your salary or leave records need updating.</p>`;
+  }
+
+  function reportHtml(report, { readOnly = false } = {}) {
+    if (readOnly) return employeeReportHtml(report);
     const total = report.totals;
     return `<p class="salary-scope">${esc(report.scope)} Daily rate: monthly gross ÷ ${report.divisor} calendar days in ${esc(report.month)}.</p>
       ${report.period_state !== 'ENDED' ? `<p class="salary-notice">${report.period_state === 'IN_PROGRESS' ? 'This month is still in progress.' : 'This is a future-month projection.'} Salaries and approved leave may change.</p>` : ''}
@@ -47,7 +64,7 @@
         ${report.rows.map(row => `<tr><td><strong>${esc(row.name)}</strong>${row.emp_code ? `<div class="salary-muted">${esc(row.emp_code)}</div>` : ''}${row.pending_requests ? `<div class="salary-muted">${row.pending_requests} pending leave request(s)</div>` : ''}</td>
           <td>${row.monthly_gross_paise === null ? 'Review rates' : money(row.monthly_gross_paise)}</td><td>${days(row.unpaid_leave_days)}</td><td>${money(row.deduction_paise)}</td>
           <td>${row.status !== 'REVIEW' ? `<strong>${money(row.salary_to_pay_paise)}</strong>${row.status === 'REVIEWED' ? '<div><span class="badge b-approved">Reviewed</span></div>' : ''}` : '<span class="badge b-pending">Needs review</span>'}</td>
-          <td><button class="btn btn-ghost btn-sm" data-salary-detail="${row.id}" aria-controls="salaryDetail${row.id}" aria-expanded="false">${row.status === 'CALCULATED' ? 'View calculation' : row.status === 'REVIEWED' ? 'Edit review' : 'Resolve review'}</button></td></tr>
+          <td><button class="btn btn-ghost btn-sm" data-salary-detail="${row.id}" aria-controls="salaryDetail${row.id}" aria-expanded="false">${row.status === 'CALCULATED' ? 'View calculation' : row.status === 'REVIEWED' ? 'Edit review' : 'Resolve review'}</button>${row.salary_slip?.available ? `<a class="btn btn-ghost btn-sm" href="${esc(row.salary_slip.url)}" data-salary-slip="${row.id}" download>Salary slip (PDF)</a>` : ''}</td></tr>
           <tr id="salaryDetail${row.id}" hidden><td colspan="6">${calculation(row)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">No employees were employed during this month.</div>'}
       <p class="salary-muted">Calculated from current salary history and approved leave. Request-time deduction estimates may differ. Refresh after changing salaries or approvals. This page does not record payments.</p>`;
@@ -73,8 +90,8 @@
       salary_to_pay_paise: included.reduce((n, row) => n + row.salary_to_pay_paise, 0) } };
   }
 
-  async function mount(root, { api, onManage, month: initialMonth = '', userId = null, onMonthChange }) {
-    root.innerHTML = `<div class="toolbar salary-controls"><div class="field"><label for="salaryMonth">Salary month</label><input type="month" id="salaryMonth"></div><button class="btn btn-primary" id="salaryRefresh">Calculate</button><button class="btn btn-ghost" id="salaryCsv" disabled>Download CSV</button><button class="btn btn-ghost" id="salaryManage">Manage salaries</button></div><p id="salaryStatus" role="status" aria-live="polite"></p><div id="salaryReport"></div>`;
+  async function mount(root, { api, onManage, month: initialMonth = '', userId = null, onMonthChange, readOnly = false }) {
+    root.innerHTML = `<div class="toolbar salary-controls"><div class="field"><label for="salaryMonth">Salary month</label><input type="month" id="salaryMonth"></div><button class="btn btn-primary" id="salaryRefresh">Calculate</button><button class="btn btn-ghost" id="salaryCsv" disabled>Download CSV</button>${readOnly ? '' : '<button class="btn btn-ghost" id="salaryManage">Manage salaries</button>'}</div><p id="salaryStatus" role="status" aria-live="polite"></p><div id="salaryReport"></div>`;
     const $ = selector => root.querySelector(selector); let report = null, version = 0, selectedMonth = initialMonth;
     $('#salaryMonth').value = initialMonth;
     async function load(openId = null) {
@@ -83,15 +100,31 @@
       report = null; $('#salaryCsv').disabled = true; $('#salaryRefresh').disabled = true;
       $('#salaryReport').innerHTML = ''; $('#salaryStatus').textContent = 'Calculating salaries…';
       try {
-        let result = await api.get('/salaries' + (month ? '?month=' + encodeURIComponent(month) : ''));
+        let result = await api.get((readOnly ? '/salaries/mine' : '/salaries') + (month ? '?month=' + encodeURIComponent(month) : ''));
         if (userId !== null) result = scopeReport(result, userId);
         if (current !== version || !root.isConnected || month !== $('#salaryMonth').value) return;
-        report = result; selectedMonth = result.month; $('#salaryMonth').value = result.month; $('#salaryReport').innerHTML = reportHtml(result);
+        report = result; selectedMonth = result.month; $('#salaryMonth').value = result.month; $('#salaryReport').innerHTML = reportHtml(result, { readOnly });
         $('#salaryStatus').textContent = 'Calculated ' + new Date(result.calculated_ts).toLocaleString() + '. Based on approved leave only.';
         $('#salaryCsv').disabled = false;
         root.querySelectorAll('[data-salary-detail]').forEach(button => button.addEventListener('click', () => {
           const detail = $('#salaryDetail' + button.dataset.salaryDetail); detail.hidden = !detail.hidden;
           button.setAttribute('aria-expanded', String(!detail.hidden));
+        }));
+        root.querySelectorAll('[data-salary-slip]').forEach(link => link.addEventListener('click', async event => {
+          event.preventDefault(); if (link.dataset.busy === '1') return;
+          link.dataset.busy = '1'; link.setAttribute('aria-disabled', 'true');
+          const label = link.textContent; link.textContent = 'Preparing salary slip…';
+          try {
+            const response = await fetch(link.href, { credentials: 'same-origin' });
+            if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || 'Could not download the salary slip. Please try again.'); }
+            if (!response.headers.get('content-type')?.startsWith('application/pdf')) throw new Error('Could not download the salary slip. Please refresh and try again.');
+            const blob = await response.blob();
+            if (current !== version || !root.isConnected) return;
+            const url = URL.createObjectURL(blob), download = document.createElement('a');
+            download.href = url; download.download = `salary-slip-${result.month}-${link.dataset.salarySlip}.pdf`; download.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          } catch (error) { if (current === version && root.isConnected) $('#salaryStatus').textContent = error.message; }
+          finally { link.dataset.busy = '0'; link.removeAttribute('aria-disabled'); link.textContent = label; }
         }));
         root.querySelectorAll('[data-salary-form]').forEach(form => {
           const row = result.rows.find(row => row.id === Number(form.dataset.salaryForm));
@@ -131,7 +164,7 @@
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { $('#salaryMonth').value = selectedMonth; return; }
       selectedMonth = month; onMonthChange?.(month); return load();
     }); $('#salaryRefresh').addEventListener('click', load);
-    $('#salaryManage').addEventListener('click', onManage);
+    $('#salaryManage')?.addEventListener('click', onManage);
     $('#salaryCsv').addEventListener('click', () => {
       if (!report) return;
       const url = URL.createObjectURL(new Blob([csv(report)], { type:'text/csv;charset=utf-8;' }));
@@ -140,5 +173,5 @@
     });
     await load();
   }
-  window.Salaries = { mount, reportHtml, csv, scopeReport };
+  window.Salaries = { mount, reportHtml, employeeReportHtml, csv, scopeReport };
 })();

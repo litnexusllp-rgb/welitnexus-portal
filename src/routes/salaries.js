@@ -1,15 +1,47 @@
 'use strict';
 const router = require('express').Router();
-const { requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin } = require('../auth');
 const { db } = require('../db');
 const { buildSalaries } = require('../salaries');
 const { now } = require('../time');
-router.use(requireAdmin);
+const { employeeSalaryReport, withSalarySlips, slipEligibility } = require('../employeeSalary');
+const { renderSalarySlip } = require('../salarySlip');
+const slipLimiter = require('express-rate-limit')({ windowMs: 15 * 60 * 1000, max: 30,
+  standardHeaders: true, legacyHeaders: false, keyGenerator: req => String(req.user.id),
+  message: { error: 'Too many salary-slip downloads. Please try again later.' } });
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+const requireEmployee = (req, res, next) => {
+  if (req.user.role !== 'EMPLOYEE') return res.status(403).json({ error: 'Use an employee account to view personal salary records.' });
+  if (Object.keys(req.query).some(key => key !== 'month')) return res.status(400).json({ error: 'Only the salary month can be selected.' });
+  next();
+};
+
+router.get('/mine', requireAuth, requireEmployee, (req, res) => {
+  try { res.json(employeeSalaryReport(db, req.user.id, req.query.month)); }
+  catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not load your salary calculation. Please try again.' }); }
+});
+
+async function sendSlip(req, res, userId) {
+  try {
+    if (typeof req.query.month !== 'string') fail('Choose a salary month.');
+    const report = employeeSalaryReport(db, userId, req.query.month), row = report.rows[0];
+    if (!row) fail('No employment records for this salary month.', 404);
+    const reason = slipEligibility(report, row); if (reason) fail(reason, 409);
+    const pdf = await renderSalarySlip(report, row);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="salary-slip-${report.month}-${userId}.pdf"`);
+    res.send(pdf);
+  } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not create the salary slip. Please try again.' }); }
+}
+
+router.get('/mine/slip', requireAuth, requireEmployee, slipLimiter, require('../asyncRoute')((req, res) => sendSlip(req, res, req.user.id)));
+
+router.use(requireAdmin);
 router.get('/', (req, res) => {
-  try { res.json(buildSalaries(db, req.query.month)); }
+  try { res.json(withSalarySlips(buildSalaries(db, req.query.month))); }
   catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not calculate salaries. Please try again.' }); }
 });
+router.get('/:id/slip', require('../requestValidation').validateParams, slipLimiter, require('../asyncRoute')((req, res) => sendSlip(req, res, Number(req.params.id))));
 
 function fail(message, status=400) { throw Object.assign(new Error(message), { status }); }
 function target(req) {

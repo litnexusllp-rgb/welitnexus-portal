@@ -19,7 +19,7 @@ Duplicate approved leave dates are capped at one day for reference calculations 
 
 Employees with known employment wholly outside the selected month are omitted. Former employees with overlapping employment are included for historical/final-month review; an inactive employee without an exit date is retained and flagged rather than silently excluded. Admin accounts are excluded. Current and future months are visibly provisional. Historical months are live calculations, not locked payroll snapshots.
 
-The report route `/api/salaries?month=YYYY-MM` is admin-only and `Cache-Control: no-store`; employees cannot read the report or other staff salaries. The CSV is generated from the current successful report and is disabled while recalculating or after an error. Employee text is escaped in HTML and protected against spreadsheet formula injection in CSV.
+The report route `/api/salaries?month=YYYY-MM` is admin-only and `Cache-Control: no-store`; employees cannot read this team report or other staff salaries. Their own read-only calculation is served separately by `/api/salaries/mine?month=YYYY-MM`. The CSV is generated from the current successful report and is disabled while recalculating or after an error. Employee text is escaped in HTML and protected against spreadsheet formula injection in CSV.
 
 ## Confirming a review
 
@@ -38,3 +38,5 @@ The salary-to-pay total includes automatic and confirmed rows. Gross and leave-d
 ## Verification
 
 `node --test test/salaries.test.js test/salary-review.test.js` covers calendar/month boundaries, half days and aggregate rounding, rate changes, partial employment, missing/zero salaries, historical inactive staff, overlaps, read-only source preservation, subtotal exclusions, API permissions, CSV/HTML safety and stale-response protection. Review tests also cover exact amounts, zero/missing salaries, validation, permissions, idempotency, conflicting edits, reopening, source invalidation, rollback, audit history and persistence. Browser verification uses a separate synthetic database, without production payroll or leave writes.
+
+Employee self-service and PDF salary slips: [employee salary access](employee-salary-slips.md).

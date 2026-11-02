@@ -12,7 +12,7 @@ If any unpaid date has no applicable salary, the amount is unavailable rather th
 
 Submission saves the server-calculated estimate with the request. Employee history and admin approval lists show this estimate at request time; later salary edits or approval decisions do not silently replace it. Unpriced older requests remain unpriced. Existing fixed-30-day quotes remain unchanged and are labelled as historical estimates; new quotes use calendar-month days. These amounts are estimates for payroll review; this feature does not execute payroll or salary deductions.
 
-Salary history is stored separately from shared employee profiles. Only admins can read or edit salary records. Employees can preview only their own leave deductions and see the salary rates used in that calculation. Other employees' salaries are excluded from directory, authentication and attendance responses. Existing administrator database backups include the new salary and audit tables.
+Salary history is stored separately from shared employee profiles. Only admins can edit salary records or read another employee's salary. Employees can also view their own monthly calculation and download eligible salary slips through the dedicated self-service routes. Employees can preview only their own leave deductions and see the salary rates used in that calculation. Other employees' salaries are excluded from directory, authentication and attendance responses. Existing administrator database backups include the new salary and audit tables.
 
 ## Verification
 

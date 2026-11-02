@@ -14,17 +14,19 @@ function monthRange(month) {
 
 // Report reads never change data. Recalculate approved leave at the salary rate
 // effective on each leave date, never by adding stale request-time quotes.
-function buildSalaries(db, month = todayStr().slice(0, 7)) {
+function buildSalaries(db, month = todayStr().slice(0, 7), userId = null) {
   const period = monthRange(month);
+  if (userId !== null && (!Number.isSafeInteger(userId) || userId < 1)) throw new Error('Invalid salary report scope');
+  const scope = userId === null ? [] : [userId];
   return db.transaction(() => {
-    const users = db.prepare(`SELECT id,name,emp_code,department,active,join_date,exit_date
-      FROM users WHERE role='EMPLOYEE' ORDER BY name COLLATE NOCASE`).all()
+    const users = db.prepare(`SELECT id,name,emp_code,department,title,active,join_date,exit_date
+      FROM users WHERE role='EMPLOYEE' ${userId === null ? '' : 'AND id=?'} ORDER BY name COLLATE NOCASE`).all(...scope)
       .filter(user => overlapsEmployment(user, period.start, period.end));
-    const salaries = db.prepare('SELECT user_id,effective_from,monthly_gross_paise FROM employee_salary_rates WHERE effective_from<=? ORDER BY effective_from DESC').all(period.end);
+    const salaries = db.prepare(`SELECT user_id,effective_from,monthly_gross_paise FROM employee_salary_rates WHERE effective_from<=? ${userId === null ? '' : 'AND user_id=?'} ORDER BY effective_from DESC`).all(period.end,...scope);
     const leaves = db.prepare(`SELECT id,user_id,start_date,end_date,kind,category,status FROM leaves
-      WHERE status IN ('APPROVED','PENDING') AND start_date<=? AND end_date>=? ORDER BY start_date,id`).all(period.end, period.start);
+      WHERE status IN ('APPROVED','PENDING') AND start_date<=? AND end_date>=? ${userId === null ? '' : 'AND user_id=?'} ORDER BY start_date,id`).all(period.end, period.start,...scope);
     const reviews = db.prepare(`SELECT r.*,u.name AS reviewer_name FROM salary_month_reviews r
-      JOIN users u ON u.id=r.reviewed_by WHERE r.month=?`).all(month);
+      JOIN users u ON u.id=r.reviewed_by WHERE r.month=? ${userId === null ? '' : 'AND r.user_id=?'}`).all(month,...scope);
     const rows = users.map(user => {
       const rates = salaries.filter(s => s.user_id === user.id), userLeaves = leaves.filter(l => l.user_id === user.id);
       const row = employeeSalary(user, period, rates, userLeaves);
@@ -124,7 +126,7 @@ function employeeSalary(user, period, rates, leaves) {
   const gross = !missingSalaryDays && amounts.size === 1 ? [...amounts][0] : null;
   const reference = gross !== null && deduction !== null ? gross - deduction : null;
   const status = reasons.size || reference === null ? 'REVIEW' : 'CALCULATED';
-  return { id: user.id, name: user.name, emp_code: user.emp_code, department: user.department,
+  return { id: user.id, name: user.name, emp_code: user.emp_code, department: user.department, title: user.title,
     active: user.active, join_date: user.join_date, exit_date: user.exit_date,
     employed_from: from, employed_to: to, employed_calendar_days: employedDays, divisor: period.divisor,
     monthly_gross_paise: gross, paid_leave_days: paid, unpaid_leave_days: unpaid, deduction_paise: deduction,
