@@ -75,7 +75,7 @@ router.post('/preview', requireAuth, (req, res) => {
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
-    const leave = { ...normalizeLeave(req.body, { allowPast: req.user.role === 'ADMIN', requireReason: false }), user_id:userId, status:'PENDING' };
+    const leave = { ...normalizeLeave(req.body, { allowPast: req.user.role === 'ADMIN', requireReason: false }), user_id:userId, status:req.user.role === 'ADMIN' ? 'APPROVED' : 'PENDING' };
     assertAvailable(userId, leave);
     res.json({ leave: { ...describeLeave(leave), deduction_estimate: estimateDeduction(userId, leave) }, balances: syncBalance(userId), categories: CATEGORIES });
   } catch (e) { return fail(res, e); }
