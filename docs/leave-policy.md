@@ -1,73 +1,110 @@
-# Leave categories and October reset
+# Leave policy and payroll
 
-Effective 1 October 2026, the portal grants a fresh 20-day entitlement every
-1 October for the year ending 30 September: 18 regular paid days, 1 Flexi day,
-and 1 shared birthday/anniversary day. Unused credit expires at the next reset.
-The owner explicitly confirmed the October anniversary and full 20-day reset;
-these override the supplied staff PDF's calendar-year/monthly-accrual wording.
-There is no additional 1.5-day monthly credit on top of the 18 regular days.
+Source: the owner's three-page **LIT_Nexus_Staff_Policy_Final.pdf**, read in full,
+including letterhead, leave, Short Day, Fun Friday and bonus provisions. The
+owner's clarifications on 2 November 2026 take precedence where noted below.
+The calculation rules apply from 1 October 2026; prior dates retain legacy paid
+treatment. Existing requests, decisions, reasons and saved quotes are preserved.
 
-Employees select Regular, Flexi, Birthday or Anniversary separately from
-Full/Half duration. Flexi is allowed only on dates after the 15th and requires
-no reason. Birthday and anniversary draw from the same single-day pool.
-Managers continue to review requests before approval. This change does not
-add automated enforcement of the PDF's other advance-notice, consecutive-day,
-short-day or bonus provisions.
+## Paid and unpaid time
 
-## Payment and balances
+- Annual ceilings reset every **1 October**: 18 regular + 1 Flexi + 1 shared
+  birthday/anniversary day. No annual carryover. The October reset supersedes
+  the PDF's calendar-year reset.
+- Regular paid leave has a **strict 1.5 scheduled-day limit in each month**.
+  Unused monthly credit does not accumulate or become usable in another month.
+  Further regular leave is unpaid, even if an annual remaining balance is shown.
+  This supersedes the earlier implementation's unrestricted 18-day annual grant
+  and the PDF's accumulation wording.
+- Flexi and special entitlements are separate from the monthly regular limit.
+  Flexi is only after the 15th and needs no reason. Birthday and anniversary share
+  one day. Requests exceeding those special paid category entitlements must be
+  submitted as regular leave, where excess time can be unpaid.
+- **The 1st–12th inclusive is unpaid for every category**, regardless of available
+  paid credit. Unpaid time does not use paid credit.
+- **Only scheduled working time is charged.** Saturday/Sunday are non-working
+  unless published in Working days. Full holidays are excluded; a half holiday
+  has 0.5 working day. Full-day requests charge that day's working portion;
+  half-day requests charge up to 0.5 scheduled day, including on half holidays.
+  A full holiday remains non-working even if a working-weekend override exists.
+- The monthly cap replaces the former **3+ consecutive-day deduction**. A
+  three-working-day regular block is 1.5 paid / 1.5 unpaid outside the 1st–12th,
+  rather than three unpaid days. Split requests cannot bypass the cap.
+- Approved requests allocate credit first, ordered by leave date then ID.
+  Pending requests then reserve remaining credit in that order. Rejection and
+  cancellation release reservations. This ordering is deterministic; adding an
+  earlier approved request can change later requests' paid/unpaid allocation.
+- Cross-month requests use each month's own allowance and calendar divisor;
+  cross-October requests use each leave year's own category entitlements.
 
-- The owner clarified that the 1st through the 12th, inclusive, are **unpaid**,
-  following the staff PDF. Those days do not deduct from paid entitlement.
-- A request spanning the 12th is split into paid/unpaid days. A request spanning
-  1 October charges each paid day to its own leave year. Half days count as 0.5.
-- Existing calendar-day counting is retained, including weekends. The portal
-  labels unpaid leave for payroll review; it does not calculate a currency
-  deduction or change payroll payments/scheduled hours.
-- Approved paid leave reduces remaining credit. Pending paid requests reserve
-  available credit without reducing the confirmed remaining balance. Rejection
-  and cancellation release reservations. Unpaid requests need no paid balance.
-- The server computes treatment and credit availability; client-supplied
-  payment status, day counts or balance cannot override it. Both employee and
-  direct-admin recording paths use the same calculation and checks.
-- Employee Dashboard and Leaves show the three personal pools, pending credit,
-  available credit and reset date. Admins see their own pools plus team totals.
+`src/leaveCalculation.js` is the shared ledger for balances, previews and monthly
+salary reports. `leaves.days` still records requested calendar duration for
+historical compatibility; `paid_days`, `unpaid_days`, `non_working_days` and
+`date_lines` distinguish scheduled treatment. A request entirely on non-working
+dates is labelled NON_WORKING, costs no credit and creates no deduction.
 
-## Existing data and reset audit
+## Requests and management checks
 
-Schema changes are additive: a category column and `leave_balance_resets`
-table. Existing untyped requests remain regular leave. Their dates, duration,
-reason, approval and identifiers remain intact. Actual dates from 1 October
-2026 determine the new paid/unpaid treatment; earlier leave does not spend the
-new October entitlement. Historical requests are not cancelled or deleted.
+Apply at least three days ahead unless an emergency applies. Three or more
+planned scheduled leave days need at least 20 days' notice (the PDF also
+recommends one month); only health emergencies bypass that longer notice.
+The form records NONE / HEALTH / OTHER emergency classification. The server
+validates it and enforces notice for employee requests and previews. Admins
+can record historical absences and decide legacy/auto-flagged requests.
 
-Balances are rebuilt from approved records in the applicable leave year. This
-deducts approved paid leave since 1 October rather than blindly setting the
-current total to 20 and discarding October usage. Approved future leave within
-the year is included. Old overdrawn history is visible as a negative pool;
-new paid requests cannot exceed available category credit.
+Managers should respond within one business day. Pending records display the
+next business-date deadline and overdue status, using the published calendar.
+Leave adjoining non-working dates carries a specific approval warning and may
+be refused. All full/half-day requests still require management approval.
 
-A unique reset marker per employee/year preserves the previous cached total
-and new entitlement. Repeated reads/restarts never grant extra credit. Totals
-refresh at startup and when balance-bearing screens/APIs are read, including
-at the next October boundary without a server restart. The old
-`users.leave_balance` field is a compatibility cache; employee profile edits
-cannot override calculated entitlement. Existing profile details remain editable.
+Dates, scheduled time, decisions and paid/unpaid treatment must be checked
+before payroll. Employees can inspect calculations and ask management to
+correct attendance or leave errors. Management's existing review-confirmation
+workflow records an explanation for exceptions without rewriting leave sources.
 
-## Verification and rollback
+## Short Day
 
-`test/leave-policy.test.js` uses a temporary synthetic database and test clock
-to cover date boundaries, category quotas, reservations, cancellations,
-duplicate approvals, access control, forged payloads, admin recording, October
-renewal, January continuity and restart persistence. Full browser checks use
-the real frontend/API with local synthetic accounts.
+The employee workspace provides separate Short Day requests for 1–120 minutes,
+with a **120-minute monthly allowance**. Pending requests reserve time; approved
+requests consume it; rejection/cancellation releases reservations. No regular,
+Flexi or special leave credit is consumed and no salary penalty is created.
 
-No production attendance or leave requests are created as deployment tests.
-Deployment may initialize the owner-authorized October reset/cache/audit data.
-Do not roll back to the old balance-decrementing handlers after live leave
-decisions; they cannot account for the new pools or unpaid days. Retain the
-additive columns/audit records and use a forward fix or an explicitly reviewed
-database restore if a financial rollback is needed.
+Management must approve before the requested start timestamp. Expired pending
+requests can be rejected, not backdated into advance approval. Start times are
+stored with their timezone and absolute timestamp; nonexistent/ambiguous DST
+times are rejected. Non-working dates, overlapping Short Day intervals and
+full/half-day leave conflicts are rejected. Requests crossing midnight must be
+split by date. Existing attendance punches are not edited or fabricated.
 
-## Admin accounts
+The authenticated `/api/short-days` routes return an employee's own requests;
+admins can inspect an employee or the pending team queue and approve/reject.
+Balances and decisions use immediate transactions to prevent exceeding the
+allowance through concurrent requests. Approved minutes appear separately in
+salary calculations/slips. A short attendance flag alone is not a deduction.
 
-Personal leave is available to employees. Admin accounts use Leaves for employee approvals, recording leave and reviewing balances; their own balance, requests and Apply button are omitted from Leaves and Dashboard. Admins are excluded from the balance summary and employee selector. Direct personal request/preview calls for an admin are rejected. Historical leave rows are preserved and remain available through administrator history APIs.
+## Other provisions reviewed
+
+Fun Friday is twice monthly, approved/coordinated, 40–90 minutes excluding
+breaks, with client commitments protected. This guidance is visible in the
+workspace; it is not a payroll adjustment.
+
+The policy lists punctuality, attendance, deadlines, client appreciation, extra
+effort, learning, quality, ownership, teamwork and process improvement as bonus
+considerations. The Bonus Email is due before 6 PM on the last working day;
+recipients are announced after processing and amounts remain private. These
+requirements are shown in policy guidance. The PDF supplies no bonus formula,
+so no bonus amount or attendance penalty is invented or added to salary.
+
+## Data and verification
+
+Migrations add emergency classification and a separate Short Day table. Existing
+leave dates, statuses, reasons, IDs and request-time quotes are never rewritten.
+Derived compatibility balances are rebuilt from the ledger; reset markers retain
+the original cached value. Salary review fingerprints include the policy version,
+relevant leave-year sources, working calendar and Short Day records. Affected old
+confirmations become stale and must be checked and reconfirmed.
+
+Tests cover shared calculations, monthly limits, separate categories, pending
+reservations, notice exceptions, calendar boundaries/holidays, exact month lengths,
+review invalidation, source preservation, Short Day permissions/limits/advance
+approval and concurrent requests. Browser/PDF checks use synthetic records only.

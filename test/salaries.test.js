@@ -32,18 +32,18 @@ test('monthly salary worksheet uses approved leave and keeps review calculations
   await t.test('full-month salary remains monthly gross in 28-, 29-, 30- and 31-day months', () => {
     const id=add(); salary(id);
     for(const month of ['2027-02','2028-02','2026-11','2026-12']) {
-      leave(id,month+'-12'); leave(id,month+'-13');
+      leave(id,month+'-02'); leave(id,month+'-13');
       const r=row(id,month); assert.equal(r.monthly_gross_paise,3000000); assert.equal(r.unpaid_leave_days,1); const divisor=Number(month.slice(5))===2?(month.startsWith('2028')?29:28):month.endsWith('11')?30:31;
       const deduction=Math.round(3000000/divisor); assert.equal(r.divisor,divisor); assert.equal(r.deduction_paise,deduction); assert.equal(r.salary_to_pay_paise,3000000-deduction);
     }
   });
   await t.test('half-day fractions round once for the whole employee month, not per request', () => {
-    const id=add(); salary(id,'1000.01'); leave(id,'2026-11-01',{ kind:'HALF' }); leave(id,'2026-11-02',{ kind:'HALF' });
+    const id=add(); salary(id,'1000.01'); leave(id,'2026-11-02',{ kind:'HALF' }); leave(id,'2026-11-03',{ kind:'HALF' });
     const r=row(id); assert.equal(r.unpaid_leave_days,1); assert.equal(r.deduction_paise,3333); assert.equal(r.salary_to_pay_paise,96668);
   });
   await t.test('cross-month leave clips to selected dates and follows October policy effective date', () => {
     const id=add(); salary(id); leave(id,'2026-09-30',{ end_date:'2026-10-13' });
-    assert.equal(row(id,'2026-09').unpaid_leave_days,0); const oct=row(id,'2026-10'); assert.equal(oct.unpaid_leave_days,12); assert.equal(oct.paid_leave_days,1); assert.equal(oct.deduction_paise,1161290);
+    assert.equal(row(id,'2026-09').unpaid_leave_days,0); const oct=row(id,'2026-10'); assert.equal(oct.unpaid_leave_days,8); assert.equal(oct.paid_leave_days,1); assert.equal(oct.deduction_paise,774194);
     const half=add(); salary(half); leave(half,'2026-09-30',{ kind:'HALF',end_date:'2026-10-02' });
     assert.equal(row(half,'2026-10').approved_leaves.length,0); assert.equal(row(half,'2026-10').unpaid_leave_days,0);
   });
@@ -65,7 +65,7 @@ test('monthly salary worksheet uses approved leave and keeps review calculations
   });
   await t.test('missing salary, zero salary and uncertain employment are distinct', () => {
     const missing=add(); leave(missing); let r=row(missing); assert.equal(r.monthly_gross_paise,null); assert.equal(r.deduction_paise,null); assert.equal(r.salary_to_pay_paise,null);
-    salary(missing,'30000','2026-11-06'); leave(missing,'2026-11-07'); r=row(missing); assert.equal(r.deduction_paise,null); assert.equal(r.deduction_lines.length,1);
+    salary(missing,'30000','2026-11-06'); leave(missing,'2026-11-09'); r=row(missing); assert.equal(r.deduction_paise,null); assert.equal(r.deduction_lines.length,1);
     const zero=add(); salary(zero,'0'); leave(zero); assert.equal(row(zero).status,'CALCULATED'); assert.equal(row(zero).salary_to_pay_paise,0);
     const unknown=add({ join_date:'' }); salary(unknown); assert.equal(row(unknown).status,'REVIEW'); assert.equal(row(unknown).full_month_reference_after_leave_paise,3000000);
     const inactive=add({ active:0 }); salary(inactive); assert.equal(row(inactive).status,'REVIEW');

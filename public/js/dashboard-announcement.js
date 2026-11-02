@@ -103,7 +103,7 @@
         <div class="dc-stat"><div class="k">Today</div><div class="v">${esc(status?.state || '—')}</div><div class="s">Attendance status</div></div>
         <div class="dc-stat"><div class="k">Worked today</div><div class="v">${fmtMins(status?.workedMinutes)}</div><div class="s">Break ${fmtMins(status?.breakMinutes)}</div></div>
         <div class="dc-stat"><div class="k">My work</div><div class="v">${openCount}</div><div class="s">${workUnavailable ? 'Unable to load work' : overdueCount ? `${overdueCount} overdue` : 'Nothing overdue'}</div></div>
-        ${admin ? '' : `<div class="dc-stat"><div class="k">Leave balance</div><div class="v">${esc(leaves?.balance ?? k.leaveBalance ?? '—')}</div><div class="s">${pendingLeave ? `${pendingLeave} request pending` : 'days available'}</div></div>`}
+        ${admin ? '' : `<div class="dc-stat"><div class="k">Regular paid leave · month</div><div class="v">${esc(leaves?.balances?.monthly_regular?.available ?? '—')} / 1.5</div><div class="s">Days available · ${esc(leaves?.balance ?? '—')} annual paid days left${pendingLeave ? ` · ${pendingLeave} request pending` : ''}</div></div>`}
       </div>
 
       ${a ? `<div class="dc-card" style="margin-bottom:18px"><div class="dc-head"><h2>${Number(a.pinned) === 1 ? '📌 Pinned announcement' : '📣 Latest announcement'}</h2><button class="dc-link" data-go="noticeboard">View all notices</button></div><div class="dc-ann"><div class="dc-ann-title">${esc(a.title)}</div>${a.body ? `<div class="dc-ann-body">${esc(a.body)}</div>` : ''}<div class="dc-small">${esc(a.author || 'LIT Nexus')}${a.created_ts ? ` · ${esc(new Date(a.created_ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}` : ''}</div></div></div>` : ''}

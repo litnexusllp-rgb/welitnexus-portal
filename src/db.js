@@ -338,6 +338,25 @@ CREATE INDEX IF NOT EXISTS idx_bonus_month ON bonuses(month);`);
 if (!db.pragma('table_info(leaves)').some(c => c.name === 'category')) {
   db.exec("ALTER TABLE leaves ADD COLUMN category TEXT NOT NULL DEFAULT 'REGULAR'");
 }
+if (!db.pragma('table_info(leaves)').some(c => c.name === 'emergency_type')) {
+  db.exec("ALTER TABLE leaves ADD COLUMN emergency_type TEXT NOT NULL DEFAULT 'NONE' CHECK(emergency_type IN ('NONE','HEALTH','OTHER'))");
+}
+db.exec(`CREATE TABLE IF NOT EXISTS short_day_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  start_ts INTEGER NOT NULL,
+  minutes INTEGER NOT NULL CHECK(minutes BETWEEN 1 AND 120),
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','APPROVED','REJECTED','CANCELLED')),
+  created_ts INTEGER NOT NULL,
+  decided_by INTEGER REFERENCES users(id),
+  decided_ts INTEGER,
+  admin_note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_short_day_employee_date ON short_day_requests(user_id,date);`);
 db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
   user_id INTEGER NOT NULL REFERENCES users(id),
   period_start TEXT NOT NULL,

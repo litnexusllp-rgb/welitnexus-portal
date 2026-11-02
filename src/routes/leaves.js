@@ -6,15 +6,15 @@ const { requireAuth, requireAdmin } = require('../auth');
 const { now, todayStr, inclusiveDays } = require('../time');
 const { notify } = require('../notify');
 const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
-const { CATEGORIES, describeLeave, syncBalance, syncAllBalancesAsync, normalizeLeave, assertAvailable } = require('../leavePolicy');
+const { CATEGORIES, describeLeave, describeLeaves, syncBalance, syncAllBalancesAsync, normalizeLeave, assertAvailable } = require('../leavePolicy');
 const { estimateDeduction, savedDeduction } = require('../salaryDeduction');
 
 const router = express.Router();
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 const insertLeave = db.prepare(
-  `INSERT INTO leaves (user_id, start_date, end_date, kind, category, reason, status, days, created_ts, deduction_quote_json)
-   VALUES (@user_id, @start_date, @end_date, @kind, @category, @reason, 'PENDING', @days, @created_ts, @deduction_quote_json)`
+  `INSERT INTO leaves (user_id, start_date, end_date, kind, category, reason, status, days, created_ts, emergency_type, deduction_quote_json)
+   VALUES (@user_id, @start_date, @end_date, @kind, @category, @reason, 'PENDING', @days, @created_ts, @emergency_type, @deduction_quote_json)`
 );
 const leavesForUser = db.prepare(`SELECT * FROM leaves WHERE user_id = ? ORDER BY start_date DESC`);
 const getLeave = db.prepare(`SELECT * FROM leaves WHERE id = ?`);
@@ -38,9 +38,14 @@ const presentLeave = leave => {
   const { deduction_quote_json, ...fields } = describeLeave(leave);
   return { ...fields, deduction_estimate: savedDeduction(leave) };
 };
-const present = leaves => leaves.map(presentLeave);
+const present = leaves => describeLeaves(leaves).map(leave => { const { deduction_quote_json, ...fields } = leave; return { ...fields, deduction_estimate:savedDeduction(leave) }; });
 const fail = (res, e) => res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not update leave. Please try again.' });
 const personalLeaveUnavailable = res => res.status(403).json({ error: 'Personal leave is not available for admin accounts.' });
+function checkShortDays(userId, leave) {
+  if (db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND status IN ('PENDING','APPROVED') AND date BETWEEN ? AND ? LIMIT 1").get(userId,leave.start_date,leave.end_date)) {
+    throw Object.assign(new Error('Short Day time already covers a date in this request. Resolve the overlapping time with management before recording full/half-day leave.'), {status:409});
+  }
+}
 
 function employeeLeaveHistory(userId) {
   const balances = syncBalance(userId), leaves = leavesForUser.all(userId), today = todayStr();
@@ -70,7 +75,7 @@ router.post('/preview', requireAuth, (req, res) => {
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
-    const leave = normalizeLeave(req.body, { allowPast: req.user.role === 'ADMIN', requireReason: false });
+    const leave = { ...normalizeLeave(req.body, { allowPast: req.user.role === 'ADMIN', requireReason: false }), user_id:userId, status:'PENDING' };
     assertAvailable(userId, leave);
     res.json({ leave: { ...describeLeave(leave), deduction_estimate: estimateDeduction(userId, leave) }, balances: syncBalance(userId), categories: CATEGORIES });
   } catch (e) { return fail(res, e); }
@@ -80,8 +85,9 @@ router.post('/preview', requireAuth, (req, res) => {
 router.post('/', requireAuth, (req, res) => {
   if (req.user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
-    const leave = normalizeLeave(req.body);
+    const leave = { ...normalizeLeave(req.body), user_id:req.user.id, status:'PENDING' };
     const created = db.transaction(() => {
+      checkShortDays(req.user.id,leave);
       if (overlappingLeaves.get(req.user.id, leave.end_date, leave.start_date)) throw Object.assign(new Error('You already have a leave request covering some of these dates.'), { status: 409 });
       assertAvailable(req.user.id, leave);
       const info = insertLeave.run({ ...leave, user_id: req.user.id, created_ts: now().toMillis(), deduction_quote_json: JSON.stringify(estimateDeduction(req.user.id, leave)) });
@@ -115,8 +121,8 @@ router.post('/:id/cancel', require('../requestValidation').validateParams, requi
 // Recorded as already APPROVED — balance is deducted and the employee is told.
 // Past dates are allowed here on purpose (recording what already happened).
 const insertApprovedLeave = db.prepare(
-  `INSERT INTO leaves (user_id, start_date, end_date, kind, category, reason, status, days, decided_by, decided_ts, created_ts, deduction_quote_json)
-   VALUES (@user_id, @start_date, @end_date, @kind, @category, @reason, 'APPROVED', @days, @decided_by, @decided_ts, @created_ts, @deduction_quote_json)`
+  `INSERT INTO leaves (user_id, start_date, end_date, kind, category, reason, status, days, decided_by, decided_ts, created_ts, emergency_type, deduction_quote_json)
+   VALUES (@user_id, @start_date, @end_date, @kind, @category, @reason, 'APPROVED', @days, @decided_by, @decided_ts, @created_ts, @emergency_type, @deduction_quote_json)`
 );
 router.post('/admin', requireAdmin, (req, res) => {
   const user = getUser.get(Number(req.body.user_id));
@@ -125,8 +131,9 @@ router.post('/admin', requireAdmin, (req, res) => {
   let leaveId;
   let leave;
   try {
-    leave = normalizeLeave(req.body, { allowPast: true, requireReason: false });
+    leave = { ...normalizeLeave(req.body, { allowPast: true, requireReason: false }), user_id:user.id, status:'APPROVED' };
     db.transaction(() => {
+      checkShortDays(user.id,leave);
       if (overlappingLeaves.get(user.id, leave.end_date, leave.start_date)) throw Object.assign(new Error(`${user.name} already has a leave covering some of these dates.`), { status: 409 });
       assertAvailable(user.id, leave);
       leaveId = insertApprovedLeave.run({ ...leave, user_id: user.id, decided_by: req.user.id, decided_ts: now().toMillis(), created_ts: now().toMillis(), deduction_quote_json: JSON.stringify(estimateDeduction(user.id, leave)) }).lastInsertRowid;
@@ -217,6 +224,7 @@ router.post('/:id/decide', require('../requestValidation').validateParams, requi
       if (!leave) throw Object.assign(new Error('Not found'), { status: 404 });
       if (leave.status !== 'PENDING') throw Object.assign(new Error('Already decided'), { status: 409 });
       if (decision === 'APPROVED') {
+        checkShortDays(leave.user_id,leave);
         // Revalidate legacy/auto-flagged requests and available category credit.
         normalizeLeave(leave, { allowPast: true, requireReason: false });
         assertAvailable(leave.user_id, leave, leave.id);
