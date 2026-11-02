@@ -6,6 +6,13 @@ const { DateTime, ZONE } = require('./time');
 const { slipEligibility } = require('./employeeSalary');
 
 const fontDir = path.join(__dirname, '..', 'assets', 'fonts');
+const logo = path.join(__dirname, '..', 'public', 'img', 'Color Logo.jpg');
+// Company letterhead in LIT_Nexus_Staff_Policy_Final.pdf, supplied by the owner.
+const company = {
+  name: 'LIT Nexus LLP',
+  street: 'Cabin No. 12, First Floor, Big Bang Tower, Plot No. E279',
+  city: 'Sector-75, Industrial Area, Mohali, Punjab - 160071',
+};
 const money = value => Number.isSafeInteger(value) ? 'INR ' + (value / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Not recorded';
 const safeText = value => String(value ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').replace(/[\u2010-\u2015]/g, '-').slice(0, 240) || 'Not recorded';
 const dayCount = value => `${value} ${value === 1 ? 'day' : 'days'}`;
@@ -19,7 +26,7 @@ function renderSalarySlip(report, row) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({ size: 'A4', margins: { top: 48, right: 48, bottom: 48, left: 48 }, bufferPages: true,
-      info: { Title: `Salary slip - ${report.month}`, Author: 'LIT Nexus', CreationDate: new Date(report.calculated_ts) } });
+      info: { Title: `Salary slip - ${report.month}`, Author: company.name, CreationDate: new Date(report.calculated_ts) } });
     doc.on('data', chunk => chunks.push(chunk));
     doc.on('error', reject);
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -36,27 +43,28 @@ function renderSalarySlip(report, row) {
       function ensureSpace(height) {
         if (y + height <= 740) return;
         doc.addPage();
-        text('LIT NEXUS  /  Salary slip - ' + report.month, 48, 40, { size: 11, bold: true });
+        doc.image(logo, 30, 17, { width: 145 });
+        text('Salary slip - ' + report.month, 285, 40, { size: 11, bold: true, width: width - 237, align: 'right' });
         y = 78;
       }
       function paragraph(value, options = {}) {
         doc.font(options.bold ? 'Bold' : 'Body').fontSize(options.size || 10);
         const height = doc.heightOfString(value, { width, lineGap: 3 });
-        ensureSpace(height + 12);
-        text(value, 48, y, { ...options, lineGap: 3 }); y += height + 12;
+        ensureSpace(height + 8);
+        text(value, 48, y, { ...options, lineGap: 3 }); y += height + 8;
       }
       function grid(left, right) {
         const fieldWidth = (width - 28) / 2;
         doc.font('Body').fontSize(11);
         const values = [safeText(left[1]), safeText(right[1])];
         const height = Math.max(...values.map(value => doc.heightOfString(value, { width: fieldWidth, lineGap: 2 })));
-        ensureSpace(height + 42);
+        ensureSpace(height + 30);
         [left, right].forEach((field, index) => {
           const x = 48 + index * (fieldWidth + 28);
           text(field[0].toUpperCase(), x, y, { width: fieldWidth, size: 8, color: muted, bold: true });
           text(values[index], x, y + 17, { width: fieldWidth, size: 11, lineGap: 2 });
         });
-        y += height + 39;
+        y += height + 27;
       }
       function amountRow(label, amount, total = false) {
         ensureSpace(42);
@@ -64,18 +72,19 @@ function renderSalarySlip(report, row) {
         text(label, total ? 60 : 48, y + 7, { width: width * 0.61, bold: total, size: total ? 12 : 10 });
         text(amount, 48 + width * 0.61, y + 7, { width: width * 0.39 - (total ? 12 : 0), align: 'right', bold: total, size: total ? 13 : 11, color: total ? teal : navy });
         if (!total) doc.moveTo(48, y + 34).lineTo(48 + width, y + 34).strokeColor(line).lineWidth(0.6).stroke();
-        y += 43;
+        y += total ? 43 : 38;
       }
 
-      doc.rect(48, 42, 5, 29).fill(teal);
-      text('LIT NEXUS', 64, 40, { size: 21, bold: true, width: 230 });
-      text('EMPLOYEE PORTAL', 64, 70, { size: 8, color: muted, width: 230 });
+      doc.image(logo, 17, 13, { width: 235 });
       text('Salary slip', 320, 43, { size: 21, bold: true, width: doc.page.width - 368, align: 'right' });
       const month = DateTime.fromISO(report.month + '-01').toFormat('LLLL yyyy');
-      text(month, 48, 105, { size: 15, bold: true });
-      text(`Reference: ${report.month}/${row.id}`, 320, 108, { width: doc.page.width - 368, align: 'right', size: 9, color: muted });
-      doc.moveTo(48, 139).lineTo(48 + width, 139).strokeColor(line).stroke();
-      y = 157;
+      text(month, 320, 76, { size: 12, bold: true, width: doc.page.width - 368, align: 'right' });
+      text(company.name, 48, 104, { size: 9, bold: true, width: 225 });
+      text(`Reference: ${report.month}/${row.id}`, 320, 104, { width: doc.page.width - 368, align: 'right', size: 9, color: muted });
+      text(company.street, 48, 119, { size: 8.5, color: muted });
+      text(company.city, 48, 132, { size: 8.5, color: muted });
+      doc.moveTo(48, 157).lineTo(48 + width, 157).strokeColor(line).stroke();
+      y = 175;
       grid(['Employee', row.name], ['Employee code', row.emp_code]);
       grid(['Department', row.department], ['Title', row.title]);
       grid(['Employment this month', `${date(row.employed_from)} - ${date(row.employed_to)}`], ['Calculation', row.status === 'REVIEWED' ? 'Confirmed by admin' : 'Calculated from recorded sources']);
@@ -88,20 +97,21 @@ function renderSalarySlip(report, row) {
       }
       amountRow('Salary to pay', money(row.salary_to_pay_paise), true);
       y += 12;
-      paragraph(`Calendar basis: ${report.divisor} days in ${month}. Approved paid leave: ${dayCount(row.paid_leave_days)}.`, { color: muted, size: 9 });
+      paragraph(`Calendar basis: ${report.divisor} days in ${month}. Approved paid leave: ${dayCount(row.paid_leave_days)}. Approved Short Day: ${row.approved_short_day_minutes || 0} minutes (no deduction).`, { color: muted, size: 9 });
       if (row.deduction_lines.length) {
         paragraph('Leave deduction calculation', { size: 11, bold: true });
         for (const item of row.deduction_lines) {
-          paragraph(`${money(item.monthly_gross_paise)} / ${report.divisor} calendar days x ${dayCount(item.unpaid_days)} unpaid\nLeave dates: ${item.dates.map(date).join(', ')}`, { size: 9, color: muted });
+          paragraph(`${money(item.monthly_gross_paise)} / ${report.divisor} calendar days x ${dayCount(item.unpaid_days)} unpaid\nLeave dates: ${item.date_details ? item.date_details.map(d => `${date(d.date)} (${d.unpaid_days} day; ${d.reasons.includes('FIRST_TWELVE') ? '1st-12th' : d.reasons.includes('MONTHLY_LIMIT') ? 'monthly paid limit' : 'annual entitlement'})`).join(', ') : item.dates.map(date).join(', ')}`, { size: 9, color: muted });
         }
       }
+      paragraph('Leave policy: the 1st-12th is unpaid. Outside it, regular paid leave is limited to 1.5 scheduled days per month; unused monthly allowance does not accumulate. Flexi and birthday/anniversary have separate annual entitlements. Only scheduled working time is charged; weekends and full holidays are excluded, and half holidays have 0.5 working day.', { size:8, color:muted });
       paragraph('Amounts are based on recorded monthly gross salary and approved unpaid leave. Tax, bonuses and other payroll adjustments are not recorded in this calculation. This slip does not confirm payment.', { size: 8, color: muted });
       const generated = DateTime.fromMillis(report.calculated_ts, { zone: ZONE }).toFormat('d LLL yyyy, HH:mm ZZZZ');
       paragraph('Generated ' + generated + (row.review?.reviewed_ts ? ' | Salary confirmed ' + DateTime.fromMillis(row.review.reviewed_ts, { zone: ZONE }).toFormat('d LLL yyyy') : ''), { size: 8, color: muted });
       const pages = doc.bufferedPageRange();
       for (let page = pages.start; page < pages.start + pages.count; page++) {
         doc.switchToPage(page);
-        text(`LIT Nexus | ${report.month} | Page ${page + 1} of ${pages.count}`, 48, 775, { size: 8, color: muted, align: 'center' });
+        text(`${company.name} | ${report.month} | Page ${page + 1} of ${pages.count}`, 48, 775, { size: 8, color: muted, align: 'center' });
       }
       doc.end();
     } catch (error) { doc.destroy(); reject(error); }

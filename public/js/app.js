@@ -457,7 +457,7 @@
         ${statCard('Current session', `${badge(status.state)}`, 'value small')}
         ${statCard('Worked this session day', fmtMins(status.workedMinutes), 'value small')}
         ${statCard('Break this session day', fmtMins(status.breakMinutes), 'value small')}
-        ${mine ? statCard('Leave balance', `${mine.balance} days`, 'value small') : ''}
+        ${mine ? statCard('Regular paid leave this month', `${mine.balances.monthly_regular.available} / 1.5 days`, 'value small') : ''}
         ${statCard('Open tasks', openTasks, 'value')}
         ${mine ? statCard('Pending leave requests', pending, 'value') : ''}`;
       $('#dashLeaveBalances').innerHTML = mine ? leaveBalanceMarkup(mine.balances) : '';
@@ -809,34 +809,46 @@
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" role="img"><line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e3eaf1"/>${bars}${labels}</svg>`;
   }
   // ---------- Leaves ----------
-  const LEAVE_CATEGORIES = { REGULAR: 'Regular paid leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' };
+  const LEAVE_CATEGORIES = { REGULAR: 'Regular leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' };
   const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${value === 'REGULAR' ? 'Regular leave' : label}</option>`).join('');
   const leaveTypeLabel = l => `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
   const salaryMoney = paise => Number.isSafeInteger(paise) && paise >= 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100) : 'Unavailable';
-  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}${l.deduction_estimate?.version === 1 ? ' · Historical 30-day basis' : ''}`;
+  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}${l.deduction_estimate?.version === 1 ? ' · Historical 30-day basis' : l.deduction_estimate && l.deduction_estimate.version < 3 ? ' · Historical estimate before monthly-limit policy' : ''}`;
   function leavePreviewMarkup(leave, admin = false) {
     const estimate = leave.deduction_estimate;
     const available = estimate?.status === 'AVAILABLE';
     const money = paise => salaryMoney(paise).replace(/\.00$/, '');
     const days = n => `${n} ${n === 1 ? 'day' : 'days'}`;
-    return `<div class="leave-preview-heading"><strong>${days(leave.days)} total</strong><span>${leave.paid_days} paid · ${leave.unpaid_days} unpaid</span></div>
+    return `<div class="leave-preview-heading"><strong>${days(leave.days)} total</strong><span>${leave.paid_days} paid · ${leave.unpaid_days} unpaid${leave.non_working_days ? ` · ${leave.non_working_days} non-working` : ''}</span></div>
       <div class="leave-preview-deduction"><span>Estimated deduction</span><strong>${available ? money(estimate.total_paise) : 'Unavailable'}</strong></div>
       ${!available ? `<p class="leave-preview-note">${admin ? 'Add the employee’s salary' : 'Ask an admin to add your salary'} to see the amount. You can still ${admin ? 'save this leave' : 'apply'}.</p>` : ''}
       <details class="leave-preview-details"><summary>Calculation &amp; leave rules</summary><div>
         ${available ? estimate.items.map(item => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ ${item.divisor || estimate.divisor} × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
-        <p>${leave.unpaid_days ? 'Leave on the 1st–12th is unpaid, even when paid leave is available.' : 'No unpaid days in this request.'} Only paid days use the selected leave balance.</p>
-        <p>Deductions use monthly gross salary effective on each leave date, divided by the actual calendar days in that month. Half days count as 0.5. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
-        <p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
+        <p>The 1st–12th is unpaid. Outside it, regular paid leave is limited to 1.5 scheduled days each month; excess is unpaid. Unused monthly allowance does not accumulate. Only paid working time uses leave balance.</p>
+        <p>Deductions use monthly gross salary effective on each leave date, divided by the actual calendar days in that month. Weekends and full holidays are excluded; a half holiday has only 0.5 working day. Half-day leave uses up to 0.5 scheduled day. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
+        ${leave.policy_notes?.map(note => `<p>${esc(note)}</p>`).join('') || ''}<p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
       </div></details>`;
   }
   function leaveBalanceMarkup(b, activity) {
     if (!b) return '';
     const labels = { regular: 'Regular leave', flexi: 'Flexi leave', special: 'Birthday / anniversary' };
     return `<section class="section leave-balance-panel"><h3>Leave balances</h3>
-      <p class="page-sub">${fmtDate(b.period.start)} – ${fmtDate(b.period.end)} · Resets every 1 October · ${b.balance} days remaining after approved leave</p>
-      <div class="cards">${Object.entries(labels).map(([key,label]) => { const p = b.buckets[key]; return `<div class="card stat"><div class="label">${label}</div><div class="value small">${p.remaining} / ${p.entitlement} days</div><div class="leave-balance-note">${p.used} approved paid days · ${p.pending} pending · ${p.available} available to request</div></div>`; }).join('')}</div>
+      <p class="page-sub">${fmtDate(b.period.start)} – ${fmtDate(b.period.end)} · Annual entitlements reset every 1 October · ${b.balance} annual paid days remaining</p>
+      ${b.monthly_regular ? `<p><strong>Regular paid leave · ${esc(b.monthly_regular.month)}: ${b.monthly_regular.available} / 1.5 days available</strong><br>${b.monthly_regular.used} approved · ${b.monthly_regular.pending} reserved for pending requests. Strict monthly limit; unused days do not accumulate. Annual remaining balance does not increase this limit.</p>` : ''}
+      <div class="cards">${Object.entries(labels).map(([key,label]) => { const p = b.buckets[key]; return `<div class="card stat"><div class="label">${label}</div><div class="value small">${p.remaining} / ${p.entitlement} days</div><div class="leave-balance-note">${p.used} approved paid days · ${p.pending} pending · ${p.available} annual credits available${key === 'regular' ? '; monthly limit applies' : ''}</div></div>`; }).join('')}</div>
       ${activity ? `<div class="cards employee-leave-stats">${statCard('Taken this leave year', activity.taken_days, 'value small')}${statCard('Approved upcoming days', activity.upcoming_days, 'value small')}${statCard('Pending days', activity.pending_days, 'value small')}</div><p class="leave-balance-note">Taken includes paid and unpaid approved leave through today. Upcoming and pending days are shown separately for this leave year (${activity.pending_requests} pending requests).</p>` : ''}
-      <p class="leave-balance-note">Birthday and anniversary share one paid day. Pending requests reserve balance until approved, rejected or cancelled. Leave from the 1st–12th is unpaid and does not use paid leave. Next reset: ${fmtDate(b.period.nextReset)}.</p></section>`;
+      <p class="leave-balance-note">Flexi and the shared birthday/anniversary day are separate from the 1.5-day monthly regular allowance. Pending requests reserve credit. The 1st–12th is unpaid for every category. Only scheduled working time is charged. Next annual reset: ${fmtDate(b.period.nextReset)}.</p>${leavePolicyMarkup()}</section>`;
+  }
+  function leavePolicyMarkup() {
+    return `<details class="leave-preview-details"><summary>Staff leave policy and payroll rules</summary><div>
+      <p><strong>Paid leave:</strong> annual limits are 18 regular, 1 Flexi and 1 shared birthday/anniversary day, reset on 1 October without annual carryover. Regular paid leave is capped at 1.5 scheduled days in each month with no monthly accumulation. Additional regular leave is unpaid. Flexi is available only after the 15th and needs no explanation.</p>
+      <p><strong>Unpaid leave:</strong> all scheduled leave on the 1st–12th is unpaid, including special categories. Only scheduled working time is deducted: weekends and full holidays are excluded; published working weekends count; half holidays have 0.5 working day. Daily rate = monthly gross ÷ actual calendar days in the salary month. The monthly limit replaces the former three-consecutive-day deduction rule.</p>
+      <p><strong>Requests:</strong> apply at least three days ahead unless there is an emergency. For three or more planned scheduled leave days, inform management a month ahead or at least 20 days before; health emergencies are exempt. Management should respond within one business day. Leave adjoining a long weekend or public holiday needs specific approval and may be refused. Half-day leave counts up to 0.5 scheduled day.</p>
+      <p><strong>Short Day:</strong> up to two hours per month, approved by management in advance and planned around work and deadlines. A short attendance flag alone does not create a salary deduction. Use the Short Day request below. Pending requests reserve minutes; only requests approved before their start are valid. Short Day time is separate from full/half-day leave.</p>
+      <p><strong>Before payroll:</strong> check dates, scheduled working time, approvals and paid/unpaid treatment. Management must check and explain deductions; ask for attendance or leave errors to be corrected before payroll is processed.</p>
+      <p><strong>Fun Friday:</strong> twice a month, with approval and team coordination; sessions last 40–90 minutes excluding breaks, without affecting client work.</p>
+      <p><strong>Month-end bonus:</strong> management considers punctuality, attendance, deadlines, client appreciation, extra effort, learning, quality, ownership, teamwork and process improvement. Send the Bonus Email before 6 PM on the last working day. Recipients are announced after processing; amounts remain private. No automatic bonus amount is specified by this policy.</p>
+    </div></details>`;
   }
   function mountTeamLeaves() {
     $('#markLeaveBtn').addEventListener('click', () => openMarkLeaveModal());
@@ -873,6 +885,7 @@
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${todayISO()}"></div>
         <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${todayISO()}"></div></div>
       <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
+      <div class="form-row one"><div class="field"><label for="mlEmergency">Emergency exception</label><select id="mlEmergency"><option value="NONE">None — planned leave</option><option value="HEALTH">Health emergency</option><option value="OTHER">Other emergency</option></select></div></div>
       <div id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
     if (LEAVE_BALANCES.some(user => String(user.id) === myPerfUserId)) $('#mlUser').value = myPerfUserId;
@@ -896,10 +909,10 @@
       LEAVE_BALANCES = rows;
       const el = $('#leaveSummary'); if (!el) return;
       el.innerHTML = rows.length ? `<p class="page-sub" style="margin:0 0 10px;">Click a row to see that employee's leave history.</p>
-        <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Total left</th><th>Regular</th><th>Flexi</th><th>Birthday / anniversary</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
+        <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Annual paid left</th><th>Regular · this month</th><th>Regular · annual</th><th>Flexi</th><th>Birthday / anniversary</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
         ${rows.map((r) => `<tr style="cursor:pointer;" data-leave-emp="${r.id}" data-leave-name="${esc(r.name)}"><td><strong>${esc(r.name)}</strong></td><td>${esc(r.department || '—')}</td>
           <td><strong>${r.balance}</strong> ${r.balance === 1 ? 'day' : 'days'}</td>
-          <td>${r.balances.buckets.regular.remaining}</td><td>${r.balances.buckets.flexi.remaining}</td><td>${r.balances.buckets.special.remaining}</td>
+          <td>${r.balances.monthly_regular.available} / 1.5</td><td>${r.balances.buckets.regular.remaining}</td><td>${r.balances.buckets.flexi.remaining}</td><td>${r.balances.buckets.special.remaining}</td>
           <td>${daysLabel(r.taken30)}</td><td>${daysLabel(r.takenYear)}</td></tr>`).join('')}
       </tbody></table></div>` : `<div class="empty">No employees.</div>`;
       el.querySelectorAll('[data-leave-emp]').forEach((tr) => tr.addEventListener('click', () => openLeaveBreakdown(tr.dataset.leaveEmp, tr.dataset.leaveName)));
@@ -912,7 +925,7 @@
       const { leaves } = await api.get(`/leaves/for/${userId}`);
       $('#lbBody').innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th></tr></thead><tbody>
         ${leaves.map((l) => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${leavePaymentLabel(l)}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`).join('')}
+          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.policy_notes?.map(note => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`).join('')}
       </tbody></table>` : `<div class="empty">No leave records.</div>`;
     } catch (e) { $('#lbBody').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
     const done = document.createElement('div');
@@ -959,9 +972,11 @@
       if (current !== employeeLeaveVersion || !host.isConnected || selectedEmployee()?.id !== user.id) return;
       host.innerHTML = leaveBalanceMarkup(balances, activity) + `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` + (leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
         ${leaves.map(l => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
+          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.non_working_days ? ` · ${l.non_working_days} non-working` : ''}${l.policy_notes?.map(note => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
           <td>${l.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>`) : esc(l.admin_note || '—')}</td></tr>`).join('')}
         </tbody></table>` : '<div class="empty">No leave requests yet.</div>') + '</div>';
+      host.insertAdjacentHTML('beforeend', '<div class="section" id="employeeShortDays"></div>');
+      await loadEmployeeShortDays(user, current);
       wireLeaveApprovals();
       host.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', async () => {
         button.disabled = true;
@@ -971,15 +986,53 @@
     } catch (e) { if (current === employeeLeaveVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
   }
 
+  function shortDayTable(records, team = false) {
+    if (!records.length) return '<p class="empty">No Short Day requests.</p>';
+    return `<div class="table-wrap"><table><thead><tr>${team ? '<th>Employee</th>' : ''}<th>Date / local start</th><th>Minutes</th><th>Status</th><th>Action / note</th></tr></thead><tbody>${records.map(r => `<tr>${team ? `<td>${esc(r.name)}</td>` : ''}<td>${fmtDate(r.date)} · ${esc(r.start_time)}<div class="leave-balance-note">${esc(r.timezone)}</div></td><td>${r.minutes}</td><td>${badge(r.status)}</td><td>${r.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-short-approve="${r.id}">Approve Short Day</button><button class="btn btn-danger btn-sm" data-short-reject="${r.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-short-cancel="${r.id}">Cancel</button>`) : esc(r.admin_note || '—')}${r.reason ? `<div class="leave-balance-note">${esc(r.reason)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  function wireShortDays(root) {
+    root.querySelectorAll('[data-short-approve],[data-short-reject],[data-short-cancel]').forEach(button => {
+      if (button.dataset.wired) return; button.dataset.wired = '1';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        const id = button.dataset.shortApprove || button.dataset.shortReject || button.dataset.shortCancel;
+        try {
+          await api.post(`/short-days/${id}/${button.dataset.shortCancel ? 'cancel' : 'decide'}`, button.dataset.shortCancel ? {} : {decision:button.dataset.shortApprove ? 'APPROVED' : 'REJECTED'});
+          toast('Short Day updated'); await refreshEmployeeLeaveData();
+        } catch(e) { toast(e.message,true); button.disabled = false; }
+      });
+    });
+  }
+  async function loadEmployeeShortDays(user, version) {
+    const root = $('#employeeShortDays'); if (!root) return;
+    try {
+      const data = await api.get('/short-days' + (isAdmin() ? '?user_id=' + user.id : ''));
+      if (!root.isConnected || version !== employeeLeaveVersion) return;
+      root.innerHTML = `<h3>Short Day · ${esc(data.month)}</h3><p>${data.used_minutes} / 120 minutes approved · ${data.pending_minutes} pending · ${data.available_minutes} available. Management approval is required before the start time. Approved time has no automatic salary deduction.</p>${isAdmin() ? '' : '<button class="btn btn-ghost" id="requestShortDay">Request Short Day</button>'}${shortDayTable(data.requests)}`;
+      $('#requestShortDay')?.addEventListener('click', () => openShortDayRequest(data.timezone));
+      wireShortDays(root);
+    } catch(e) { if (root.isConnected) root.textContent = e.message; }
+  }
+  function openShortDayRequest(timezone) {
+    modal(`<h3>Request Short Day</h3><p>Up to two hours per month, with management approval before the start. Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${todayISO()}"></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="60"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">Submit request</button></div>`);
+    $('#mCancel').addEventListener('click',closeModal);
+    $('#sdSubmit').addEventListener('click', async () => {
+      const button = $('#sdSubmit'); button.disabled = true;
+      try { await api.post('/short-days',{date:$('#sdDate').value,start_time:$('#sdTime').value,minutes:Number($('#sdMinutes').value),reason:$('#sdReason').value}); closeModal(); toast('Short Day requested'); await refreshEmployeeLeaveData(); }
+      catch(e) { $('#sdStatus').textContent = e.message; button.disabled = false; }
+    });
+  }
+
   // One preview path for employee requests and admin-recorded leave. Stale
   // responses cannot enable a submit button for a different set of dates.
   function wireLeavePreview(prefix, buttonSelector, admin = false) {
     const start = $('#' + prefix + 'Start'), end = $('#' + prefix + 'End');
     const kind = $('#' + prefix + 'Kind'), category = $('#' + prefix + 'Category');
+    const emergency = $('#' + prefix + 'Emergency');
     const reason = $('#' + prefix + 'Reason'), preview = $('#' + prefix + 'Preview');
     const user = admin ? $('#mlUser') : null, button = $(buttonSelector);
     let valid = false, busy = false, version = 0;
-    const payload = () => ({ start_date: start.value, end_date: kind.value === 'HALF' ? start.value : end.value, kind: kind.value, category: category.value, reason: reason.value, ...(admin ? { user_id: Number(user.value) } : {}) });
+    const payload = () => ({ start_date: start.value, end_date: kind.value === 'HALF' ? start.value : end.value, kind: kind.value, category: category.value, reason: reason.value, emergency_type:emergency.value, ...(admin ? { user_id: Number(user.value) } : {}) });
     const updateButton = () => { button.disabled = !valid || busy; };
     const refresh = async () => {
       const current = ++version;
@@ -998,7 +1051,7 @@
       } catch (e) { if (current === version && preview.isConnected) { preview.textContent = e.message; preview.classList.add('error'); } }
       if (current === version) updateButton();
     };
-    [start, end, kind, category, user].filter(Boolean).forEach(el => el.addEventListener('change', refresh));
+    [start, end, kind, category, emergency, user].filter(Boolean).forEach(el => el.addEventListener('change', refresh));
     refresh();
     return { payload, ready: () => valid && !busy, saving: value => { busy = value; updateButton(); } };
   }
@@ -1011,6 +1064,7 @@
         <div class="field"><label>End date</label><input type="date" id="lEnd" value="${todayISO()}"></div></div>
       <div class="form-row one"><div class="field"><label>Duration</label><select id="lKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
       <div class="form-row one"><div class="field"><label id="lReasonLabel">Reason *</label><textarea id="lReason" placeholder="Required — e.g. family function, medical, personal work"></textarea></div></div>
+      <div class="form-row one"><div class="field"><label for="lEmergency">Emergency exception</label><select id="lEmergency"><option value="NONE">None — planned leave</option><option value="HEALTH">Health emergency</option><option value="OTHER">Other emergency</option></select><p class="page-sub">Apply three days ahead; three or more planned leave days need at least 20 days’ notice. Health emergencies are exempt.</p></div></div>
       <div id="lPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSubmit" disabled>Submit request</button></div>`);
     const form = wireLeavePreview('l', '#mSubmit');
@@ -1030,7 +1084,7 @@
     return `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Action</th></tr></thead><tbody>
       ${leaves.map((l) => `<tr>
         <td>${esc(l.name)}</td><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-        <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${leavePaymentLabel(l)}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
+        <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.policy_notes?.map(note => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
         <td><div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button>
           <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div></td>
       </tr>`).join('')}</tbody></table>`;
@@ -1078,10 +1132,11 @@
 
   async function loadAdminLeaves() {
     try {
-      const { leaves } = await api.get('/leaves/pending');
+      const [{ leaves }, { requests:shortDays }] = await Promise.all([api.get('/leaves/pending'), api.get('/short-days/pending')]);
       const host = $('#adminLeaves'); if (!host) return;
       host.innerHTML = `<h2>Pending approvals (${leaves.length})</h2>${leaves.length ? leaveApprovalTable(leaves) : `<div class="empty">Nothing waiting.</div>`}`;
-      wireLeaveApprovals();
+      host.insertAdjacentHTML('beforeend', `<h3>Pending Short Day approvals (${shortDays.length})</h3>${shortDayTable(shortDays,true)}`);
+      wireLeaveApprovals(); wireShortDays(host);
     } catch (e) { toast(e.message, true); }
   }
 
@@ -2957,7 +3012,7 @@
         <p class="leave-balance-note">Admin only. Employees can see their own deduction estimate. Unpaid leave uses monthly gross salary ÷ calendar days in the leave month × unpaid days, including 0.5 for a half day. Add an effective date when salary changes; earlier rates and saved estimates are retained.</p>
         ${salary.rates.length ? `<details><summary>Recorded salary history</summary><div class="leave-table-wrap"><table><thead><tr><th>Effective from</th><th>Monthly gross</th></tr></thead><tbody>${salary.rates.map(rate => `<tr><td>${fmtDate(rate.effective_from)}</td><td>${salaryMoney(rate.monthly_gross_paise)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       </div>
-      <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid leave. Resets each 1 October.</div></div>
+      <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">Annual ceilings: 18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid time. Resets each 1 October. Regular paid leave has a strict 1.5-day monthly limit; unused monthly credit does not accumulate.</div></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);

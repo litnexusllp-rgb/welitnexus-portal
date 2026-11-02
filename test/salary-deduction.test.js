@@ -28,36 +28,36 @@ test('private gross salary and leave deduction estimates', async t => {
     assert.equal(estimateDeduction(id,leave()).total_paise,100000);
     assert.equal(estimateDeduction(id,leave('2026-11-05',{kind:'HALF'})).total_paise,50000);
     assert.equal(estimateDeduction(id,leave('2027-02-05')).total_paise,107143);
-    assert.equal(estimateDeduction(id,leave('2028-02-05')).total_paise,103448);
-    assert.equal(estimateDeduction(id,leave('2026-12-05')).total_paise,96774);
-    assert.equal(estimateDeduction(id,leave('2026-12-05',{kind:'HALF'})).total_paise,48387);
-    assert.equal(estimateDeduction(id,leave('2028-02-05')).items[0].divisor,29);
+    assert.equal(estimateDeduction(id,leave('2028-02-04')).total_paise,103448);
+    assert.equal(estimateDeduction(id,leave('2026-12-04')).total_paise,96774);
+    assert.equal(estimateDeduction(id,leave('2026-12-04',{kind:'HALF'})).total_paise,48387);
+    assert.equal(estimateDeduction(id,leave('2028-02-04')).items[0].divisor,29);
     const q=estimateDeduction(id,leave('2026-11-11',{end_date:'2026-11-14'}));assert.equal(q.unpaid_days,2);assert.equal(q.total_paise,200000);
   });
   await t.test('boundaries, paid requests and zero salaries are explicit',()=>{
     const id=add();saveSalary(id,salary('30000'),admin);
-    for(const date of ['2026-11-01','2026-11-12']) assert.equal(estimateDeduction(id,leave(date)).total_paise,100000);
-    for(const date of ['2026-11-13','2026-09-05']) assert.equal(estimateDeduction(id,leave(date)).total_paise,0);
+    for(const date of ['2026-11-02','2026-11-12']) assert.equal(estimateDeduction(id,leave(date)).total_paise,100000);
+    for(const date of ['2026-11-01','2026-11-13','2026-09-05']) assert.equal(estimateDeduction(id,leave(date)).total_paise,0);
     const zero=add();saveSalary(zero,salary('0'),admin);const q=estimateDeduction(zero,leave());assert.equal(q.status,'AVAILABLE');assert.equal(q.total_paise,0);
   });
   await t.test('effective salary dates and cross-month ranges use applicable recorded rates',()=>{
     const id=add();saveSalary(id,salary('30000'),admin);saveSalary(id,salary('60000','2026-11-01'),admin);saveSalary(id,salary('90000','2026-11-06'),admin);
     assert.equal(estimateDeduction(id,leave('2026-10-05')).total_paise,96774);
     const q=estimateDeduction(id,leave('2026-11-05',{end_date:'2026-11-06'}));assert.equal(q.total_paise,500000);assert.equal(q.items.length,2);
-    const crossing=estimateDeduction(id,leave('2026-10-12',{end_date:'2026-11-02'}));assert.equal(crossing.unpaid_days,3);assert.equal(crossing.total_paise,496774);assert.deepEqual(crossing.items.map(item=>item.divisor),[31,30]);
+    const crossing=estimateDeduction(id,leave('2026-10-12',{end_date:'2026-11-02'}));assert.equal(crossing.unpaid_days,14.5);assert.equal(crossing.total_paise,1506452);assert.deepEqual(crossing.items.map(item=>item.divisor),[31,30]);
   });
   await t.test('round once per request using integer paise and half-day units',()=>{
     const id=add();saveSalary(id,salary('1000.01'),admin);
-    assert.equal(estimateDeduction(id,leave('2026-11-01',{end_date:'2026-11-03'})).total_paise,10000);
-    assert.equal(estimateDeduction(id,leave('2026-11-01',{kind:'HALF'})).total_paise,1667);
+    assert.equal(estimateDeduction(id,leave('2026-11-02',{end_date:'2026-11-04'})).total_paise,10000);
+    assert.equal(estimateDeduction(id,leave('2026-11-02',{kind:'HALF'})).total_paise,1667);
     assert.equal(validateSalary(salary('12345.67')).monthly_gross_paise,1234567);
   });
   await t.test('cross-month fractions round only after adding every month',()=>{
     const id=add();saveSalary(id,salary('0.01'),admin);
     const quote=estimateDeduction(id,leave('2026-11-01',{end_date:'2026-12-12'}));
-    assert.equal(quote.total_paise,1);assert.equal(quote.unpaid_days,24);
+    assert.equal(quote.total_paise,1);assert.equal(quote.unpaid_days,28.5);
     assert.deepEqual(quote.items.map(item=>item.divisor),[30,31]);assert.equal(quote.day_basis,'CALENDAR_MONTH');
-    assert.equal(quote.version,2);
+    assert.equal(quote.version,3);
   });
   await t.test('missing or partly missing salary is unavailable, not a zero estimate',()=>{
     const id=add();let q=estimateDeduction(id,leave());assert.equal(q.status,'MISSING_SALARY');assert.equal(q.total_paise,null);
@@ -111,7 +111,7 @@ test('private gross salary and leave deduction estimates', async t => {
   });
   await t.test('client monetary payloads are ignored; missing salary does not block leave',async()=>{
     const id=add();saveSalary(id,salary('30000'),admin);
-    const r=await request(id,'leaves','POST',leave('2026-11-08',{monthly_gross:1,deduction_quote_json:'{"total_paise":1}',deduction_estimate:{total_paise:1},paid_days:1}));assert.equal(r.status,200);assert.equal(r.body.leave.deduction_estimate.total_paise,100000);assert.equal(r.body.balances.balance,20);
+    const r=await request(id,'leaves','POST',leave('2026-11-09',{monthly_gross:1,deduction_quote_json:'{"total_paise":1}',deduction_estimate:{total_paise:1},paid_days:1}));assert.equal(r.status,200);assert.equal(r.body.leave.deduction_estimate.total_paise,100000);assert.equal(r.body.balances.balance,20);
     const missing=add();const q=await request(missing,'leaves','POST',leave());assert.equal(q.status,200);assert.equal(q.body.leave.deduction_estimate.status,'MISSING_SALARY');
   });
   await t.test('admin-recorded leave saves the same estimate; legacy rows remain unpriced',async()=>{

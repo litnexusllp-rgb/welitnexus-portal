@@ -7,6 +7,8 @@
   const date = iso => /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? new Date(iso + 'T00:00').toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : 'Unknown';
   const range = (from, to) => from === to ? date(from) : `${date(from)} – ${date(to)}`;
 
+  const ruleLabel = code => ({ FIRST_TWELVE:'Mandatory unpaid leave: 1st–12th', MONTHLY_LIMIT:'Regular leave above the 1.5-day monthly paid limit', ANNUAL_LIMIT:'Annual category entitlement exhausted' }[code] || code);
+
   function calculation(row, readOnly = false) {
     const confirmed = row.status === 'REVIEWED';
     const automatic = (row.calculation_status || row.status) === 'CALCULATED';
@@ -22,13 +24,14 @@
       <p>Employment this month: ${esc(range(row.employed_from, row.employed_to))} · ${days(row.employed_calendar_days)}.</p>
       <h3>Salary rates</h3>
       ${row.rate_lines.length ? row.rate_lines.map(line => `<p>${esc(range(line.from, line.to))} · ${days(line.calendar_days)}<br>Monthly gross ${money(line.monthly_gross_paise)} ÷ ${row.divisor} = ${money(line.monthly_gross_paise / row.divisor)} per day</p>`).join('') : (readOnly ? '<p>Ask an admin to record your salary for this month.</p>' : '<p>Add the applicable salary in Employees → Personal information.</p>')}
+      <p>Short Day: ${row.approved_short_day_minutes || 0} minutes approved separately (up to 120 minutes per month); ${row.pending_short_day_minutes || 0} pending. Approved Short Day time has no leave deduction.</p>
       <h3>Approved unpaid leave deduction</h3>
-      ${row.deduction_lines.map(line => `<p>${money(line.monthly_gross_paise)} ÷ ${row.divisor} × ${days(line.unpaid_days)} unpaid<br><span class="salary-muted">${line.dates.map(date).map(esc).join(', ')}</span></p>`).join('')}
+      ${row.deduction_lines.map(line => `<p>${money(line.monthly_gross_paise)} ÷ ${row.divisor} × ${days(line.unpaid_days)} unpaid<br><span class="salary-muted">${line.dates.map(date).map(esc).join(', ')}${line.reasons?.length ? '<br>' + line.reasons.map(ruleLabel).map(esc).join('; ') : ''}</span></p>`).join('')}
       <p><strong>${money(row.deduction_paise)}</strong>${row.deduction_paise === null ? ' · Cannot calculate the complete deduction until missing records are resolved.' : row.unpaid_leave_days ? ' · Total rounded once to the nearest paise.' : ' · No approved unpaid leave this month.'}</p>
       ${automatic ? `<p class="salary-equation">Automatic calculation: ${money(row.monthly_gross_paise)} gross − ${money(row.deduction_paise)} leave deduction = <strong>${money(row.calculated_salary_to_pay_paise ?? row.salary_to_pay_paise)}</strong></p>` : row.full_month_reference_after_leave_paise !== null ? `<p class="salary-equation">Full-month reference: ${money(row.monthly_gross_paise)} − ${money(row.deduction_paise)} = <strong>${money(row.full_month_reference_after_leave_paise)}</strong><br><span class="salary-muted">Before any part-month adjustment. ${confirmed ? 'The confirmed amount above is used in the total.' : 'For review only; excluded from the salary-to-pay total.'}</span></p>` : '<p class="salary-muted">No prorated monthly gross is assumed. Use the available calculations above to review the final amount.</p>'}
       ${row.pending_requests ? `<p>${row.pending_requests} pending leave request(s) are not deducted.</p>` : ''}
-      ${row.approved_leaves.length ? `<details><summary>Approved leave records (${row.approved_leaves.length})</summary><div class="table-wrap"><table><thead><tr><th>Dates</th><th>Paid days</th><th>Unpaid days</th></tr></thead><tbody>${row.approved_leaves.map(leave => `<tr><td>${esc(range(leave.start_date, leave.end_date))}</td><td>${leave.paid_days}</td><td>${leave.unpaid_days}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
-      <p class="salary-muted">Daily rates are displayed rounded. Deductions use exact salary amounts and half-day units, then round once for the month. Only leave on the 1st–12th, from October 2026, is unpaid.</p>
+      ${row.approved_leaves.length ? `<details><summary>Approved leave records (${row.approved_leaves.length})</summary><div class="table-wrap"><table><thead><tr><th>Dates</th><th>Paid days</th><th>Unpaid days</th><th>Non-working</th></tr></thead><tbody>${row.approved_leaves.map(leave => `<tr><td>${esc(range(leave.start_date, leave.end_date))}</td><td>${leave.paid_days}</td><td>${leave.unpaid_days}</td><td>${leave.non_working_days || 0}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+      <p class="salary-muted">Daily rates are displayed rounded. Deductions use exact salary amounts and scheduled half-day units, then round once for the month. From October 2026, the 1st–12th is unpaid. Outside it, regular paid leave has a strict 1.5-day monthly limit; excess is unpaid. Flexi and birthday/anniversary have separate annual entitlements. ${row.non_working_leave_days || 0} non-working leave days are excluded. Weekends/full holidays are excluded and half holidays count only the working half. Approved short-day time does not automatically create a salary deduction.</p>
     </div>`;
   }
 

@@ -32,7 +32,7 @@ test('October leave year, category credits and unpaid dates', async t => {
     const res = await fetch(`http://127.0.0.1:${server.address().port}/api/${url}`, { method, headers:{cookie:cookie(id),'content-type':'application/json'}, ...(body ? { body:JSON.stringify(body) } : {}) });
     return { status:res.status, body:await res.json() };
   };
-  const body = (start, category='REGULAR', extra={}) => ({start_date:start,end_date:start,kind:'FULL',category,reason:'Synthetic leave',...extra});
+  const body = (start, category='REGULAR', extra={}) => ({start_date:start,end_date:start,kind:'FULL',category,reason:'Synthetic leave',emergency_type:'HEALTH',...extra});
   const rawLeave = (id,start,end,status='APPROVED',category='REGULAR',kind='FULL') => db.prepare('INSERT INTO leaves(user_id,start_date,end_date,kind,category,reason,status,days,created_ts) VALUES(?,?,?,?,?,?,?,?,0)').run(id,start,end,kind,category,'Existing source record',status,kind==='HALF'?0.5:require('../src/time').inclusiveDays(start,end)).lastInsertRowid;
 
   await t.test('reset retains audit and source history, deducts only approved paid days since October',async()=>{
@@ -40,7 +40,7 @@ test('October leave year, category credits and unpaid dates', async t => {
     rawLeave(id,'2026-09-18','2026-09-19'); rawLeave(id,'2026-10-05','2026-10-05'); rawLeave(id,'2026-10-15','2026-10-15'); rawLeave(id,'2026-10-22','2026-10-22','PENDING');
     const before=db.prepare('SELECT * FROM leaves WHERE user_id=?').all(id);
     let r=await request(id,'leaves/mine'); assert.equal(r.status,200); assert.equal(r.body.balance,19);
-    assert.equal(r.body.balances.buckets.regular.remaining,17); assert.equal(r.body.balances.buckets.regular.pending,1); assert.equal(r.body.balances.buckets.regular.available,16);
+    assert.equal(r.body.balances.buckets.regular.remaining,17); assert.equal(r.body.balances.buckets.regular.pending,0.5); assert.equal(r.body.balances.buckets.regular.available,16.5);
     assert.equal(r.body.balances.buckets.flexi.remaining,1); assert.equal(r.body.balances.buckets.special.remaining,1);
     assert.equal(r.body.leaves.find(l=>l.start_date==='2026-10-05').pay_status,'UNPAID');
     await request(id,'leaves/mine');
@@ -57,11 +57,11 @@ test('October leave year, category credits and unpaid dates', async t => {
     Settings.now=()=>Date.parse('2026-10-21T10:00:00+05:30');
   });
   await t.test('1st and 12th are unpaid, 13th paid; mixed ranges and half days split exactly',()=>{
-    for(const date of ['2026-11-01','2026-11-12']) assert.equal(policy.describeLeave(body(date)).unpaid_days,1);
+    for(const date of ['2026-11-02','2026-11-12']) assert.equal(policy.describeLeave(body(date)).unpaid_days,1);
     assert.equal(policy.describeLeave(body('2026-11-13')).paid_days,1);
-    const mixed=policy.describeLeave(body('2026-11-11','REGULAR',{end_date:'2026-11-14'}));assert.equal(mixed.paid_days,2);assert.equal(mixed.unpaid_days,2);assert.equal(mixed.pay_status,'MIXED');
+    const mixed=policy.describeLeave(body('2026-11-11','REGULAR',{end_date:'2026-11-14'}));assert.equal(mixed.paid_days,1);assert.equal(mixed.unpaid_days,2);assert.equal(mixed.pay_status,'MIXED');
     const half=policy.normalizeLeave(body('2026-11-12','REGULAR',{kind:'HALF',end_date:'2026-11-20'}));assert.equal(half.end_date,'2026-11-12');assert.equal(policy.describeLeave(half).unpaid_days,0.5);
-    const crossing=policy.describeLeave(body('2027-09-30','REGULAR',{end_date:'2027-10-13'}));assert.deepEqual(crossing.charges,[{period:'2026-10-01',bucket:'regular',days:1},{period:'2027-10-01',bucket:'regular',days:1}]);assert.equal(crossing.unpaid_days,12);
+    const crossing=policy.describeLeave(body('2027-09-30','REGULAR',{end_date:'2027-10-13'}));assert.deepEqual(crossing.charges,[{period:'2026-10-01',bucket:'regular',days:1},{period:'2027-10-01',bucket:'regular',days:1}]);assert.equal(crossing.unpaid_days,8);
     assert.equal(policy.describeLeave(body('2026-09-01')).unpaid_days,0);
   });
   await t.test('regular requests reserve credit; cancellation/rejection releases it',async()=>{
@@ -74,7 +74,7 @@ test('October leave year, category credits and unpaid dates', async t => {
     assert.equal((await request(id,'leaves/mine')).body.balances.available,20);
   });
   await t.test('approval deducts once; duplicate/concurrent decisions have one notification',async()=>{
-    const id=employee();const r=await request(id,'leaves','POST',body('2026-10-25'));const rid=r.body.leave.id;
+    const id=employee();const r=await request(id,'leaves','POST',body('2026-10-26'));const rid=r.body.leave.id;
     const results=await Promise.all([request(admin,`leaves/${rid}/decide`,'POST',{decision:'APPROVED'}),request(admin,`leaves/${rid}/decide`,'POST',{decision:'APPROVED'})]);
     assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);assert.equal(policy.syncBalance(id).balance,19);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM notifications WHERE user_id=? AND title='Leave approved'").get(id).n,1);
@@ -96,10 +96,10 @@ test('October leave year, category credits and unpaid dates', async t => {
     assert.equal((await request(admin,'leaves/admin','POST',body('2026-11-15','FLEXI',{user_id:id}))).status,400);
   });
   await t.test('unpaid leave works with zero balance and ignores client payment/day claims',async()=>{
-    const id=employee();rawLeave(id,'2026-10-13','2026-10-30');rawLeave(id,'2026-11-16','2026-11-16','APPROVED','FLEXI');rawLeave(id,'2026-11-17','2026-11-17','APPROVED','BIRTHDAY');assert.equal(policy.syncBalance(id).balance,0);
-    let r=await request(id,'leaves','POST',body('2026-12-12','REGULAR',{paid_days:1,unpaid_days:0,days:99,pay_status:'PAID'}));assert.equal(r.status,200);assert.equal(r.body.leave.days,1);assert.equal(r.body.leave.paid_days,0);assert.equal(r.body.leave.unpaid_days,1);
+    const id=employee(); for(let m=0;m<12;m++) { const d=require('../src/time').DateTime.fromISO('2026-10-13').plus({months:m}); let start=d; while(start.weekday>5) start=start.plus({days:1}); let next=start.plus({days:1}); while(next.weekday>5) next=next.plus({days:1}); rawLeave(id,start.toISODate(),start.toISODate()); rawLeave(id,next.toISODate(),next.toISODate(),'APPROVED','REGULAR','HALF'); } rawLeave(id,'2026-11-16','2026-11-16','APPROVED','FLEXI');rawLeave(id,'2026-11-17','2026-11-17','APPROVED','BIRTHDAY');assert.equal(policy.syncBalance(id).balance,0);
+    let r=await request(id,'leaves','POST',body('2026-12-10','REGULAR',{paid_days:1,unpaid_days:0,days:99,pay_status:'PAID'}));assert.equal(r.status,200);assert.equal(r.body.leave.days,1);assert.equal(r.body.leave.paid_days,0);assert.equal(r.body.leave.unpaid_days,1);
     r=await request(admin,`leaves/${r.body.leave.id}/decide`,'POST',{decision:'APPROVED'});assert.equal(r.status,200);assert.equal(r.body.balances.balance,0);
-    assert.equal((await request(id,'leaves','POST',body('2026-12-13'))).status,409);
+    assert.equal((await request(id,'leaves','POST',body('2026-12-17'))).status,200);
   });
   await t.test('admin recording, auto-flagged legacy requests and profile totals use the same rules',async()=>{
     const id=employee();let r=await request(admin,'leaves/admin','POST',body('2026-10-08','REGULAR',{user_id:id}));assert.equal(r.status,200);assert.equal(r.body.balances.balance,20);
@@ -118,8 +118,8 @@ test('October leave year, category credits and unpaid dates', async t => {
     assert.equal((await request(other,`leaves/${r.body.leave.id}/cancel`,'POST',{})).status,404);
   });
   await t.test('future leave year uses its own pool without consuming the current year',async()=>{
-    const id=employee();let r=await request(id,'leaves','POST',body('2027-10-16','FLEXI'));assert.equal(r.status,200);assert.equal(r.body.balances.available,20);
-    assert.equal((await request(id,'leaves','POST',body('2027-10-17','FLEXI'))).status,409);
+    const id=employee();let r=await request(id,'leaves','POST',body('2027-10-18','FLEXI'));assert.equal(r.status,200);assert.equal(r.body.balances.available,20);
+    assert.equal((await request(id,'leaves','POST',body('2027-10-19','FLEXI'))).status,409);
   });
   await t.test('admins have no personal leave; employee management and existing records remain',async()=>{
     const otherAdmin=employee('ADMIN'),id=employee();
@@ -153,7 +153,7 @@ test('October leave year, category credits and unpaid dates', async t => {
     const own=await request(id,'leaves/mine'),managed=await request(admin,`leaves/for/${id}`);
     assert.equal(own.status,200);assert.deepEqual(own.body,managed.body);assert.equal(own.body.leaves.length,112);
     assert.deepEqual(own.body.activity,{taken_days:4.5,upcoming_days:2,pending_days:2.5,pending_requests:2});
-    assert.equal(own.body.balances.entitlement,20);assert.equal(own.body.balances.balance,16);
+    assert.equal(own.body.balances.entitlement,20);assert.equal(own.body.balances.balance,18.5);
     assert.equal((await request(other,`leaves/for/${id}`)).status,403);
     assert.equal((await request(admin,'leaves/for/999999')).status,404);
     assert.equal((await request(admin,'leaves/for/invalid')).status,400);

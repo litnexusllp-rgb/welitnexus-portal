@@ -1,7 +1,7 @@
 'use strict';
 
 const { DateTime, ZONE, now, todayStr } = require('./time');
-const { EFFECTIVE } = require('./leavePolicy');
+const { VERSION, periodFor, calendarFrom, calculateLeaves } = require('./leaveCalculation');
 const { employmentError, overlapsEmployment } = require('./employment');
 const { createHash } = require('node:crypto');
 
@@ -24,13 +24,19 @@ function buildSalaries(db, month = todayStr().slice(0, 7), userId = null) {
       .filter(user => overlapsEmployment(user, period.start, period.end));
     const salaries = db.prepare(`SELECT user_id,effective_from,monthly_gross_paise FROM employee_salary_rates WHERE effective_from<=? ${userId === null ? '' : 'AND user_id=?'} ORDER BY effective_from DESC`).all(period.end,...scope);
     const leaves = db.prepare(`SELECT id,user_id,start_date,end_date,kind,category,status FROM leaves
-      WHERE status IN ('APPROVED','PENDING') AND start_date<=? AND end_date>=? ${userId === null ? '' : 'AND user_id=?'} ORDER BY start_date,id`).all(period.end, period.start,...scope);
+      WHERE status IN ('APPROVED','PENDING') AND start_date<=? AND end_date>=? ${userId === null ? '' : 'AND user_id=?'} ORDER BY start_date,id`).all(period.end, periodFor(period.start).start,...scope);
     const reviews = db.prepare(`SELECT r.*,u.name AS reviewer_name FROM salary_month_reviews r
       JOIN users u ON u.id=r.reviewed_by WHERE r.month=? ${userId === null ? '' : 'AND r.user_id=?'}`).all(month,...scope);
+    const shortDays = db.prepare(`SELECT id,user_id,date,start_time,timezone,start_ts,minutes,status,decided_ts FROM short_day_requests WHERE date BETWEEN ? AND ? ${userId === null ? '' : 'AND user_id=?'} ORDER BY date,id`).all(period.start,period.end,...scope);
+    const calendar = calendarFrom(db), ledger = calculateLeaves(leaves, calendar);
+    const calendarInputs = { holidays:[...calendar.holidays].filter(([date]) => date >= periodFor(period.start).start && date <= period.end), working:[...calendar.working].filter(date => date >= periodFor(period.start).start && date <= period.end) };
     const rows = users.map(user => {
       const rates = salaries.filter(s => s.user_id === user.id), userLeaves = leaves.filter(l => l.user_id === user.id);
-      const row = employeeSalary(user, period, rates, userLeaves);
-      const inputs = { version:2, day_basis:'CALENDAR_MONTH', divisor:period.divisor, month, user:{ id:user.id, active:user.active, join_date:user.join_date, exit_date:user.exit_date }, rates, leaves:userLeaves };
+      const row = employeeSalary(user, period, rates, userLeaves.filter(l => l.start_date <= period.end && l.end_date >= period.start), ledger);
+      const userShortDays = shortDays.filter(s => s.user_id === user.id);
+      row.approved_short_day_minutes = userShortDays.filter(s => s.status === 'APPROVED').reduce((n,s) => n+s.minutes,0);
+      row.pending_short_day_minutes = userShortDays.filter(s => s.status === 'PENDING').reduce((n,s) => n+s.minutes,0);
+      const inputs = { version:VERSION, short_days:userShortDays, calendar:calendarInputs, day_basis:'CALENDAR_MONTH', divisor:period.divisor, month, user:{ id:user.id, active:user.active, join_date:user.join_date, exit_date:user.exit_date }, rates, leaves:userLeaves };
       row.source_fingerprint = createHash('sha256').update(JSON.stringify(inputs)).digest('hex');
       row.calculation_status = row.status;
       row.calculated_salary_to_pay_paise = row.salary_to_pay_paise;
@@ -54,7 +60,7 @@ function buildSalaries(db, month = todayStr().slice(0, 7), userId = null) {
     const included = [...calculated, ...reviewed];
     return { ...period, currency: 'INR', day_basis: 'CALENDAR_MONTH', basis: 'MONTHLY_GROSS', calculated_ts: now().toMillis(),
       period_state: month < todayStr().slice(0, 7) ? 'ENDED' : month === todayStr().slice(0, 7) ? 'IN_PROGRESS' : 'UPCOMING',
-      scope: 'Monthly gross less approved unpaid leave only. Tax, bonuses, attendance penalties and other adjustments are not included.',
+      scope: 'Monthly gross less approved unpaid scheduled leave. The 1st–12th is unpaid; outside it, regular paid leave is limited to 1.5 days per month. Flexi and special leave have separate annual entitlements. Tax, bonuses and other adjustments are not included.',
       totals: { employees: rows.length, calculated: calculated.length, reviewed:reviewed.length, included:included.length, review: rows.length - included.length,
         pending_requests: rows.reduce((sum, row) => sum + row.pending_requests, 0),
         gross_paise: calculated.reduce((sum, row) => sum + row.monthly_gross_paise, 0),
@@ -63,7 +69,7 @@ function buildSalaries(db, month = todayStr().slice(0, 7), userId = null) {
   }).deferred();
 }
 
-function employeeSalary(user, period, rates, leaves) {
+function employeeSalary(user, period, rates, leaves, ledger) {
   const reasons = new Set(), days = new Map(), rateLines = new Map(), deductionLines = new Map();
   const invalidEmployment = employmentError(user.join_date, user.exit_date);
   if (invalidEmployment || !user.join_date || (!user.active && !user.exit_date)) reasons.add('Confirm the joining and last working dates.');
@@ -74,7 +80,7 @@ function employeeSalary(user, period, rates, leaves) {
   while (date.toISODate() <= to) {
     const iso = date.toISODate(), rate = rates.find(rate => rate.effective_from <= iso);
     employedDays++;
-    days.set(iso, { rate, units: 0 });
+    days.set(iso, { rate, units:0, paid:0, unpaid:0, reasons:new Set() });
     if (!rate) missingSalaryDays++;
     else {
       const key = rate.effective_from;
@@ -94,18 +100,25 @@ function employeeSalary(user, period, rates, leaves) {
       invalidLeave = true; reasons.add(`Review invalid approved leave #${leave.id}.`); continue;
     }
     if (leave.kind === 'HALF' && leave.start_date < period.start) continue;
-    const line = { ...leave, paid_days: 0, unpaid_days: 0 };
+    const line = { ...leave, paid_days:0, unpaid_days:0, non_working_days:0, date_lines:[] };
+    const treatment = ledger.get(leave);
+    if (!treatment || treatment.pay_status === 'REVIEW') { invalidLeave = true; reasons.add(`Review invalid approved leave #${leave.id}.`); continue; }
     const start = leave.start_date > period.start ? leave.start_date : period.start;
     const end = leave.kind === 'HALF' ? leave.start_date : leave.end_date < period.end ? leave.end_date : period.end;
     let day = DateTime.fromISO(start, { zone: ZONE });
     while (day.toISODate() <= end && day.toISODate() <= period.end) {
       const iso = day.toISODate(), record = days.get(iso), units = leave.kind === 'HALF' ? 1 : 2;
+      const treatmentDay = treatment.date_lines.find(d => d.date === iso);
       if (!record) reasons.add(`Approved leave #${leave.id} falls outside employment dates.`);
       else {
         if (record.units) reasons.add('Approved leave overlaps: confirm the records before payment.');
         record.units = Math.min(2, record.units + units);
-        if (iso >= EFFECTIVE && day.day <= 12) line.unpaid_days += units / 2;
-        else line.paid_days += units / 2;
+        line.paid_days += treatmentDay.paid_days; line.unpaid_days += treatmentDay.unpaid_days; line.non_working_days += treatmentDay.non_working_days;
+        line.date_lines.push(treatmentDay);
+        record.capacity = Math.max(record.capacity || 0, treatmentDay.scheduled_days);
+        record.paid = Math.min(record.capacity, record.paid + treatmentDay.paid_days);
+        record.unpaid = Math.min(record.capacity - record.paid, record.unpaid + treatmentDay.unpaid_days);
+        if (treatmentDay.unpaid_reason) record.reasons.add(treatmentDay.unpaid_reason);
       }
       day = day.plus({ days: 1 });
     }
@@ -113,14 +126,15 @@ function employeeSalary(user, period, rates, leaves) {
   }
   let numerator = 0, unpaid = 0, paid = 0, missingDeductionSalary = false;
   for (const [iso, day] of days) {
-    if (!day.units) continue;
-    if (iso < EFFECTIVE || Number(iso.slice(8, 10)) > 12) { paid += day.units / 2; continue; }
-    unpaid += day.units / 2;
+    paid += day.paid; unpaid += day.unpaid;
+    if (!day.unpaid) continue;
     if (!day.rate) { missingDeductionSalary = true; continue; }
-    numerator += day.rate.monthly_gross_paise * day.units;
+    numerator += day.rate.monthly_gross_paise * day.unpaid * 2;
     const key = day.rate.effective_from;
-    if (!deductionLines.has(key)) deductionLines.set(key, { effective_from: key, monthly_gross_paise: day.rate.monthly_gross_paise, unpaid_days: 0, dates: [] });
-    const line = deductionLines.get(key); line.unpaid_days += day.units / 2; line.dates.push(iso);
+    if (!deductionLines.has(key)) deductionLines.set(key, { effective_from: key, monthly_gross_paise: day.rate.monthly_gross_paise, unpaid_days: 0, dates: [], reasons:[], date_details:[] });
+    const line = deductionLines.get(key); line.unpaid_days += day.unpaid; line.dates.push(iso);
+    line.reasons = [...new Set([...line.reasons, ...day.reasons])];
+    line.date_details.push({date:iso,unpaid_days:day.unpaid,reasons:[...day.reasons]});
   }
   const deduction = missingDeductionSalary || invalidLeave ? null : Math.round(numerator / (2 * period.divisor));
   const gross = !missingSalaryDays && amounts.size === 1 ? [...amounts][0] : null;
@@ -129,7 +143,7 @@ function employeeSalary(user, period, rates, leaves) {
   return { id: user.id, name: user.name, emp_code: user.emp_code, department: user.department, title: user.title,
     active: user.active, join_date: user.join_date, exit_date: user.exit_date,
     employed_from: from, employed_to: to, employed_calendar_days: employedDays, divisor: period.divisor,
-    monthly_gross_paise: gross, paid_leave_days: paid, unpaid_leave_days: unpaid, deduction_paise: deduction,
+    monthly_gross_paise: gross, non_working_leave_days:leaveLines.reduce((sum,l) => sum+l.non_working_days,0), paid_leave_days: paid, unpaid_leave_days: unpaid, deduction_paise: deduction,
     salary_to_pay_paise: status === 'CALCULATED' ? reference : null,
     full_month_reference_after_leave_paise: status === 'REVIEW' ? reference : null,
     status, review_reasons: [...reasons], pending_requests: leaves.filter(leave => leave.status === 'PENDING').length,
