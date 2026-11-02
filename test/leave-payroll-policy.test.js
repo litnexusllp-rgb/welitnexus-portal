@@ -72,6 +72,17 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal(oct.deduction_paise,50000);assert.equal(nov.deduction_paise,981667);
     assert.equal(estimateDeduction(id,{start_date:'2026-10-29',end_date:'2026-11-16',kind:'FULL',category:'REGULAR',id:db.prepare('SELECT id FROM leaves WHERE user_id=?').get(id).id,status:'APPROVED'}).total_paise,1031667);
   });
+  await t.test('admin direct-record preview uses approval priority and matches the saved estimate and payroll',async()=>{
+    const id=add();salary(id);leave(id,'2026-11-13');leave(id,'2026-11-16','FULL','PENDING');
+    const draft={start_date:'2026-11-17',end_date:'2026-11-17',kind:'FULL',category:'REGULAR',reason:'Synthetic'};
+    const employeePreview=await req(id,'leaves/preview','POST',draft);
+    assert.equal(employeePreview.status,200);assert.equal(employeePreview.body.leave.unpaid_days,1);
+    const preview=await req(admin,'leaves/preview','POST',{...draft,user_id:id,status:'PENDING'});
+    assert.equal(preview.status,200);assert.equal(preview.body.leave.paid_days,0.5);assert.equal(preview.body.leave.unpaid_days,0.5);
+    const saved=await req(admin,'leaves/admin','POST',{...draft,user_id:id});
+    assert.equal(saved.status,200);assert.equal(saved.body.leave.deduction_estimate.total_paise,preview.body.leave.deduction_estimate.total_paise);
+    assert.equal(row(id,'2026-11').deduction_paise,preview.body.leave.deduction_estimate.total_paise);
+  });
   await t.test('calendar changes invalidate salary confirmations and do not rewrite source leaves or saved estimates',()=>{
     const id=add();salary(id);leave(id,'2026-10-06');
     const before=row(id),sources=db.prepare('SELECT * FROM leaves WHERE user_id=?').all(id);
