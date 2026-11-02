@@ -37,7 +37,7 @@ test('unknown and admin-only routes fall back safely; signed-out links survive l
  h.c.ME=null;h.c.window.location.hash='#/myperf';h.listeners.hashchange();assert.equal(h.c.window.location.hash,'#/myperf');
  h.c.ME={role:'EMPLOYEE'};h.c.navigate(h.c.viewFromAddress(),true);assert.equal(h.renders.at(-1),'employees');
  const a=harness('#/bonuses',true);a.c.navigate(a.c.viewFromAddress(),true);assert.equal(a.renders[0],'bonuses');
- const salaries=harness('#/salaries');salaries.c.navigate(salaries.c.viewFromAddress(),true);assert.equal(salaries.renders[0],'dashboard');
+ const salaries=harness('#/salaries');salaries.c.navigate(salaries.c.viewFromAddress(),true);assert.equal(salaries.renders[0],'employees');
  const adminSalaries=harness('#/salaries',true);adminSalaries.c.navigate(adminSalaries.c.viewFromAddress(),true);assert.equal(adminSalaries.renders[0],'employees');
 });
 

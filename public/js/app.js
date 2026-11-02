@@ -361,7 +361,7 @@
   function navigate(view, fromAddress = false) {
     if (!ME) return;
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
-    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'salaries'];
+    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
     const employeeAliases = { myperf: 'employeePerformance', leaves: 'employeeLeaves', salaries: 'employeeSalary' };
     const legacyEmployeeView = Object.hasOwn(employeeAliases, view);
@@ -2562,7 +2562,7 @@
   VIEWS.employees = async () => {
     if (!myPerfMonth) myPerfMonth = thisMonthISO();
     const admin = isAdmin(), section = employeeSection;
-    setMain('Employees', admin ? 'Performance, leave, salary calculations and personal information in one place.' : 'Your performance, leave and personal information in one place.',
+    setMain('Employees', admin ? 'Performance, leave, salary calculations and personal information in one place.' : 'Your performance, leave, salary calculations and personal information in one place.',
       `<div id="employeesRoot"><p role="status">Loading employees…</p></div>`);
     const host = $('#employeesRoot');
     try {
@@ -2577,11 +2577,11 @@
         <div class="field"><label for="perfMonth">Month</label><input type="month" id="perfMonth" value="${myPerfMonth}"></div>
         <button class="btn btn-ghost" id="employeeRefresh">Refresh</button>
         ${admin ? '<button class="btn btn-primary" id="addEmpBtn">+ Add employee</button>' : ''}</div>
-        <div class="employee-section-links" aria-label="Employee sections"><button class="btn btn-ghost" data-employee-section="employeePerformance">Performance</button><button class="btn btn-ghost" data-employee-section="employeeLeaves">Leaves</button>${admin ? '<button class="btn btn-ghost" data-employee-section="employeeSalary">Salary calculations</button>' : ''}<button class="btn btn-ghost" data-employee-section="employeePersonal">Personal information</button></div>
+        <div class="employee-section-links" aria-label="Employee sections"><button class="btn btn-ghost" data-employee-section="employeePerformance">Performance</button><button class="btn btn-ghost" data-employee-section="employeeLeaves">Leaves</button><button class="btn btn-ghost" data-employee-section="employeeSalary">Salary calculations</button><button class="btn btn-ghost" data-employee-section="employeePersonal">Personal information</button></div>
         <section class="section employee-section" id="employeePerformance" tabindex="-1" aria-labelledby="employeePerformanceTitle"><h2 id="employeePerformanceTitle">Performance</h2><div class="cards" id="myKpiCards"></div><div class="pcal" id="myCal"></div></section>
         <section class="section employee-section" id="employeeLeaves" tabindex="-1" aria-labelledby="employeeLeavesTitle"><div class="toolbar"><h2 id="employeeLeavesTitle">Leaves</h2>${admin ? '<div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn">Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave</button></div>' : '<button class="btn btn-primary" id="applyBtn">+ Apply for leave</button>'}</div><div id="employeeLeaveDetails"></div>
           ${admin ? '<details class="employee-team-leaves"><summary>Team approvals, upcoming leave and balances</summary><div class="section leave-table-wrap" id="adminLeaves"></div><div class="section"><h3 id="onLeaveHeading">On leave — current &amp; upcoming</h3><div class="leave-table-wrap" id="onLeave"></div></div><div class="section"><h3>Team leave balances</h3><div class="leave-table-wrap" id="leaveSummary"></div></div></details>' : ''}
-          ${admin ? '<section class="employee-section" id="employeeSalary" tabindex="-1" aria-labelledby="employeeSalaryTitle"><div class="toolbar"><h3 id="employeeSalaryTitle">Salary calculations</h3><button class="btn btn-ghost" id="employeeSalaryScope">Show all employee salaries</button></div><p id="employeeSalaryName" class="page-sub"></p><div id="employeeSalaryMount"></div></section>' : ''}</section>
+          <section class="employee-section" id="employeeSalary" tabindex="-1" aria-labelledby="employeeSalaryTitle"><div class="toolbar"><h3 id="employeeSalaryTitle">Salary calculations</h3>${admin ? '<button class="btn btn-ghost" id="employeeSalaryScope">Show all employee salaries</button>' : ''}</div><p id="employeeSalaryName" class="page-sub"></p><div id="employeeSalaryMount"></div></section></section>
         <section class="section employee-section" id="employeePersonal" tabindex="-1" aria-labelledby="employeePersonalTitle"><h2 id="employeePersonalTitle">Personal information</h2><div id="employeeProfile"></div>${admin ? '<details class="employee-management"><summary>Manage all employees and access</summary><div class="table-wrap" id="empTable"></div></details>' : ''}</section>`;
       host.querySelectorAll('[data-employee-section]').forEach(button => button.addEventListener('click', () => scrollEmployeeSection(button.dataset.employeeSection)));
       $('#perfMonth').addEventListener('change', async event => {
@@ -2609,14 +2609,17 @@
 
   async function mountEmployeeSalary(team = false) {
     const host = $('#employeeSalaryMount'), user = selectedEmployee();
-    if (!host || !user || !isAdmin()) return;
+    if (!host || !user) return;
+    const admin = isAdmin(); team = admin && team;
     // Replacing the root also invalidates all outstanding worksheet responses.
     host.innerHTML = '<div id="employeeSalaryRoot"></div>';
-    $('#employeeSalaryScope').dataset.team = team ? '1' : '0';
-    $('#employeeSalaryScope').textContent = team ? 'Show selected employee salary' : 'Show all employee salaries';
+    if (admin) {
+      $('#employeeSalaryScope').dataset.team = team ? '1' : '0';
+      $('#employeeSalaryScope').textContent = team ? 'Show selected employee salary' : 'Show all employee salaries';
+    }
     $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + myPerfMonth;
     if (!team && user.role === 'ADMIN') { host.innerHTML = '<p class="empty">Admin accounts are outside the employee salary worksheet.</p>'; return; }
-    await window.Salaries.mount($('#employeeSalaryRoot'), { api, month: myPerfMonth, userId: team ? null : user.id,
+    await window.Salaries.mount($('#employeeSalaryRoot'), { api, month: myPerfMonth, userId: team ? null : user.id, readOnly: !admin,
       onManage: () => scrollEmployeeSection('employeePersonal'),
       onMonthChange: month => { if (!/^\d{4}-\d{2}$/.test(month)) return; myPerfMonth = month; $('#perfMonth').value = month; $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + month; loadMyPerf(); } });
   }

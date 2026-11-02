@@ -29,7 +29,7 @@ function harness(admin) {
 test('Employees keeps all sections on one page, with role-specific actions and selected salary', async () => {
   for (const admin of [true, false]) {
     const h = harness(admin); await h.c.VIEWS.employees();
-    const order = ['employeePerformance', 'employeeLeaves', ...(admin ? ['employeeSalary'] : []), 'employeePersonal'];
+    const order = ['employeePerformance', 'employeeLeaves', 'employeeSalary', 'employeePersonal'];
     assert.ok(order.every((id, i) => i === 0 || h.html.indexOf(`id="${id}"`) > h.html.indexOf(`id="${order[i - 1]}"`)));
     if (admin) {
       assert.ok(h.html.includes('Mark leave')); assert.ok(!h.html.includes('Apply for leave'));
@@ -40,8 +40,8 @@ test('Employees keeps all sections on one page, with role-specific actions and s
       await h.elements.employeeSalaryScope.listeners.click(); assert.equal(h.salaries.at(-1).userId, null);
       h.salaries.at(-1).onMonthChange('2027-02'); assert.equal(h.elements.perfMonth.value, '2027-02');
     } else {
-      assert.ok(h.html.includes('Apply for leave')); assert.ok(!h.html.includes('employeeSalary'));
-      assert.ok(!h.html.includes('Manage all employees')); assert.ok(!h.html.includes('perfUser')); assert.equal(h.salaries.length, 0);
+      assert.ok(h.html.includes('Apply for leave')); assert.ok(h.html.includes('employeeSalary'));assert.equal(h.salaries[0].readOnly,true);assert.equal(h.salaries[0].userId,1);
+      assert.ok(!h.html.includes('Manage all employees')); assert.ok(!h.html.includes('perfUser')); assert.equal(h.salaries.length, 1);assert.ok(!h.html.includes('employeeSalaryScope'));
       assert.ok(!h.calls.includes('/users/manage')); assert.ok(!h.calls.includes('team'));
     }
   }
