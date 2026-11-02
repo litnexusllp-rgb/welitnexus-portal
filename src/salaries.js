@@ -9,7 +9,7 @@ const validDay = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.tes
 function monthRange(month) {
   const first = typeof month === 'string' && /^\d{4}-\d{2}$/.test(month) ? DateTime.fromISO(month + '-01', { zone: ZONE }) : null;
   if (!first?.isValid) throw Object.assign(new Error('Choose a valid salary month.'), { status: 400 });
-  return { month, start: first.toISODate(), end: first.endOf('month').toISODate() };
+  return { month, start: first.toISODate(), end: first.endOf('month').toISODate(), divisor: first.daysInMonth };
 }
 
 // Report reads never change data. Recalculate approved leave at the salary rate
@@ -28,7 +28,7 @@ function buildSalaries(db, month = todayStr().slice(0, 7)) {
     const rows = users.map(user => {
       const rates = salaries.filter(s => s.user_id === user.id), userLeaves = leaves.filter(l => l.user_id === user.id);
       const row = employeeSalary(user, period, rates, userLeaves);
-      const inputs = { version:1, month, user:{ id:user.id, active:user.active, join_date:user.join_date, exit_date:user.exit_date }, rates, leaves:userLeaves };
+      const inputs = { version:2, day_basis:'CALENDAR_MONTH', divisor:period.divisor, month, user:{ id:user.id, active:user.active, join_date:user.join_date, exit_date:user.exit_date }, rates, leaves:userLeaves };
       row.source_fingerprint = createHash('sha256').update(JSON.stringify(inputs)).digest('hex');
       row.calculation_status = row.status;
       row.calculated_salary_to_pay_paise = row.salary_to_pay_paise;
@@ -42,7 +42,7 @@ function buildSalaries(db, month = todayStr().slice(0, 7)) {
         else {
           row.status = 'REVIEW'; row.salary_to_pay_paise = null;
           row.full_month_reference_after_leave_paise ??= row.calculated_salary_to_pay_paise;
-          row.review_reasons.unshift(state === 'STALE' ? 'Source records changed. Check and confirm the salary again.' : 'Review was reopened. Confirm a new amount.');
+          row.review_reasons.unshift(state === 'STALE' ? 'Calculation rules or source records changed. Check and confirm the salary again.' : 'Review was reopened. Confirm a new amount.');
         }
       }
       return row;
@@ -50,7 +50,7 @@ function buildSalaries(db, month = todayStr().slice(0, 7)) {
     const calculated = rows.filter(row => row.status === 'CALCULATED');
     const reviewed = rows.filter(row => row.status === 'REVIEWED');
     const included = [...calculated, ...reviewed];
-    return { ...period, currency: 'INR', divisor: 30, basis: 'MONTHLY_GROSS', calculated_ts: now().toMillis(),
+    return { ...period, currency: 'INR', day_basis: 'CALENDAR_MONTH', basis: 'MONTHLY_GROSS', calculated_ts: now().toMillis(),
       period_state: month < todayStr().slice(0, 7) ? 'ENDED' : month === todayStr().slice(0, 7) ? 'IN_PROGRESS' : 'UPCOMING',
       scope: 'Monthly gross less approved unpaid leave only. Tax, bonuses, attendance penalties and other adjustments are not included.',
       totals: { employees: rows.length, calculated: calculated.length, reviewed:reviewed.length, included:included.length, review: rows.length - included.length,
@@ -120,13 +120,13 @@ function employeeSalary(user, period, rates, leaves) {
     if (!deductionLines.has(key)) deductionLines.set(key, { effective_from: key, monthly_gross_paise: day.rate.monthly_gross_paise, unpaid_days: 0, dates: [] });
     const line = deductionLines.get(key); line.unpaid_days += day.units / 2; line.dates.push(iso);
   }
-  const deduction = missingDeductionSalary || invalidLeave ? null : Math.round(numerator / 60);
+  const deduction = missingDeductionSalary || invalidLeave ? null : Math.round(numerator / (2 * period.divisor));
   const gross = !missingSalaryDays && amounts.size === 1 ? [...amounts][0] : null;
   const reference = gross !== null && deduction !== null ? gross - deduction : null;
   const status = reasons.size || reference === null ? 'REVIEW' : 'CALCULATED';
   return { id: user.id, name: user.name, emp_code: user.emp_code, department: user.department,
     active: user.active, join_date: user.join_date, exit_date: user.exit_date,
-    employed_from: from, employed_to: to, employed_calendar_days: employedDays,
+    employed_from: from, employed_to: to, employed_calendar_days: employedDays, divisor: period.divisor,
     monthly_gross_paise: gross, paid_leave_days: paid, unpaid_leave_days: unpaid, deduction_paise: deduction,
     salary_to_pay_paise: status === 'CALCULATED' ? reference : null,
     full_month_reference_after_leave_paise: status === 'REVIEW' ? reference : null,

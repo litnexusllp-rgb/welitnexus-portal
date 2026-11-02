@@ -549,3 +549,20 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .salary-resolution .field { max-width: 540px; margin-bottom: 12px; }
 .salary-confirmation { border-left: 4px solid var(--teal); }
 .salary-form-status { color: var(--danger); }
+
+/* The employee workspace follows one person through a single scrolling page. */
+#employeesRoot #myKpiCards { grid-template-columns: repeat(auto-fit,minmax(min(100%,160px),1fr)); }
+.employee-controls { flex-wrap: wrap; justify-content: flex-start; align-items: end; gap: 12px; }
+.employee-controls .field { margin: 0; }
+.employee-controls select { max-width: 100%; min-width: min(250px, 100%); }
+.employee-section-links { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.employee-section { scroll-margin-top: 24px; }
+.employee-section:focus { outline: none; }
+.employee-section h3 { color: var(--navy); margin: 20px 0 12px; }
+.employee-team-leaves, .employee-management { margin-top: 24px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.employee-team-leaves > summary, .employee-management > summary { cursor: pointer; font-weight: 600; color: var(--navy); }
+.employee-info { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,240px),1fr)); gap: 0 24px; margin: 16px 0; }
+.employee-info > div { padding: 12px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.employee-info dt { font-size: .8rem; color: var(--slate); margin-bottom: 6px; }
+.employee-info dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+.employee-leave-stats { margin-top: 18px; }

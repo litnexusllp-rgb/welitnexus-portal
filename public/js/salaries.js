@@ -21,9 +21,9 @@
       </form>` : ''}
       <p>Employment this month: ${esc(range(row.employed_from, row.employed_to))} · ${days(row.employed_calendar_days)}.</p>
       <h3>Salary rates</h3>
-      ${row.rate_lines.length ? row.rate_lines.map(line => `<p>${esc(range(line.from, line.to))} · ${days(line.calendar_days)}<br>Monthly gross ${money(line.monthly_gross_paise)} ÷ 30 = ${money(line.monthly_gross_paise / 30)} per day</p>`).join('') : '<p>Add the applicable salary in Admin → Employees.</p>'}
+      ${row.rate_lines.length ? row.rate_lines.map(line => `<p>${esc(range(line.from, line.to))} · ${days(line.calendar_days)}<br>Monthly gross ${money(line.monthly_gross_paise)} ÷ ${row.divisor} = ${money(line.monthly_gross_paise / row.divisor)} per day</p>`).join('') : '<p>Add the applicable salary in Employees → Personal information.</p>'}
       <h3>Approved unpaid leave deduction</h3>
-      ${row.deduction_lines.map(line => `<p>${money(line.monthly_gross_paise)} ÷ 30 × ${days(line.unpaid_days)} unpaid<br><span class="salary-muted">${line.dates.map(date).map(esc).join(', ')}</span></p>`).join('')}
+      ${row.deduction_lines.map(line => `<p>${money(line.monthly_gross_paise)} ÷ ${row.divisor} × ${days(line.unpaid_days)} unpaid<br><span class="salary-muted">${line.dates.map(date).map(esc).join(', ')}</span></p>`).join('')}
       <p><strong>${money(row.deduction_paise)}</strong>${row.deduction_paise === null ? ' · Cannot calculate the complete deduction until missing records are resolved.' : row.unpaid_leave_days ? ' · Total rounded once to the nearest paise.' : ' · No approved unpaid leave this month.'}</p>
       ${automatic ? `<p class="salary-equation">Automatic calculation: ${money(row.monthly_gross_paise)} gross − ${money(row.deduction_paise)} leave deduction = <strong>${money(row.calculated_salary_to_pay_paise ?? row.salary_to_pay_paise)}</strong></p>` : row.full_month_reference_after_leave_paise !== null ? `<p class="salary-equation">Full-month reference: ${money(row.monthly_gross_paise)} − ${money(row.deduction_paise)} = <strong>${money(row.full_month_reference_after_leave_paise)}</strong><br><span class="salary-muted">Before any part-month adjustment. ${confirmed ? 'The confirmed amount above is used in the total.' : 'For review only; excluded from the salary-to-pay total.'}</span></p>` : '<p class="salary-muted">No prorated monthly gross is assumed. Use the available calculations above to review the final amount.</p>'}
       ${row.pending_requests ? `<p>${row.pending_requests} pending leave request(s) are not deducted.</p>` : ''}
@@ -34,7 +34,7 @@
 
   function reportHtml(report) {
     const total = report.totals;
-    return `<p class="salary-scope">${esc(report.scope)}</p>
+    return `<p class="salary-scope">${esc(report.scope)} Daily rate: monthly gross ÷ ${report.divisor} calendar days in ${esc(report.month)}.</p>
       ${report.period_state !== 'ENDED' ? `<p class="salary-notice">${report.period_state === 'IN_PROGRESS' ? 'This month is still in progress.' : 'This is a future-month projection.'} Salaries and approved leave may change.</p>` : ''}
       ${total.review ? `<p class="salary-review" role="status">${total.review} employee(s) need review and are excluded from the total. Select Resolve review, enter the confirmed amount and add your calculation.</p>` : ''}
       ${total.pending_requests ? `<p class="salary-notice">${total.pending_requests} pending leave request(s) are not deducted. Review approvals before paying.</p>` : ''}
@@ -56,23 +56,37 @@
   function csv(report) {
     const cell = value => { let text = String(value ?? ''); if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text; return '"' + text.replace(/"/g, '""') + '"'; };
     const amount = value => value === null ? '' : (value / 100).toFixed(2);
-    const rows = [['Month','Employee','Code','Monthly gross INR','Approved paid leave days','Approved unpaid leave days','Leave deduction INR','Salary to pay before other adjustments INR','Full-month reference after leave INR - review only','Status','Review notes','Pending leave requests','Confirmation state','Last confirmed amount INR','Confirmed by','Confirmed at','Calculation note']];
-    report.rows.forEach(row => rows.push([report.month,row.name,row.emp_code,amount(row.monthly_gross_paise),row.paid_leave_days,row.unpaid_leave_days,amount(row.deduction_paise),amount(row.salary_to_pay_paise),amount(row.full_month_reference_after_leave_paise),row.status,row.review_reasons.join(' '),row.pending_requests,row.review?.state || '',row.review ? amount(row.review.amount_paise) : '',row.review?.reviewer_name || '',row.review ? new Date(row.review.reviewed_ts).toISOString() : '',row.review?.note || '']));
+    const rows = [['Month','Employee','Code','Monthly gross INR','Approved paid leave days','Approved unpaid leave days','Leave deduction INR','Salary to pay before other adjustments INR','Full-month reference after leave INR - review only','Status','Review notes','Pending leave requests','Confirmation state','Last confirmed amount INR','Confirmed by','Confirmed at','Calculation note','Calendar days in month']];
+    report.rows.forEach(row => rows.push([report.month,row.name,row.emp_code,amount(row.monthly_gross_paise),row.paid_leave_days,row.unpaid_leave_days,amount(row.deduction_paise),amount(row.salary_to_pay_paise),amount(row.full_month_reference_after_leave_paise),row.status,row.review_reasons.join(' '),row.pending_requests,row.review?.state || '',row.review ? amount(row.review.amount_paise) : '',row.review?.reviewer_name || '',row.review ? new Date(row.review.reviewed_ts).toISOString() : '',row.review?.note || '',report.divisor]));
     return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
   }
 
-  async function mount(root, { api, onManage }) {
+  function scopeReport(report, userId) {
+    const rows = report.rows.filter(row => row.id === Number(userId));
+    const calculated = rows.filter(row => row.status === 'CALCULATED');
+    const reviewed = rows.filter(row => row.status === 'REVIEWED'), included = [...calculated, ...reviewed];
+    return { ...report, rows, totals: { employees: rows.length, calculated: calculated.length, reviewed: reviewed.length,
+      included: included.length, review: rows.length - included.length,
+      pending_requests: rows.reduce((n, row) => n + row.pending_requests, 0),
+      gross_paise: calculated.reduce((n, row) => n + row.monthly_gross_paise, 0),
+      deduction_paise: calculated.reduce((n, row) => n + row.deduction_paise, 0),
+      salary_to_pay_paise: included.reduce((n, row) => n + row.salary_to_pay_paise, 0) } };
+  }
+
+  async function mount(root, { api, onManage, month: initialMonth = '', userId = null, onMonthChange }) {
     root.innerHTML = `<div class="toolbar salary-controls"><div class="field"><label for="salaryMonth">Salary month</label><input type="month" id="salaryMonth"></div><button class="btn btn-primary" id="salaryRefresh">Calculate</button><button class="btn btn-ghost" id="salaryCsv" disabled>Download CSV</button><button class="btn btn-ghost" id="salaryManage">Manage salaries</button></div><p id="salaryStatus" role="status" aria-live="polite"></p><div id="salaryReport"></div>`;
-    const $ = selector => root.querySelector(selector); let report = null, version = 0;
+    const $ = selector => root.querySelector(selector); let report = null, version = 0, selectedMonth = initialMonth;
+    $('#salaryMonth').value = initialMonth;
     async function load(openId = null) {
       if (typeof openId !== 'number') openId = null;
       const current = ++version, month = $('#salaryMonth').value;
       report = null; $('#salaryCsv').disabled = true; $('#salaryRefresh').disabled = true;
       $('#salaryReport').innerHTML = ''; $('#salaryStatus').textContent = 'Calculating salaries…';
       try {
-        const result = await api.get('/salaries' + (month ? '?month=' + encodeURIComponent(month) : ''));
+        let result = await api.get('/salaries' + (month ? '?month=' + encodeURIComponent(month) : ''));
+        if (userId !== null) result = scopeReport(result, userId);
         if (current !== version || !root.isConnected || month !== $('#salaryMonth').value) return;
-        report = result; $('#salaryMonth').value = result.month; $('#salaryReport').innerHTML = reportHtml(result);
+        report = result; selectedMonth = result.month; $('#salaryMonth').value = result.month; $('#salaryReport').innerHTML = reportHtml(result);
         $('#salaryStatus').textContent = 'Calculated ' + new Date(result.calculated_ts).toLocaleString() + '. Based on approved leave only.';
         $('#salaryCsv').disabled = false;
         root.querySelectorAll('[data-salary-detail]').forEach(button => button.addEventListener('click', () => {
@@ -104,6 +118,7 @@
             finally { form.dataset.saving = '0'; setBusy(false); }
           });
         });
+        if (openId === null && userId !== null) openId = Number(userId);
         if (openId !== null) {
           const detail = $('#salaryDetail' + openId), button = root.querySelector(`[data-salary-detail="${openId}"]`);
           if (detail && button) { detail.hidden = false; button.setAttribute('aria-expanded','true'); }
@@ -111,7 +126,11 @@
       } catch (error) { if (current === version && root.isConnected) $('#salaryStatus').textContent = error.message; }
       finally { if (current === version && root.isConnected) $('#salaryRefresh').disabled = false; }
     }
-    $('#salaryMonth').addEventListener('change', load); $('#salaryRefresh').addEventListener('click', load);
+    $('#salaryMonth').addEventListener('change', () => {
+      const month = $('#salaryMonth').value;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { $('#salaryMonth').value = selectedMonth; return; }
+      selectedMonth = month; onMonthChange?.(month); return load();
+    }); $('#salaryRefresh').addEventListener('click', load);
     $('#salaryManage').addEventListener('click', onManage);
     $('#salaryCsv').addEventListener('click', () => {
       if (!report) return;
@@ -121,5 +140,5 @@
     });
     await load();
   }
-  window.Salaries = { mount, reportHtml, csv };
+  window.Salaries = { mount, reportHtml, csv, scopeReport };
 })();

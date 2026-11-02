@@ -33,7 +33,8 @@ test('monthly salary worksheet uses approved leave and keeps review calculations
     const id=add(); salary(id);
     for(const month of ['2027-02','2028-02','2026-11','2026-12']) {
       leave(id,month+'-12'); leave(id,month+'-13');
-      const r=row(id,month); assert.equal(r.monthly_gross_paise,3000000); assert.equal(r.unpaid_leave_days,1); assert.equal(r.deduction_paise,100000); assert.equal(r.salary_to_pay_paise,2900000);
+      const r=row(id,month); assert.equal(r.monthly_gross_paise,3000000); assert.equal(r.unpaid_leave_days,1); const divisor=Number(month.slice(5))===2?(month.startsWith('2028')?29:28):month.endsWith('11')?30:31;
+      const deduction=Math.round(3000000/divisor); assert.equal(r.divisor,divisor); assert.equal(r.deduction_paise,deduction); assert.equal(r.salary_to_pay_paise,3000000-deduction);
     }
   });
   await t.test('half-day fractions round once for the whole employee month, not per request', () => {
@@ -42,7 +43,7 @@ test('monthly salary worksheet uses approved leave and keeps review calculations
   });
   await t.test('cross-month leave clips to selected dates and follows October policy effective date', () => {
     const id=add(); salary(id); leave(id,'2026-09-30',{ end_date:'2026-10-13' });
-    assert.equal(row(id,'2026-09').unpaid_leave_days,0); const oct=row(id,'2026-10'); assert.equal(oct.unpaid_leave_days,12); assert.equal(oct.paid_leave_days,1); assert.equal(oct.deduction_paise,1200000);
+    assert.equal(row(id,'2026-09').unpaid_leave_days,0); const oct=row(id,'2026-10'); assert.equal(oct.unpaid_leave_days,12); assert.equal(oct.paid_leave_days,1); assert.equal(oct.deduction_paise,1161290);
     const half=add(); salary(half); leave(half,'2026-09-30',{ kind:'HALF',end_date:'2026-10-02' });
     assert.equal(row(half,'2026-10').approved_leaves.length,0); assert.equal(row(half,'2026-10').unpaid_leave_days,0);
   });
@@ -55,8 +56,8 @@ test('monthly salary worksheet uses approved leave and keeps review calculations
   });
   await t.test('part-month join/exit rows show full-month reference and working, not assumed proration', () => {
     const id=add({ join_date:'2026-10-05' }); salary(id,'42000','2026-10-05'); leave(id,'2026-10-06');
-    const r=row(id,'2026-10'); assert.equal(r.employed_calendar_days,27); assert.equal(r.rate_lines[0].calendar_days,27); assert.equal(r.deduction_paise,140000);
-    assert.equal(r.full_month_reference_after_leave_paise,4060000); assert.equal(r.salary_to_pay_paise,null); assert.equal(r.status,'REVIEW');
+    const r=row(id,'2026-10'); assert.equal(r.employed_calendar_days,27); assert.equal(r.rate_lines[0].calendar_days,27); assert.equal(r.deduction_paise,135484);
+    assert.equal(r.full_month_reference_after_leave_paise,4064516); assert.equal(r.salary_to_pay_paise,null); assert.equal(r.status,'REVIEW');
     const leaving=add({ active:0, exit_date:'2026-11-15' }); salary(leaving); leave(leaving);
     assert.equal(row(leaving).employed_calendar_days,15); assert.equal(row(leaving).status,'REVIEW'); assert.equal(row(leaving,'2026-12'),undefined);
     const past=add({ active:0, exit_date:'2026-08-31' }); assert.equal(row(past),undefined);
@@ -113,6 +114,7 @@ test('salary page ignores stale responses and disables stale exports after a mon
   elements['#salaryMonth'].value='2026-11'; const nov=elements['#salaryMonth'].listeners.change();
   elements['#salaryMonth'].value='2026-12'; const dec=elements['#salaryMonth'].listeners.change();
   pending[2].resolve(report('2026-12')); await dec; assert.equal(elements['#salaryCsv'].disabled,false);
+  elements['#salaryMonth'].value=''; await elements['#salaryMonth'].listeners.change(); assert.equal(elements['#salaryMonth'].value,'2026-12'); assert.equal(pending.length,3);
   pending[1].resolve(report('2026-11')); await nov; pending[0].resolve(report('2026-10')); await mounted; assert.equal(elements['#salaryMonth'].value,'2026-12');
   const failed=elements['#salaryRefresh'].listeners.click(); assert.equal(elements['#salaryCsv'].disabled,true); assert.equal(elements['#salaryReport'].innerHTML,'');
   pending[3].reject(new Error('Unavailable')); await failed; assert.equal(elements['#salaryCsv'].disabled,true); assert.equal(elements['#salaryStatus'].textContent,'Unavailable');

@@ -24,8 +24,8 @@ test('salary review confirmations are scoped, audited and reopened when inputs c
     rate(employee); db.prepare("INSERT INTO leaves(user_id,start_date,end_date,kind,reason,status,days,created_ts) VALUES(?,'2026-10-06','2026-10-06','HALF','Synthetic','APPROVED',0.5,0)").run(employee);
     const before={users:db.prepare('SELECT * FROM users').all(),rates:db.prepare('SELECT * FROM employee_salary_rates').all(),leaves:db.prepare('SELECT * FROM leaves').all()};
     const original=row(employee),base=buildSalaries(db,'2026-10').totals.salary_to_pay_paise;
-    assert.equal(original.deduction_paise,50000);assert.equal((await request(admin,employee,payload(employee,'26500.42'))).status,200);
-    const r=row(employee);assert.equal(r.status,'REVIEWED');assert.equal(r.salary_to_pay_paise,2650042);assert.equal(r.deduction_paise,50000);assert.equal(r.review.reviewer_name,'Review 1');assert.equal(r.review.revision,1);
+    assert.equal(original.deduction_paise,48387);assert.equal((await request(admin,employee,payload(employee,'26500.42'))).status,200);
+    const r=row(employee);assert.equal(r.status,'REVIEWED');assert.equal(r.salary_to_pay_paise,2650042);assert.equal(r.deduction_paise,48387);assert.equal(r.review.reviewer_name,'Review 1');assert.equal(r.review.revision,1);
     const totals=buildSalaries(db,'2026-10').totals;assert.equal(totals.salary_to_pay_paise,base+2650042);assert.equal(totals.reviewed,1);assert.equal(totals.included,totals.calculated+totals.reviewed);
     assert.equal(row(employee,'2026-11').status,'CALCULATED');assert.equal(row(employee,'2026-11').salary_to_pay_paise,3000000);
     assert.deepEqual({users:db.prepare('SELECT * FROM users').all(),rates:db.prepare('SELECT * FROM employee_salary_rates').all(),leaves:db.prepare('SELECT * FROM leaves').all()},before);
@@ -68,6 +68,17 @@ test('salary review confirmations are scoped, audited and reopened when inputs c
     let r=row(id);assert.equal(r.calculation_status,'CALCULATED');assert.equal(r.status,'REVIEW');assert.equal(r.review.state,'STALE');assert.equal(r.salary_to_pay_paise,null);
     await request(admin,id,payload(id,'33833.33','Corrected employment dates reviewed'));r=row(id);assert.equal(r.status,'REVIEWED');
     rate(id,'40000','2026-12-01');assert.equal(row(id).status,'REVIEWED');
+  });
+  await t.test('confirmations from the former 30-day rule become stale without altering their audit', async()=>{
+    const id=add();rate(id);await request(admin,id,payload(id));
+    const {createHash}=require('node:crypto');
+    const rates=db.prepare('SELECT user_id,effective_from,monthly_gross_paise FROM employee_salary_rates WHERE user_id=? AND effective_from<=? ORDER BY effective_from DESC').all(id,'2026-10-31');
+    const user=db.prepare('SELECT id,active,join_date,exit_date FROM users WHERE id=?').get(id);
+    const old=createHash('sha256').update(JSON.stringify({version:1,month:'2026-10',user,rates,leaves:[]})).digest('hex');
+    db.prepare('UPDATE salary_month_reviews SET source_fingerprint=? WHERE user_id=?').run(old,id);
+    const before=db.prepare('SELECT * FROM salary_month_reviews WHERE user_id=?').get(id),audit=events(id);
+    const current=row(id);assert.equal(current.review.state,'STALE');assert.equal(current.salary_to_pay_paise,null);assert.equal(current.divisor,31);
+    assert.deepEqual(db.prepare('SELECT * FROM salary_month_reviews WHERE user_id=?').get(id),before);assert.deepEqual(events(id),audit);
   });
   await t.test('audit failure rolls back the confirmation atomically',async()=>{
     const id=add();db.exec("CREATE TRIGGER fail_review_audit BEFORE INSERT ON salary_month_review_events BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;");

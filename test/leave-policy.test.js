@@ -140,6 +140,24 @@ test('October leave year, category credits and unpaid dates', async t => {
     assert.equal((await request(id,'leaves/mine')).body.leaves.length,1);
     assert.equal((await request(admin,`leaves/for/${otherAdmin}`)).body.leaves.length,1);
   });
+  await t.test('employee workspace returns complete history, clipped activity and protected balances', async()=>{
+    const id=employee(),other=employee();
+    rawLeave(id,'2026-09-30','2026-10-02'); // two taken days inside this leave year
+    rawLeave(id,'2026-10-05','2026-10-05','APPROVED','REGULAR','HALF');
+    rawLeave(id,'2026-10-20','2026-10-23'); // two taken and two upcoming
+    rawLeave(id,'2026-10-25','2026-10-25','PENDING','REGULAR','HALF');
+    rawLeave(id,'2026-11-01','2026-11-02','PENDING'); // unpaid pending still counted
+    rawLeave(id,'2026-10-24','2026-10-24','REJECTED');
+    rawLeave(id,'2027-10-15','2027-10-15'); // outside current leave year
+    for(let i=0;i<105;i++)rawLeave(id,'2025-11-15','2025-11-15','CANCELLED');
+    const own=await request(id,'leaves/mine'),managed=await request(admin,`leaves/for/${id}`);
+    assert.equal(own.status,200);assert.deepEqual(own.body,managed.body);assert.equal(own.body.leaves.length,112);
+    assert.deepEqual(own.body.activity,{taken_days:4.5,upcoming_days:2,pending_days:2.5,pending_requests:2});
+    assert.equal(own.body.balances.entitlement,20);assert.equal(own.body.balances.balance,16);
+    assert.equal((await request(other,`leaves/for/${id}`)).status,403);
+    assert.equal((await request(admin,'leaves/for/999999')).status,404);
+    assert.equal((await request(admin,'leaves/for/invalid')).status,400);
+  });
   await t.test('restart and additive migration preserve original leave records and reset markers',()=>{
     const id=employee();rawLeave(id,'2026-10-13','2026-10-13');policy.syncBalance(id);
     const source=db.prepare('SELECT * FROM leaves WHERE user_id=?').all(id);const count=db.prepare('SELECT COUNT(*) n FROM leave_balance_resets').get().n;
