@@ -23,13 +23,15 @@ test('private gross salary and leave deduction estimates', async t => {
   const salary=(monthly_gross,effective_from='2026-10-01')=>({monthly_gross,effective_from,currency:'INR'});
   const leave=(start_date='2026-11-05',extra={})=>({start_date,end_date:start_date,kind:'FULL',category:'REGULAR',reason:'Synthetic request',...extra});
 
-  await t.test('full and half days use gross / 30, independent of month length',()=>{
+  await t.test('full and half days use the actual calendar length, including leap years',()=>{
     const id=add();saveSalary(id,salary('30000'),admin);
     assert.equal(estimateDeduction(id,leave()).total_paise,100000);
     assert.equal(estimateDeduction(id,leave('2026-11-05',{kind:'HALF'})).total_paise,50000);
-    assert.equal(estimateDeduction(id,leave('2027-02-05')).total_paise,100000);
-    assert.equal(estimateDeduction(id,leave('2028-02-05')).total_paise,100000);
-    assert.equal(estimateDeduction(id,leave('2026-12-05')).total_paise,100000);
+    assert.equal(estimateDeduction(id,leave('2027-02-05')).total_paise,107143);
+    assert.equal(estimateDeduction(id,leave('2028-02-05')).total_paise,103448);
+    assert.equal(estimateDeduction(id,leave('2026-12-05')).total_paise,96774);
+    assert.equal(estimateDeduction(id,leave('2026-12-05',{kind:'HALF'})).total_paise,48387);
+    assert.equal(estimateDeduction(id,leave('2028-02-05')).items[0].divisor,29);
     const q=estimateDeduction(id,leave('2026-11-11',{end_date:'2026-11-14'}));assert.equal(q.unpaid_days,2);assert.equal(q.total_paise,200000);
   });
   await t.test('boundaries, paid requests and zero salaries are explicit',()=>{
@@ -40,15 +42,22 @@ test('private gross salary and leave deduction estimates', async t => {
   });
   await t.test('effective salary dates and cross-month ranges use applicable recorded rates',()=>{
     const id=add();saveSalary(id,salary('30000'),admin);saveSalary(id,salary('60000','2026-11-01'),admin);saveSalary(id,salary('90000','2026-11-06'),admin);
-    assert.equal(estimateDeduction(id,leave('2026-10-05')).total_paise,100000);
+    assert.equal(estimateDeduction(id,leave('2026-10-05')).total_paise,96774);
     const q=estimateDeduction(id,leave('2026-11-05',{end_date:'2026-11-06'}));assert.equal(q.total_paise,500000);assert.equal(q.items.length,2);
-    const crossing=estimateDeduction(id,leave('2026-10-12',{end_date:'2026-11-02'}));assert.equal(crossing.unpaid_days,3);assert.equal(crossing.total_paise,500000);
+    const crossing=estimateDeduction(id,leave('2026-10-12',{end_date:'2026-11-02'}));assert.equal(crossing.unpaid_days,3);assert.equal(crossing.total_paise,496774);assert.deepEqual(crossing.items.map(item=>item.divisor),[31,30]);
   });
   await t.test('round once per request using integer paise and half-day units',()=>{
     const id=add();saveSalary(id,salary('1000.01'),admin);
     assert.equal(estimateDeduction(id,leave('2026-11-01',{end_date:'2026-11-03'})).total_paise,10000);
     assert.equal(estimateDeduction(id,leave('2026-11-01',{kind:'HALF'})).total_paise,1667);
     assert.equal(validateSalary(salary('12345.67')).monthly_gross_paise,1234567);
+  });
+  await t.test('cross-month fractions round only after adding every month',()=>{
+    const id=add();saveSalary(id,salary('0.01'),admin);
+    const quote=estimateDeduction(id,leave('2026-11-01',{end_date:'2026-12-12'}));
+    assert.equal(quote.total_paise,1);assert.equal(quote.unpaid_days,24);
+    assert.deepEqual(quote.items.map(item=>item.divisor),[30,31]);assert.equal(quote.day_basis,'CALENDAR_MONTH');
+    assert.equal(quote.version,2);
   });
   await t.test('missing or partly missing salary is unavailable, not a zero estimate',()=>{
     const id=add();let q=estimateDeduction(id,leave());assert.equal(q.status,'MISSING_SALARY');assert.equal(q.total_paise,null);
@@ -107,7 +116,7 @@ test('private gross salary and leave deduction estimates', async t => {
   });
   await t.test('admin-recorded leave saves the same estimate; legacy rows remain unpriced',async()=>{
     const id=add();saveSalary(id,salary('30000'),admin);
-    const r=await request(admin,'leaves/admin','POST',leave('2026-10-06',{user_id:id,kind:'HALF'}));assert.equal(r.status,200);assert.equal(r.body.leave.deduction_estimate.total_paise,50000);
+    const r=await request(admin,'leaves/admin','POST',leave('2026-10-06',{user_id:id,kind:'HALF'}));assert.equal(r.status,200);assert.equal(r.body.leave.deduction_estimate.total_paise,48387);
     db.prepare("INSERT INTO leaves(user_id,start_date,end_date,kind,reason,status,days,created_ts) VALUES(?,'2026-10-07','2026-10-07','FULL','Legacy','APPROVED',1,0)").run(id);
     const history=(await request(id,'leaves/mine')).body.leaves;assert.equal(history.find(l=>l.reason==='Legacy').deduction_estimate,null);
   });

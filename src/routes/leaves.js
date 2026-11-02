@@ -42,6 +42,26 @@ const present = leaves => leaves.map(presentLeave);
 const fail = (res, e) => res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not update leave. Please try again.' });
 const personalLeaveUnavailable = res => res.status(403).json({ error: 'Personal leave is not available for admin accounts.' });
 
+function employeeLeaveHistory(userId) {
+  const balances = syncBalance(userId), leaves = leavesForUser.all(userId), today = todayStr();
+  const activity = { taken_days: 0, upcoming_days: 0, pending_days: 0, pending_requests: 0 };
+  for (const leave of leaves) {
+    const start = leave.start_date > balances.period.start ? leave.start_date : balances.period.start;
+    const last = leave.kind === 'HALF' ? leave.start_date : leave.end_date;
+    const end = last < balances.period.end ? last : balances.period.end;
+    if (start > end) continue;
+    const count = (from, to) => from > to ? 0 : leave.kind === 'HALF' ? 0.5 : inclusiveDays(from, to);
+    if (leave.status === 'PENDING') {
+      activity.pending_days += count(start, end); activity.pending_requests++;
+    } else if (leave.status === 'APPROVED') {
+      activity.taken_days += count(start, end < today ? end : today);
+      // Exclude today from future days without assuming a browser timezone.
+      activity.upcoming_days += count(start, end) - count(start, end < today ? end : today);
+    }
+  }
+  return { balance: balances.balance, balances, activity, leaves: present(leaves) };
+}
+
 // Server-authoritative payment preview; employees can preview only themselves.
 router.post('/preview', requireAuth, (req, res) => {
   const userId = Number(req.body.user_id || req.user.id);
@@ -74,8 +94,7 @@ router.post('/', requireAuth, (req, res) => {
 // My leave history + balance.
 router.get('/mine', requireAuth, (req, res) => {
   if (req.user.role === 'ADMIN') return personalLeaveUnavailable(res);
-  const balances = syncBalance(req.user.id);
-  res.json({ balance: balances.balance, balances, leaves: present(leavesForUser.all(req.user.id)) });
+  res.json(employeeLeaveHistory(req.user.id));
 });
 
 // Employee cancels their own pending request.
@@ -178,11 +197,11 @@ router.get('/summary', requireAdmin, require('../asyncRoute')(async (_req, res) 
 }));
 
 // ADMIN: one employee's full leave history (for the balance breakdown).
-const leavesForEmployee = db.prepare(
-  `SELECT l.*, u.name FROM leaves l JOIN users u ON u.id = l.user_id
-   WHERE l.user_id = ? ORDER BY l.start_date DESC LIMIT 100`
-);
-router.get('/for/:userId', require('../requestValidation').validateParams, requireAdmin, (req, res) => res.json({ leaves: present(leavesForEmployee.all(Number(req.params.userId))) }));
+router.get('/for/:userId', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
+  const user = getUser.get(Number(req.params.userId));
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
+  res.json(employeeLeaveHistory(user.id));
+});
 
 // ADMIN: approve / reject. Deducts balance on approval.
 router.post('/:id/decide', require('../requestValidation').validateParams, requireAdmin, (req, res) => {

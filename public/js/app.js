@@ -318,6 +318,7 @@
         ME = { ...ME, ...r.user };
         $('#meName').textContent = ME.name; // reflect a rename in the sidebar
         closeModal(); toast('Profile updated ✓');
+        if ($('#employeesRoot')) loadEmployeeProfile();
       } catch (e) { toast(e.message, true); }
     });
   }
@@ -341,6 +342,7 @@
   }
 
   // ---------- navigation ----------
+  let employeeSection = 'employeePerformance';
   function viewFromAddress() {
     return window.location.hash.replace(/^#\//, '') || 'dashboard';
   }
@@ -361,6 +363,10 @@
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
     const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'salaries'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
+    const employeeAliases = { myperf: 'employeePerformance', leaves: 'employeeLeaves', salaries: 'employeeSalary' };
+    const legacyEmployeeView = Object.hasOwn(employeeAliases, view);
+    employeeSection = legacyEmployeeView ? employeeAliases[view] : 'employeePerformance';
+    if (legacyEmployeeView) view = 'employees';
     const hash = '#/' + view;
     if (window.location.hash !== hash) {
       window.history[fromAddress ? 'replaceState' : 'pushState'](null, '', hash);
@@ -388,11 +394,8 @@
   // ====================================================================
   const VIEWS = {};
 
-  VIEWS.salaries = async () => {
-    if (!isAdmin()) return;
-    setMain('Salaries', 'Monthly gross, approved leave deductions and salary to pay.', '<div id="salariesRoot"></div>');
-    await window.Salaries.mount($('#salariesRoot'), { api, onManage: () => navigate('admin') });
-  };
+  // Preserve bookmarks and notification destinations after consolidation.
+  for (const legacy of ['myperf', 'leaves', 'salaries']) VIEWS[legacy] = () => navigate(legacy);
 
   VIEWS.taskreview = async () => {
     if (!isAdmin()) return;
@@ -810,7 +813,7 @@
   const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${value === 'REGULAR' ? 'Regular leave' : label}</option>`).join('');
   const leaveTypeLabel = l => `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
   const salaryMoney = paise => Number.isSafeInteger(paise) && paise >= 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100) : 'Unavailable';
-  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}`;
+  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}${l.deduction_estimate?.version === 1 ? ' · Historical 30-day basis' : ''}`;
   function leavePreviewMarkup(leave, admin = false) {
     const estimate = leave.deduction_estimate;
     const available = estimate?.status === 'AVAILABLE';
@@ -820,46 +823,39 @@
       <div class="leave-preview-deduction"><span>Estimated deduction</span><strong>${available ? money(estimate.total_paise) : 'Unavailable'}</strong></div>
       ${!available ? `<p class="leave-preview-note">${admin ? 'Add the employee’s salary' : 'Ask an admin to add your salary'} to see the amount. You can still ${admin ? 'save this leave' : 'apply'}.</p>` : ''}
       <details class="leave-preview-details"><summary>Calculation &amp; leave rules</summary><div>
-        ${available ? estimate.items.map(item => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ 30 × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
+        ${available ? estimate.items.map(item => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ ${item.divisor || estimate.divisor} × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
         <p>${leave.unpaid_days ? 'Leave on the 1st–12th is unpaid, even when paid leave is available.' : 'No unpaid days in this request.'} Only paid days use the selected leave balance.</p>
-        <p>Deductions use monthly gross salary effective on each leave date. Half days count as 0.5. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
+        <p>Deductions use monthly gross salary effective on each leave date, divided by the actual calendar days in that month. Half days count as 0.5. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
         <p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
       </div></details>`;
   }
-  function leaveBalanceMarkup(b) {
+  function leaveBalanceMarkup(b, activity) {
     if (!b) return '';
     const labels = { regular: 'Regular leave', flexi: 'Flexi leave', special: 'Birthday / anniversary' };
-    return `<section class="section leave-balance-panel"><h2>Your leave balances</h2>
+    return `<section class="section leave-balance-panel"><h3>Leave balances</h3>
       <p class="page-sub">${fmtDate(b.period.start)} – ${fmtDate(b.period.end)} · Resets every 1 October · ${b.balance} days remaining after approved leave</p>
-      <div class="cards">${Object.entries(labels).map(([key,label]) => { const p = b.buckets[key]; return `<div class="card stat"><div class="label">${label}</div><div class="value small">${p.remaining} / ${p.entitlement} days</div><div class="leave-balance-note">${p.pending} pending · ${p.available} available to request</div></div>`; }).join('')}</div>
+      <div class="cards">${Object.entries(labels).map(([key,label]) => { const p = b.buckets[key]; return `<div class="card stat"><div class="label">${label}</div><div class="value small">${p.remaining} / ${p.entitlement} days</div><div class="leave-balance-note">${p.used} approved paid days · ${p.pending} pending · ${p.available} available to request</div></div>`; }).join('')}</div>
+      ${activity ? `<div class="cards employee-leave-stats">${statCard('Taken this leave year', activity.taken_days, 'value small')}${statCard('Approved upcoming days', activity.upcoming_days, 'value small')}${statCard('Pending days', activity.pending_days, 'value small')}</div><p class="leave-balance-note">Taken includes paid and unpaid approved leave through today. Upcoming and pending days are shown separately for this leave year (${activity.pending_requests} pending requests).</p>` : ''}
       <p class="leave-balance-note">Birthday and anniversary share one paid day. Pending requests reserve balance until approved, rejected or cancelled. Leave from the 1st–12th is unpaid and does not use paid leave. Next reset: ${fmtDate(b.period.nextReset)}.</p></section>`;
   }
-  VIEWS.leaves = async () => {
-    const personal = `<div id="leaveBalanceCards"></div><div class="toolbar"><h2 style="margin:0;color:var(--navy);">My requests</h2><button class="btn btn-primary" id="applyBtn">+ Apply for leave</button></div><div class="leave-table-wrap" id="myLeaves"></div>`;
-    if (isAdmin()) {
-      setMain('Leaves', "Requests waiting for approval, and who's on leave.",
-        `<div class="toolbar leave-admin-toolbar"><span></span><div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn" title="Create pending leave for anyone who normally clocks in but didn't, for the last completed shift">⚠️ Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave for an employee</button></div></div>
-         <div class="section leave-table-wrap" id="adminLeaves"></div>
-         <div class="section"><h2 id="onLeaveHeading">On leave — current & upcoming</h2><div class="leave-table-wrap" id="onLeave"></div></div>
-         <div class="section"><h2>Leave balances</h2><div class="leave-table-wrap" id="leaveSummary"></div></div>`);
-      $('#markLeaveBtn').addEventListener('click', openMarkLeaveModal);
-      $('#flagAbsBtn').addEventListener('click', async () => {
-        const btn = $('#flagAbsBtn'); btn.disabled = true;
-        try {
-          const r = await api.post('/leaves/flag-absences');
-          toast(r.created ? `Flagged ${r.created} absence(s) for ${r.day} ✓` : `No new absences for ${r.day}`);
-          loadAdminLeaves();
-        } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
-      });
-      loadAdminLeaves();
-      loadOnLeave();
-      loadLeaveSummary();
-    } else {
-      setMain('Leaves', 'Apply for time off and track your requests.', personal);
-      $('#applyBtn').addEventListener('click', openApplyLeave);
-      await loadMyLeaves();
-    }
-  };
+  function mountTeamLeaves() {
+    $('#markLeaveBtn').addEventListener('click', () => openMarkLeaveModal());
+    $('#flagAbsBtn').addEventListener('click', async () => {
+      const btn = $('#flagAbsBtn'); btn.disabled = true;
+      try {
+        const r = await api.post('/leaves/flag-absences');
+        toast(r.created ? `Flagged ${r.created} absence(s) for ${r.day} ✓` : `No new absences for ${r.day}`);
+        await refreshEmployeeLeaveData();
+      } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    });
+    return Promise.all([loadAdminLeaves(), loadOnLeave(), loadLeaveSummary()]);
+  }
+
+  async function refreshEmployeeLeaveData() {
+    if (!$('#employeesRoot')) return;
+    await Promise.all([loadEmployeeLeaveDetails(), loadMyPerf(), mountEmployeeSalary(),
+      ...(isAdmin() ? [loadAdminLeaves(), loadOnLeave(), loadLeaveSummary()] : [])]);
+  }
 
   const daysLabel = (n) => (n ? `${n} ${n === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>');
 
@@ -879,6 +875,7 @@
       <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
       <div id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
+    if (LEAVE_BALANCES.some(user => String(user.id) === myPerfUserId)) $('#mlUser').value = myPerfUserId;
     const form = wireLeavePreview('ml', '#mSave', true);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
@@ -888,7 +885,7 @@
         await api.post('/leaves/admin', form.payload());
         closeModal(); toast('Leave marked ✓');
         LEAVE_BALANCES = []; // refetch next time — balance changed
-        loadAdminLeaves(); loadOnLeave(); loadLeaveSummary();
+        refreshEmployeeLeaveData();
       } catch (e) { toast(e.message, true); } finally { form.saving(false); }
     });
   }
@@ -949,23 +946,29 @@
     } catch (e) { toast(e.message, true); }
   }
 
-  async function loadMyLeaves() {
-    if (isAdmin()) return;
+  async function loadMyLeaves() { return loadEmployeeLeaveDetails(); }
+
+  async function loadEmployeeLeaveDetails() {
+    const host = $('#employeeLeaveDetails'), user = selectedEmployee();
+    if (!host || !user) return;
+    if (user.role === 'ADMIN') { host.innerHTML = '<p class="empty">Personal leave is not available for admin accounts. Employee approvals and balances are below.</p>'; return; }
+    host.innerHTML = '<p role="status">Loading leave balances and history…</p>';
+    const current = ++employeeLeaveVersion;
     try {
-      const { balances, leaves } = await api.get('/leaves/mine');
-      const host = $('#leaveBalanceCards'); if (!host) return;
-      host.innerHTML = leaveBalanceMarkup(balances);
-      const el = $('#myLeaves');
-      el.innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
-        ${leaves.map((l) => `<tr>
-          <td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${leavePaymentLabel(l)}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
-          <td>${l.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>` : ''}</td>
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">No leave requests yet.</div>`;
-      el.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/leaves/${b.dataset.cancel}/cancel`); toast('Cancelled'); loadMyLeaves(); } catch (e) { toast(e.message, true); }
+      const { balances, activity, leaves } = await api.get(isAdmin() ? `/leaves/for/${user.id}` : '/leaves/mine');
+      if (current !== employeeLeaveVersion || !host.isConnected || selectedEmployee()?.id !== user.id) return;
+      host.innerHTML = leaveBalanceMarkup(balances, activity) + `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` + (leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
+        ${leaves.map(l => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
+          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
+          <td>${l.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>`) : esc(l.admin_note || '—')}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No leave requests yet.</div>') + '</div>';
+      wireLeaveApprovals();
+      host.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', async () => {
+        button.disabled = true;
+        try { await api.post(`/leaves/${button.dataset.cancel}/cancel`); toast('Cancelled'); await refreshEmployeeLeaveData(); }
+        catch (e) { toast(e.message, true); button.disabled = false; }
       }));
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { if (current === employeeLeaveVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
   }
 
   // One preview path for employee requests and admin-recorded leave. Stale
@@ -1018,7 +1021,7 @@
       form.saving(true);
       try {
         await api.post('/leaves', form.payload());
-        closeModal(); toast('Request submitted ✓'); loadMyLeaves();
+        closeModal(); toast('Request submitted ✓'); refreshEmployeeLeaveData();
       } catch (e) { toast(e.message, true); } finally { form.saving(false); }
     });
   }
@@ -1076,7 +1079,8 @@
   async function loadAdminLeaves() {
     try {
       const { leaves } = await api.get('/leaves/pending');
-      $('#adminLeaves').innerHTML = `<h2>Pending approvals (${leaves.length})</h2>${leaves.length ? leaveApprovalTable(leaves) : `<div class="empty">Nothing waiting.</div>`}`;
+      const host = $('#adminLeaves'); if (!host) return;
+      host.innerHTML = `<h2>Pending approvals (${leaves.length})</h2>${leaves.length ? leaveApprovalTable(leaves) : `<div class="empty">Nothing waiting.</div>`}`;
       wireLeaveApprovals();
     } catch (e) { toast(e.message, true); }
   }
@@ -2552,29 +2556,85 @@
   // ---------- My performance (own KPIs + attendance calendar) ----------
   let myPerfMonth = null; // yyyy-mm being viewed
   let myPerfUserId = ''; // admins only: whose performance to show ('' = own)
-  VIEWS.myperf = async () => {
+  let EMPLOYEE_RECORDS = [], employeeLeaveVersion = 0, performanceVersion = 0;
+  const selectedEmployee = () => isAdmin() ? EMPLOYEE_RECORDS.find(user => String(user.id) === myPerfUserId) : ME;
+
+  VIEWS.employees = async () => {
     if (!myPerfMonth) myPerfMonth = thisMonthISO();
-    const admin = isAdmin();
-    setMain(admin ? 'Performance' : 'My performance',
-      admin ? 'Attendance, punctuality and KPIs — pick any employee to review their month.'
-        : 'Your attendance, punctuality and KPIs — visible only to you and the partners.',
-      `${admin ? `<div class="toolbar"><div style="display:flex;gap:10px;align-items:center;">
-           <label for="perfUser" style="font-size:.85rem;color:var(--slate);font-weight:600;">Employee</label>
-           <select id="perfUser" class="tf-sel"></select>
-         </div><span></span></div>` : ''}
-       <div class="cards" id="myKpiCards"></div>
-       <div class="pcal" id="myCal" style="margin-top:6px;"><div class="empty">Loading…</div></div>`);
-    if (admin) {
-      await loadLookups();
-      $('#perfUser').innerHTML = `<option value="">Me (${esc(ME.name)})</option>`
-        + USERS.filter((u) => u.id !== ME.id).map((u) => `<option value="${u.id}" ${myPerfUserId == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
-      $('#perfUser').value = myPerfUserId;
-      $('#perfUser').addEventListener('change', (e) => { myPerfUserId = e.target.value; loadMyPerf(); });
-    }
-    await loadMyPerf();
+    const admin = isAdmin(), section = employeeSection;
+    setMain('Employees', admin ? 'Performance, leave, salary calculations and personal information in one place.' : 'Your performance, leave and personal information in one place.',
+      `<div id="employeesRoot"><p role="status">Loading employees…</p></div>`);
+    const host = $('#employeesRoot');
+    try {
+      if (admin) {
+        const records = (await api.get('/users/manage')).users;
+        if (!host.isConnected) return;
+        EMPLOYEE_RECORDS = records;
+        if (!selectedEmployee()) myPerfUserId = String((EMPLOYEE_RECORDS.find(user => user.role === 'EMPLOYEE' && user.active) || EMPLOYEE_RECORDS[0])?.id || '');
+      } else { EMPLOYEE_RECORDS = [ME]; myPerfUserId = ''; }
+      host.innerHTML = `<div class="toolbar employee-controls">
+        ${admin ? `<div class="field"><label for="perfUser">Employee</label><select id="perfUser">${EMPLOYEE_RECORDS.map(user => `<option value="${user.id}">${esc(user.name)}${user.active ? '' : ' (inactive)'}${user.role === 'ADMIN' ? ' · Admin' : ''}</option>`).join('')}</select></div>` : `<strong>${esc(ME.name)}</strong>`}
+        <div class="field"><label for="perfMonth">Month</label><input type="month" id="perfMonth" value="${myPerfMonth}"></div>
+        <button class="btn btn-ghost" id="employeeRefresh">Refresh</button>
+        ${admin ? '<button class="btn btn-primary" id="addEmpBtn">+ Add employee</button>' : ''}</div>
+        <div class="employee-section-links" aria-label="Employee sections"><button class="btn btn-ghost" data-employee-section="employeePerformance">Performance</button><button class="btn btn-ghost" data-employee-section="employeeLeaves">Leaves</button>${admin ? '<button class="btn btn-ghost" data-employee-section="employeeSalary">Salary calculations</button>' : ''}<button class="btn btn-ghost" data-employee-section="employeePersonal">Personal information</button></div>
+        <section class="section employee-section" id="employeePerformance" tabindex="-1" aria-labelledby="employeePerformanceTitle"><h2 id="employeePerformanceTitle">Performance</h2><div class="cards" id="myKpiCards"></div><div class="pcal" id="myCal"></div></section>
+        <section class="section employee-section" id="employeeLeaves" tabindex="-1" aria-labelledby="employeeLeavesTitle"><div class="toolbar"><h2 id="employeeLeavesTitle">Leaves</h2>${admin ? '<div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn">Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave</button></div>' : '<button class="btn btn-primary" id="applyBtn">+ Apply for leave</button>'}</div><div id="employeeLeaveDetails"></div>
+          ${admin ? '<details class="employee-team-leaves"><summary>Team approvals, upcoming leave and balances</summary><div class="section leave-table-wrap" id="adminLeaves"></div><div class="section"><h3 id="onLeaveHeading">On leave — current &amp; upcoming</h3><div class="leave-table-wrap" id="onLeave"></div></div><div class="section"><h3>Team leave balances</h3><div class="leave-table-wrap" id="leaveSummary"></div></div></details>' : ''}
+          ${admin ? '<section class="employee-section" id="employeeSalary" tabindex="-1" aria-labelledby="employeeSalaryTitle"><div class="toolbar"><h3 id="employeeSalaryTitle">Salary calculations</h3><button class="btn btn-ghost" id="employeeSalaryScope">Show all employee salaries</button></div><p id="employeeSalaryName" class="page-sub"></p><div id="employeeSalaryMount"></div></section>' : ''}</section>
+        <section class="section employee-section" id="employeePersonal" tabindex="-1" aria-labelledby="employeePersonalTitle"><h2 id="employeePersonalTitle">Personal information</h2><div id="employeeProfile"></div>${admin ? '<details class="employee-management"><summary>Manage all employees and access</summary><div class="table-wrap" id="empTable"></div></details>' : ''}</section>`;
+      host.querySelectorAll('[data-employee-section]').forEach(button => button.addEventListener('click', () => scrollEmployeeSection(button.dataset.employeeSection)));
+      $('#perfMonth').addEventListener('change', async event => {
+        if (!/^\d{4}-\d{2}$/.test(event.target.value)) return;
+        myPerfMonth = event.target.value; await Promise.all([loadMyPerf(), mountEmployeeSalary()]);
+      });
+      $('#employeeRefresh').addEventListener('click', () => VIEWS.employees());
+      if (admin) {
+        $('#perfUser').value = myPerfUserId;
+        $('#perfUser').addEventListener('change', event => { myPerfUserId = event.target.value; loadEmployeeProfile(); });
+        $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
+        $('#employeeSalaryScope').addEventListener('click', () => mountEmployeeSalary($('#employeeSalaryScope').dataset.team !== '1'));
+        loadEmployees(EMPLOYEE_RECORDS);
+        mountTeamLeaves();
+      } else $('#applyBtn').addEventListener('click', openApplyLeave);
+      await loadEmployeeProfile();
+      if (host.isConnected && section !== 'employeePerformance') scrollEmployeeSection(section);
+    } catch (e) { if (host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
   };
 
+  function scrollEmployeeSection(id) {
+    const section = document.getElementById(id); if (!section) return;
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' }); section.focus({ preventScroll: true });
+  }
+
+  async function mountEmployeeSalary(team = false) {
+    const host = $('#employeeSalaryMount'), user = selectedEmployee();
+    if (!host || !user || !isAdmin()) return;
+    // Replacing the root also invalidates all outstanding worksheet responses.
+    host.innerHTML = '<div id="employeeSalaryRoot"></div>';
+    $('#employeeSalaryScope').dataset.team = team ? '1' : '0';
+    $('#employeeSalaryScope').textContent = team ? 'Show selected employee salary' : 'Show all employee salaries';
+    $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + myPerfMonth;
+    if (!team && user.role === 'ADMIN') { host.innerHTML = '<p class="empty">Admin accounts are outside the employee salary worksheet.</p>'; return; }
+    await window.Salaries.mount($('#employeeSalaryRoot'), { api, month: myPerfMonth, userId: team ? null : user.id,
+      onManage: () => scrollEmployeeSection('employeePersonal'),
+      onMonthChange: month => { if (!/^\d{4}-\d{2}$/.test(month)) return; myPerfMonth = month; $('#perfMonth').value = month; $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + month; loadMyPerf(); } });
+  }
+
+  async function loadEmployeeProfile() {
+    const user = selectedEmployee(), host = $('#employeeProfile'); if (!user || !host) return;
+    const fields = [['Name', user.name], ['Email', user.email], ['Phone', user.phone], ['Birthday', fmtDate(user.birthday)], ['Employee code', user.emp_code], ['Department', user.department], ['Title', user.title], ['Role', cap(user.role)], ['Joining date', fmtDate(user.join_date)], ['Last working day', fmtDate(user.exit_date)], ['Shift start', user.shift_start], ['Attendance timezone', user.attendance_timezone || 'Office default'], ['Workday starts at hour', user.attendance_cutover ?? 'Office default'], ...(isAdmin() ? [['Status', user.active ? 'Active' : 'Inactive'], ['Asana email', user.asana_email]] : [])];
+    host.innerHTML = `<p class="page-sub"><strong>${esc(user.name)}</strong>${exitTag(user)}</p><dl class="employee-info">${fields.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? '—') || '—'}</dd></div>`).join('')}</dl><div class="row-actions"><button class="btn btn-primary" id="employeeEditProfile">${isAdmin() ? 'Edit employee' : 'Edit my details'}</button>${isAdmin() ? '<button class="btn btn-ghost" id="employeePassword">Reset password</button>' : ''}</div>`;
+    $('#employeeEditProfile').addEventListener('click', () => isAdmin() ? openEmployeeModal(user) : openMyProfile());
+    $('#employeePassword')?.addEventListener('click', () => openPasswordModal(user));
+    await Promise.all([loadMyPerf(), loadEmployeeLeaveDetails(), mountEmployeeSalary()]);
+  }
+
   async function loadMyPerf() {
+    const current = ++performanceVersion, host = $('#myCal'), month = myPerfMonth, userId = myPerfUserId;
+    if (!host) return;
+    host.innerHTML = '<p role="status">Loading performance…</p>';
+    const cardsHost = $('#myKpiCards'); if (cardsHost) cardsHost.innerHTML = '';
     const start = `${myPerfMonth}-01`;
     const endDt = new Date(Number(myPerfMonth.slice(0, 4)), Number(myPerfMonth.slice(5, 7)), 0);
     const end = `${myPerfMonth}-${String(endDt.getDate()).padStart(2, '0')}`;
@@ -2584,6 +2644,7 @@
         api.get(`/kpi/me?month=${myPerfMonth}${who}`),
         api.get(`/reports/my-attendance?start=${start}&end=${end}${who}`),
       ]);
+      if (current !== performanceVersion || !host.isConnected || month !== myPerfMonth || userId !== myPerfUserId) return;
       const r = kpi.rows[0];
       const cards = $('#myKpiCards');
       if (cards) {
@@ -2597,7 +2658,7 @@
           ${statCard('Points', r.points, 'value')}` : `<div class="empty">No KPI data for this month.</div>`;
       }
       renderMyCalendar(att);
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { if (current === performanceVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
   }
 
   // Month grid: each day coloured by what happened — yellow for a late clock-in,
@@ -2681,13 +2742,14 @@
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      loadMyPerf();
+      if ($('#perfMonth')) $('#perfMonth').value = myPerfMonth;
+      loadMyPerf(); mountEmployeeSalary();
     };
     $('#calPrev').addEventListener('click', () => shiftMonth(-1));
     $('#calNext').addEventListener('click', () => shiftMonth(1));
     // Fix a day straight from the calendar.
     const openDay = (iso) => {
-      if (isAdmin()) openAttendanceEditor(att.user.id, iso, loadMyPerf, byDay[iso]);
+      if (isAdmin()) openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso]);
       else openPunchRequestModal(iso);
     };
     el.querySelectorAll('[data-fixday]').forEach((c) => {
@@ -2752,7 +2814,7 @@
             ${u.exit_date ? `<div class="join-tenure" style="background:#fdece9;color:var(--danger);margin-top:3px;">${u.exit_date < todayISO() ? 'Left' : 'Leaving'} ${esc(fmtDate(u.exit_date))}</div>` : ''}
           </div>
         </div>`).join('')}`).join('')}</div>
-        <p class="page-sub" style="margin-top:14px;">Ordered by joining date, most senior first. “≈” means the joining date isn’t set yet, so the date they were added to the portal is shown — set it on the employee’s profile in Admin.</p>`
+        <p class="page-sub" style="margin-top:14px;">Ordered by joining date, most senior first. “≈” means the joining date isn’t set yet, so the date they were added to the portal is shown — set it in Employees → Personal information.</p>`
         : `<div class="empty">No employees yet.</div>`;
     } catch (e) { toast(e.message, true); }
   };
@@ -2760,10 +2822,8 @@
   // ---------- Admin (people management) ----------
   VIEWS.admin = async () => {
     if (!isAdmin()) return navigate('dashboard');
-    setMain('Admin', 'Manage employees and access.',
-      `<div class="toolbar"><h2 style="margin:0;color:var(--navy);">Employees</h2><button class="btn btn-primary" id="addEmpBtn">+ Add employee</button></div>
-       <div id="empTable"></div>
-       <div class="section" style="margin-top:30px;">
+    setMain('Admin', 'Portal settings, backups and integrations.',
+      `<div class="section" style="margin-top:30px;">
          <h2 style="color:var(--navy);">Data &amp; backup</h2>
          <div class="card" style="max-width:640px;">
            <p style="margin:0 0 12px;color:var(--slate);font-size:.9rem;">Download a complete snapshot of everything — employees, attendance, leaves, tasks, and clients — as a single database file you can keep on your computer.</p>
@@ -2782,7 +2842,6 @@
          </div>
        </div>
        `);
-    $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
     $('#backupBtn').addEventListener('click', () => {
       const a = document.createElement('a');
       a.href = '/api/backup'; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
@@ -2828,13 +2887,13 @@
         box.textContent = e.message;
       } finally { btn.disabled = false; }
     });
-    loadEmployees();
   };
 
-  async function loadEmployees() {
+  async function loadEmployees(records) {
     try {
-      const { users } = await api.get('/users/manage');
-      $('#empTable').innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Dept / Title</th><th>Leaves</th><th>Status</th><th></th></tr></thead><tbody>
+      const users = records || (await api.get('/users/manage')).users;
+      const host = $('#empTable'); if (!host) return;
+      host.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Dept / Title</th><th>Leaves</th><th>Status</th><th></th></tr></thead><tbody>
         ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}">
           <td>${u.emp_code ? `<strong>${esc(u.emp_code)}</strong>` : '—'}</td>
           <td>${esc(u.name)}${exitTag(u)}</td><td>${esc(u.email)}</td><td>${badge(u.role)}</td>
@@ -2850,7 +2909,7 @@
       $('#empTable').querySelectorAll('[data-edit-emp]').forEach((b) => b.addEventListener('click', () => openEmployeeModal(byId[b.dataset.editEmp])));
       $('#empTable').querySelectorAll('[data-pw-emp]').forEach((b) => b.addEventListener('click', () => openPasswordModal(byId[b.dataset.pwEmp])));
       $('#empTable').querySelectorAll('[data-toggle-emp]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/users/${b.dataset.toggleEmp}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadEmployees(); } catch (e) { toast(e.message, true); }
+        try { await api.post(`/users/${b.dataset.toggleEmp}/active`, { active: Number(b.dataset.active) }); toast('Updated'); VIEWS.employees(); } catch (e) { toast(e.message, true); }
       }));
     } catch (e) { toast(e.message, true); }
   }
@@ -2892,7 +2951,7 @@
       <div class="salary-admin-panel"><h4>Salary for leave estimates</h4>
         <div class="form-row"><div class="field"><label for="eGross">Monthly gross salary (INR)</label><input id="eGross" inputmode="decimal" value="${esc(initialGross)}" placeholder="Not recorded"></div>
           <div class="field"><label for="eSalaryDate">Salary effective from</label><input type="date" id="eSalaryDate" value="${esc(initialSalaryDate)}"></div></div>
-        <p class="leave-balance-note">Admin only. Employees can see their own deduction estimate. Unpaid leave uses monthly gross salary ÷ 30 × unpaid days, including 0.5 for a half day. Add an effective date when salary changes; earlier rates and saved estimates are retained.</p>
+        <p class="leave-balance-note">Admin only. Employees can see their own deduction estimate. Unpaid leave uses monthly gross salary ÷ calendar days in the leave month × unpaid days, including 0.5 for a half day. Add an effective date when salary changes; earlier rates and saved estimates are retained.</p>
         ${salary.rates.length ? `<details><summary>Recorded salary history</summary><div class="leave-table-wrap"><table><thead><tr><th>Effective from</th><th>Monthly gross</th></tr></thead><tbody>${salary.rates.map(rate => `<tr><td>${fmtDate(rate.effective_from)}</td><td>${salaryMoney(rate.monthly_gross_paise)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       </div>
       <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid leave. Resets each 1 October.</div></div>
@@ -2909,9 +2968,9 @@
       }
       const saveButton = $('#mSave'); saveButton.disabled = true;
       try {
-        if (editing) await api.put(`/users/${u.id}`, payload);
-        else { payload.password = $('#ePw').value; await api.post('/users', payload); }
-        closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadEmployees();
+        const result = editing ? await api.put(`/users/${u.id}`, payload) : await api.post('/users', { ...payload, password: $('#ePw').value });
+        myPerfUserId = String(result.user.id);
+        closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); VIEWS.employees();
       } catch (e) { toast(e.message, true); } finally { saveButton.disabled = false; }
     });
   }
