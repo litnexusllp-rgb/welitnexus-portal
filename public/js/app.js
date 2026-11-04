@@ -361,9 +361,9 @@
   function navigate(view, fromAddress = false) {
     if (!ME) return;
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
-    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview'];
+    const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'late-requests'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
-    const employeeAliases = { myperf: 'employeePerformance', leaves: 'employeeLeaves', salaries: 'employeeSalary' };
+    const employeeAliases = { myperf: 'employeePerformance', leaves: 'employeeLeaves', salaries: 'employeeSalary', 'late-requests': 'employeeRequests' };
     const legacyEmployeeView = Object.hasOwn(employeeAliases, view);
     employeeSection = legacyEmployeeView ? employeeAliases[view] : 'employeePerformance';
     if (legacyEmployeeView) view = 'employees';
@@ -395,7 +395,7 @@
   const VIEWS = {};
 
   // Preserve bookmarks and notification destinations after consolidation.
-  for (const legacy of ['myperf', 'leaves', 'salaries']) VIEWS[legacy] = () => navigate(legacy);
+  for (const legacy of ['myperf', 'leaves', 'salaries', 'late-requests']) VIEWS[legacy] = () => navigate(legacy);
 
   VIEWS.taskreview = async () => {
     if (!isAdmin()) return;
@@ -831,20 +831,26 @@
   }
   function leaveBalanceMarkup(b, activity) {
     if (!b) return '';
-    const labels = { regular: 'Regular leave', flexi: 'Flexi leave', special: 'Birthday / anniversary' };
-    return `<section class="section leave-balance-panel"><h3>Leave balances</h3>
-      <p class="page-sub">${fmtDate(b.period.start)} – ${fmtDate(b.period.end)} · Annual entitlements reset every 1 October · ${b.balance} annual paid days remaining</p>
-      ${b.monthly_regular ? `<p><strong>Regular paid leave · ${esc(b.monthly_regular.month)}: ${b.monthly_regular.available} / 1.5 days available</strong><br>${b.monthly_regular.used} approved · ${b.monthly_regular.pending} reserved for pending requests. Strict monthly limit; unused days do not accumulate. Annual remaining balance does not increase this limit.</p>` : ''}
-      <div class="cards">${Object.entries(labels).map(([key,label]) => { const p = b.buckets[key]; return `<div class="card stat"><div class="label">${label}</div><div class="value small">${p.remaining} / ${p.entitlement} days</div><div class="leave-balance-note">${p.used} approved paid days · ${p.pending} pending · ${p.available} annual credits available${key === 'regular' ? '; monthly limit applies' : ''}</div></div>`; }).join('')}</div>
-      ${activity ? `<div class="cards employee-leave-stats">${statCard('Taken this leave year', activity.taken_days, 'value small')}${statCard('Approved upcoming days', activity.upcoming_days, 'value small')}${statCard('Pending days', activity.pending_days, 'value small')}</div><p class="leave-balance-note">Taken includes paid and unpaid approved leave through today. Upcoming and pending days are shown separately for this leave year (${activity.pending_requests} pending requests).</p>` : ''}
-      <p class="leave-balance-note">Flexi and the shared birthday/anniversary day are separate from the 1.5-day monthly regular allowance. Pending requests reserve credit. The 1st–12th is unpaid for every category. Only scheduled working time is charged. Next annual reset: ${fmtDate(b.period.nextReset)}.</p>${leavePolicyMarkup()}</section>`;
+    return `<section class="leave-balance-panel" aria-label="Leave balances">
+      <div class="cards employee-leave-stats">
+        ${statCard('Regular leave available this month', b.monthly_regular.available + ' days', 'value small')}
+        ${statCard('Flexi leave available', b.buckets.flexi.available + ' days', 'value small')}
+        ${statCard('Birthday / anniversary available', b.buckets.special.available + ' days', 'value small')}
+      </div>
+      <p class="page-sub">${b.monthly_regular.used} regular days used · ${b.monthly_regular.pending} reserved · 1.5-day monthly limit</p>
+      ${activity ? `<p class="page-sub">This leave year · ${activity.taken_days} days taken · ${activity.upcoming_days} upcoming · ${activity.pending_requests} requests pending</p>` : ''}
+      <details><summary>Annual balances</summary>
+        <p>Regular leave: ${b.buckets.regular.remaining} of 18 annual days remaining. The monthly limit still applies. Annual balances reset ${esc(fmtDate(b.period.nextReset))}.</p>
+      </details>
+      ${leavePolicyMarkup()}
+    </section>`;
   }
   function leavePolicyMarkup() {
     return `<details class="leave-preview-details"><summary>Staff leave policy and payroll rules</summary><div>
       <p><strong>Paid leave:</strong> annual limits are 18 regular, 1 Flexi and 1 shared birthday/anniversary day, reset on 1 October without annual carryover. Regular paid leave is capped at 1.5 scheduled days in each month with no monthly accumulation. Additional regular leave is unpaid. Flexi is available only after the 15th and needs no explanation.</p>
       <p><strong>Unpaid leave:</strong> all scheduled leave on the 1st–12th is unpaid, including special categories. Only scheduled working time is deducted: weekends and full holidays are excluded; published working weekends count; half holidays have 0.5 working day. Daily rate = monthly gross ÷ actual calendar days in the salary month. The monthly limit replaces the former three-consecutive-day deduction rule.</p>
       <p><strong>Requests:</strong> apply at least three days ahead unless there is an emergency. For three or more planned scheduled leave days, inform management a month ahead or at least 20 days before; health emergencies are exempt. Management should respond within one business day. Leave adjoining a long weekend or public holiday needs specific approval and may be refused. Half-day leave counts up to 0.5 scheduled day.</p>
-      <p><strong>Short Day:</strong> up to two hours per month, approved by management in advance and planned around work and deadlines. A short attendance flag alone does not create a salary deduction. Use the Short Day request below. Pending requests reserve minutes; only requests approved before their start are valid. Short Day time is separate from full/half-day leave.</p>
+      <p><strong>Short Day:</strong> The first approved Short Day each month is free. Each additional approved date charges 0.25 day against regular leave. The 1st–12th and any amount beyond available paid leave are unpaid. Up to two hours can be recorded on each Short Day. Automatic low-hours flags are for review.</p>
       <p><strong>Before payroll:</strong> check dates, scheduled working time, approvals and paid/unpaid treatment. Management must check and explain deductions; ask for attendance or leave errors to be corrected before payroll is processed.</p>
       <p><strong>Fun Friday:</strong> twice a month, with approval and team coordination; sessions last 40–90 minutes excluding breaks, without affecting client work.</p>
       <p><strong>Month-end bonus:</strong> management considers punctuality, attendance, deadlines, client appreciation, extra effort, learning, quality, ownership, teamwork and process improvement. Send the Bonus Email before 6 PM on the last working day. Recipients are announced after processing; amounts remain private. No automatic bonus amount is specified by this policy.</p>
@@ -860,13 +866,18 @@
         await refreshEmployeeLeaveData();
       } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
     });
-    return Promise.all([loadAdminLeaves(), loadOnLeave(), loadLeaveSummary()]);
+    const team = $('#employeeTeamLeave');
+    team.addEventListener('toggle', () => {
+      if (team.open) Promise.all([loadOnLeave(), loadLeaveSummary()]);
+    });
   }
 
   async function refreshEmployeeLeaveData() {
     if (!$('#employeesRoot')) return;
-    await Promise.all([loadEmployeeLeaveDetails(), loadMyPerf(), mountEmployeeSalary(),
-      ...(isAdmin() ? [loadAdminLeaves(), loadOnLeave(), loadLeaveSummary()] : [])]);
+    await Promise.all([
+      loadActiveEmployeeTab(),
+      ...(isAdmin() && employeeSection !== 'employeeRequests' ? [loadLateRequests()] : []),
+    ]);
   }
 
   const daysLabel = (n) => (n ? `${n} ${n === 1 ? 'day' : 'days'}` : '<span style="color:var(--slate)">none</span>');
@@ -974,7 +985,8 @@
     host.innerHTML = '<p role="status">Loading leave balances and history…</p>';
     const current = ++employeeLeaveVersion;
     try {
-      const { balances, activity, leaves } = await api.get(isAdmin() ? `/leaves/for/${user.id}` : '/leaves/mine');
+      const leaveUrl = isAdmin() ? `/leaves/for/${user.id}` : '/leaves/mine';
+      const { balances, activity, leaves } = await api.get(leaveUrl + '?month=' + myPerfMonth);
       if (current !== employeeLeaveVersion || !host.isConnected || selectedEmployee()?.id !== user.id) return;
       host.innerHTML = leaveBalanceMarkup(balances, activity) + `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` + (leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
         ${leaves.map(l => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
@@ -1012,9 +1024,13 @@
   async function loadEmployeeShortDays(user, version) {
     const root = $('#employeeShortDays'); if (!root) return;
     try {
-      const data = await api.get('/short-days' + (isAdmin() ? '?user_id=' + user.id : ''));
+      const data = await api.get('/short-days?month=' + myPerfMonth + (isAdmin() ? '&user_id=' + user.id : ''));
       if (!root.isConnected || version !== employeeLeaveVersion) return;
-      root.innerHTML = `<h3>Short Day · ${esc(data.month)}</h3><p>${data.used_minutes} / 120 minutes approved · ${data.pending_minutes} pending · ${data.available_minutes} available. Management approval is required before the start time. Approved time has no automatic salary deduction.</p>${isAdmin() ? '' : '<button class="btn btn-ghost" id="requestShortDay">Request Short Day</button>'}${shortDayTable(data.requests)}`;
+      const charge = data.leave_charge;
+      root.innerHTML = `<div class="toolbar"><h3>Short Days</h3>${isAdmin() ? '' : '<button class="btn btn-ghost" id="requestShortDay">Request Short Day</button>'}</div>
+        <p class="page-sub">${data.approved_days} approved in ${esc(data.month)} · ${charge.paid_days} days from leave balance · ${charge.unpaid_days} unpaid</p>
+        <details><summary>Short Day history</summary>${shortDayTable(data.requests.filter(r => r.date.startsWith(data.month)))}</details>`;
+
       $('#requestShortDay')?.addEventListener('click', () => openShortDayRequest(data.timezone));
       wireShortDays(root);
     } catch(e) { if (root.isConnected) root.textContent = e.message; }
@@ -1022,7 +1038,7 @@
   function openShortDayRequest(timezone, target = null) {
     modal(`<h3>${target ? 'Mark Short Day' : 'Request Short Day'}</h3>
       ${target ? `<p><strong>${esc(target.user.name)}</strong> · Saves as approved. For a past start time, the record shows when it was entered.</p>` : ''}
-      <p>Up to two hours per month. ${target ? '' : 'Management approval is required before the start. '}Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${esc(target?.day || todayISO())}" ${target ? 'readonly' : ''}></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="${target ? '' : '60'}"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">${target ? 'Mark Short Day' : 'Submit request'}</button></div>`);
+      <p>Up to two hours per date. First approved Short Day of the month is free. ${target ? '' : 'Management approval is required before the start. '}Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${esc(target?.day || todayISO())}" ${target ? 'readonly' : ''}></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="${target ? '' : '60'}"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">${target ? 'Mark Short Day' : 'Submit request'}</button></div>`);
     $('#mCancel').addEventListener('click',closeModal);
     $('#sdSubmit').addEventListener('click', async () => {
       const button = $('#sdSubmit'); button.disabled = true;
@@ -2360,7 +2376,7 @@
   // onDone: what to refresh after editing (defaults to the Reports page views,
   // but the calendar passes its own reloader).
   async function openAttendanceEditor(userId, day, onDone, performanceRow, employee) {
-    modal(`<h3>Fix attendance</h3><div id="fixBody">Loading…</div>`);
+    modal(`<h3>${employee ? 'Attendance for this date' : 'Fix attendance'}</h3><div id="fixBody">Loading…</div>`);
     $('#modal').classList.add('attendance-editor');
     renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
   }
@@ -2375,6 +2391,7 @@
     if (!body?.isConnected) return;
     const target = employee?.role === 'EMPLOYEE' ? { user: employee, day } : null;
     const future = performanceRow?.status === 'FUTURE';
+    const explanation = performanceRow?.lateExplanation;
     const existingFullLeave = target && performanceRow?.leaveKind === 'FULL' ? performanceRow.approvedLeave : null;
     const punchControls = future ? '' : `${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
         ${data.events.map((e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
@@ -2401,18 +2418,44 @@
       </section>`;
     body.innerHTML = `
       <p class="attendance-editor-summary"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
-      ${target ? `<div class="attendance-punctuality">
-        <div><strong>Record leave or Short Day</strong></div>
-        <div class="row-actions" style="flex-wrap:wrap;">
-          ${existingFullLeave ? '<button class="btn btn-primary btn-sm" id="fixAdjustLeave">Adjust to half day</button>' : `
-          <button class="btn btn-ghost btn-sm" id="fixFullLeave">Mark leave</button>
-          <button class="btn btn-ghost btn-sm" id="fixHalfLeave">Mark half day</button>
-          <button class="btn btn-ghost btn-sm" id="fixShortDay">Mark Short Day</button>`}
-        </div>
-      </div>` : ''}
-      ${punchControls}
+      ${explanation ? `<section class="date-explanation" aria-label="Late explanation">
+        <strong>Late explanation · ${explanation.minutes_late} min</strong> ${badge(explanation.status)}
+        <p>${esc(explanation.reason)}</p>
+        ${explanation.status === 'RESOLVED' ? `<p>${lateResolutionLabel(explanation)}</p>` : ''}
+        ${explanation.status === 'PENDING' ? '<button class="btn btn-primary btn-sm" id="fixApproveLate">Approve explanation</button>' : ''}
+      </section>` : performanceRow?.late ? `<p>Late by ${performanceRow.minutesLate} min</p>` : ''}
+      ${target ? `<section class="date-action-panel" aria-label="Mark this date">
+        <strong>Mark this date</strong>
+        ${existingFullLeave ? '<button class="btn btn-primary btn-sm" id="fixAdjustLeave">Adjust to half day</button>' : `<div class="date-action-tabs">
+          <button id="fixWorkedFull" ${future || !data.firstIn || data.fullDay ? 'disabled' : ''}><strong>Full day</strong><span>Excuse lateness</span></button>
+          <button id="fixHalfLeave"><strong>Half day</strong><span>0.5 day of leave</span></button>
+          <button id="fixShortDay"><strong>Short day</strong><span>Record approved time</span></button>
+          <button id="fixFullLeave"><strong>Leave</strong><span>1 day of leave</span></button>
+        </div>`}
+        <p id="fixDateError" role="alert"></p>
+      </section>` : ''}
+      ${target && punchControls ? `<details class="date-punch-details"><summary>Time punches and corrections</summary>${punchControls}</details>` : punchControls}
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
 
+    async function saveDateAction(button, endpoint, payload, message) {
+      button.disabled = true;
+      const error = $('#fixDateError');
+      error.textContent = '';
+      try {
+        await api.post(endpoint, payload);
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+        return;
+      }
+      if (button.isConnected) closeModal();
+      toast(message);
+      if (onDone) await onDone();
+    }
+    $('#fixApproveLate')?.addEventListener('click', event => saveDateAction(event.currentTarget,
+      `/reports/late-explanations/${explanation.id}/approve`, {}, 'Explanation approved'));
+    $('#fixWorkedFull')?.addEventListener('click', event => saveDateAction(event.currentTarget,
+      '/attendance/admin/full-day', { user_id: userId, day }, 'Full day recorded'));
     $('#fixAdjustLeave')?.addEventListener('click', () => openHalfDayAdjustment(target, existingFullLeave));
     $('#fixFullLeave')?.addEventListener('click', () => openMarkLeaveModal(target));
     $('#fixHalfLeave')?.addEventListener('click', () => openMarkLeaveModal(target, 'HALF'));
@@ -2680,8 +2723,15 @@
 
   VIEWS.employees = async () => {
     if (!myPerfMonth) myPerfMonth = thisMonthISO();
-    const admin = isAdmin(), section = employeeSection;
-    setMain('Employees', admin ? 'Performance, leave, salary calculations and personal information in one place.' : 'Your performance, leave, salary calculations and personal information in one place.',
+    const admin = isAdmin();
+    const tabs = [
+      ['employeePerformance', 'Calendar'],
+      ['employeeLeaves', 'Leave'],
+      ['employeeSalary', 'Salary calculation'],
+      ['employeePersonal', 'Personal information'],
+      ...(admin ? [['employeeRequests', 'Requests']] : []),
+    ];
+    setMain('Employees', admin ? 'Select an employee to view their records.' : 'View your calendar, leave, salary and profile.',
       `<div id="employeesRoot"><p role="status">Loading employees…</p></div>`);
     const host = $('#employeesRoot');
     try {
@@ -2696,16 +2746,44 @@
         <div class="field"><label for="perfMonth">Month</label><input type="month" id="perfMonth" value="${myPerfMonth}"></div>
         <button class="btn btn-ghost" id="employeeRefresh">Refresh</button>
         ${admin ? '<button class="btn btn-primary" id="addEmpBtn">+ Add employee</button>' : ''}</div>
-        <div class="employee-section-links" aria-label="Employee sections"><button class="btn btn-ghost" data-employee-section="employeePerformance">Performance</button><button class="btn btn-ghost" data-employee-section="employeeLeaves">Leaves</button><button class="btn btn-ghost" data-employee-section="employeeSalary">Salary calculations</button><button class="btn btn-ghost" data-employee-section="employeePersonal">Personal information</button></div>
-        <section class="section employee-section" id="employeePerformance" tabindex="-1" aria-labelledby="employeePerformanceTitle"><h2 id="employeePerformanceTitle">Performance</h2><div class="cards" id="myKpiCards"></div><div class="pcal" id="myCal"></div></section>
-        <section class="section employee-section" id="employeeLeaves" tabindex="-1" aria-labelledby="employeeLeavesTitle"><div class="toolbar"><h2 id="employeeLeavesTitle">Leaves</h2>${admin ? '<div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn">Check absences now</button><button class="btn btn-primary" id="markLeaveBtn">+ Mark leave</button></div>' : '<button class="btn btn-primary" id="applyBtn">+ Apply for leave</button>'}</div><div id="employeeLeaveDetails"></div>
-          ${admin ? '<details class="employee-team-leaves"><summary>Team approvals, upcoming leave and balances</summary><div class="section leave-table-wrap" id="adminLeaves"></div><div class="section"><h3 id="onLeaveHeading">On leave — current &amp; upcoming</h3><div class="leave-table-wrap" id="onLeave"></div></div><div class="section"><h3>Team leave balances</h3><div class="leave-table-wrap" id="leaveSummary"></div></div></details>' : ''}
-          <section class="employee-section" id="employeeSalary" tabindex="-1" aria-labelledby="employeeSalaryTitle"><div class="toolbar"><h3 id="employeeSalaryTitle">Salary calculations</h3>${admin ? '<button class="btn btn-ghost" id="employeeSalaryScope">Show all employee salaries</button>' : ''}</div><p id="employeeSalaryName" class="page-sub"></p><div id="employeeSalaryMount"></div></section></section>
-        <section class="section employee-section" id="employeePersonal" tabindex="-1" aria-labelledby="employeePersonalTitle"><h2 id="employeePersonalTitle">Personal information</h2><div id="employeeProfile"></div>${admin ? '<details class="employee-management"><summary>Manage all employees and access</summary><div class="table-wrap" id="empTable"></div></details>' : ''}</section>`;
-      host.querySelectorAll('[data-employee-section]').forEach(button => button.addEventListener('click', () => scrollEmployeeSection(button.dataset.employeeSection)));
+        <div class="employee-section-links" role="tablist" aria-label="Employee sections">
+          ${tabs.map(([id,label]) => `<button type="button" role="tab" id="${id}Tab" aria-controls="${id}" aria-selected="false" tabindex="-1" data-employee-section="${id}">${label}</button>`).join('')}
+        </div>
+        <section class="section employee-section" id="employeePerformance" role="tabpanel" tabindex="0" aria-labelledby="employeePerformanceTab" hidden>
+          <div class="pcal" id="myCal"></div><details class="employee-summary" id="employeePerformanceSummary"><summary>Monthly performance summary</summary><div class="cards" id="myKpiCards"></div></details>
+        </section>
+        <section class="section employee-section" id="employeeLeaves" role="tabpanel" tabindex="0" aria-labelledby="employeeLeavesTab" hidden>
+          <div class="toolbar"><h2>Leave</h2>${admin ? '<div class="row-actions"><button class="btn btn-ghost" id="flagAbsBtn">Check absences</button><button class="btn btn-primary" id="markLeaveBtn">Mark leave</button></div>' : '<button class="btn btn-primary" id="applyBtn">Apply for leave</button>'}</div>
+          <div id="employeeLeaveDetails"></div>
+        </section>
+        <section class="section employee-section" id="employeeSalary" role="tabpanel" tabindex="0" aria-labelledby="employeeSalaryTab" hidden>
+          <div class="toolbar"><h2>Salary calculation</h2>${admin ? '<button class="btn btn-ghost" id="employeeSalaryScope">Show all employee salaries</button>' : ''}</div><p id="employeeSalaryName" class="page-sub"></p><div id="employeeSalaryMount"></div>
+        </section>
+        <section class="section employee-section" id="employeePersonal" role="tabpanel" tabindex="0" aria-labelledby="employeePersonalTab" hidden>
+          <h2>Personal information</h2><div id="employeeProfile"></div>${admin ? '<details class="employee-management"><summary>Manage employees and access</summary><div class="table-wrap" id="empTable"></div></details>' : ''}
+        </section>
+        ${admin ? `<section class="section employee-section" id="employeeRequests" role="tabpanel" tabindex="0" aria-labelledby="employeeRequestsTab" hidden>
+          <h2>Requests</h2><div id="lateRequests"></div><div class="section leave-table-wrap" id="adminLeaves"></div>
+          <details class="employee-team-leaves" id="employeeTeamLeave"><summary>Team leave calendar and balances</summary><div class="section"><h3 id="onLeaveHeading">Upcoming leave</h3><div class="leave-table-wrap" id="onLeave"></div></div><div class="section"><h3>Team leave balances</h3><div class="leave-table-wrap" id="leaveSummary"></div></div></details>
+        </section>` : ''}`;
+      const tabButtons = [...host.querySelectorAll('[role="tab"]')];
+      tabButtons.forEach((button, index) => {
+        button.addEventListener('click', () => showEmployeeTab(button.dataset.employeeSection));
+        button.addEventListener('keydown', event => {
+          const indices = { ArrowLeft: (index + tabButtons.length - 1) % tabButtons.length, ArrowRight: (index + 1) % tabButtons.length, Home: 0, End: tabButtons.length - 1 };
+          if (!Object.hasOwn(indices, event.key)) return;
+          event.preventDefault();
+          const next = tabButtons[indices[event.key]];
+          showEmployeeTab(next.dataset.employeeSection);
+          next.focus();
+        });
+      });
+      showEmployeeTab(tabs.some(([id]) => id === employeeSection) ? employeeSection : 'employeePerformance', false);
+      const summary = $('#employeePerformanceSummary');
+      summary.addEventListener('toggle', () => { if (summary.open) loadPerformanceSummary(); });
       $('#perfMonth').addEventListener('change', async event => {
         if (!/^\d{4}-\d{2}$/.test(event.target.value)) return;
-        myPerfMonth = event.target.value; await Promise.all([loadMyPerf(), mountEmployeeSalary()]);
+        myPerfMonth = event.target.value; await loadActiveEmployeeTab();
       });
       $('#employeeRefresh').addEventListener('click', () => VIEWS.employees());
       if (admin) {
@@ -2715,15 +2793,62 @@
         $('#employeeSalaryScope').addEventListener('click', () => mountEmployeeSalary($('#employeeSalaryScope').dataset.team !== '1'));
         loadEmployees(EMPLOYEE_RECORDS);
         mountTeamLeaves();
+        if (employeeSection !== 'employeeRequests') loadLateRequests();
       } else $('#applyBtn').addEventListener('click', openApplyLeave);
       await loadEmployeeProfile();
-      if (host.isConnected && section !== 'employeePerformance') scrollEmployeeSection(section);
     } catch (e) { if (host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
   };
 
-  function scrollEmployeeSection(id) {
-    const section = document.getElementById(id); if (!section) return;
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' }); section.focus({ preventScroll: true });
+  function showEmployeeTab(id, load = true) {
+    const root = $('#employeesRoot');
+    if (!root || !document.getElementById(id)) return;
+    const changed = employeeSection !== id;
+    employeeSection = id;
+    root.querySelectorAll('[role="tabpanel"]').forEach(panel => { panel.hidden = panel.id !== id; });
+    root.querySelectorAll('[role="tab"]').forEach(tab => {
+      const selected = tab.dataset.employeeSection === id;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    });
+    if (load && changed) return loadActiveEmployeeTab();
+  }
+
+  function loadActiveEmployeeTab() {
+    switch (employeeSection) {
+      case 'employeePerformance': return loadMyPerf();
+      case 'employeeLeaves': return loadEmployeeLeaveDetails();
+      case 'employeeSalary': return mountEmployeeSalary($('#employeeSalaryScope')?.dataset.team === '1');
+      case 'employeeRequests': return Promise.all([loadLateRequests(), loadAdminLeaves(),
+        ...($('#employeeTeamLeave')?.open ? [loadOnLeave(), loadLeaveSummary()] : [])]);
+      default: return undefined;
+    }
+  }
+
+  async function loadLateRequests() {
+    const host = $('#lateRequests');
+    if (!host) return;
+    try {
+      const { requests } = await api.get('/reports/late-explanations/pending');
+      if (!host.isConnected) return;
+      $('#employeeRequestsTab').textContent = requests.length ? `Requests (${requests.length})` : 'Requests';
+      host.innerHTML = `<h3>Late explanations</h3>${requests.length ? `
+        <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Late</th><th></th></tr></thead><tbody>
+          ${requests.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(fmtDate(r.day))}</td><td>${r.minutes_late} min</td>
+          <td><button class="btn btn-ghost btn-sm" data-review-late="${r.id}">Review</button></td></tr>`).join('')}
+        </tbody></table></div>` : '<p class="page-sub">No late explanations waiting for review.</p>'}`;
+      host.querySelectorAll('[data-review-late]').forEach(button => button.addEventListener('click', async () => {
+        const request = requests.find(r => r.id === Number(button.dataset.reviewLate));
+        myPerfUserId = String(request.user_id);
+        myPerfMonth = request.day.slice(0, 7);
+        $('#perfUser').value = myPerfUserId;
+        $('#perfMonth').value = myPerfMonth;
+        showEmployeeTab('employeePerformance', false);
+        await loadEmployeeProfile();
+        if (employeeSection === 'employeePerformance' && myPerfUserId === String(request.user_id) && myPerfMonth === request.day.slice(0, 7)) {
+          $('#myCal').querySelector(`[data-fixday="${request.day}"]`)?.click();
+        }
+      }));
+    } catch (e) { if (host.isConnected) host.textContent = e.message; }
   }
 
   async function mountEmployeeSalary(team = false) {
@@ -2738,39 +2863,57 @@
     }
     $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + myPerfMonth;
     if (!team && user.role === 'ADMIN') { host.innerHTML = '<p class="empty">Admin accounts are outside the employee salary worksheet.</p>'; return; }
-    await window.Salaries.mount($('#employeeSalaryRoot'), { api, month: myPerfMonth, userId: team ? null : user.id, readOnly: !admin,
-      onManage: () => scrollEmployeeSection('employeePersonal'),
-      onMonthChange: month => { if (!/^\d{4}-\d{2}$/.test(month)) return; myPerfMonth = month; $('#perfMonth').value = month; $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + month; loadMyPerf(); } });
+    await window.Salaries.mount($('#employeeSalaryRoot'), { api, month: myPerfMonth, userId: team ? null : user.id, readOnly: !admin, embedded: true,
+      onManage: () => showEmployeeTab('employeePersonal'),
+      onMonthChange: month => { if (!/^\d{4}-\d{2}$/.test(month)) return; myPerfMonth = month; $('#perfMonth').value = month; $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + month; } });
   }
 
   async function loadEmployeeProfile() {
     const user = selectedEmployee(), host = $('#employeeProfile'); if (!user || !host) return;
-    const fields = [['Name', user.name], ['Email', user.email], ['Phone', user.phone], ['Birthday', fmtDate(user.birthday)], ['Employee code', user.emp_code], ['Department', user.department], ['Title', user.title], ['Role', cap(user.role)], ['Joining date', fmtDate(user.join_date)], ['Last working day', fmtDate(user.exit_date)], ['Shift start', user.shift_start], ['Attendance timezone', user.attendance_timezone || 'Office default'], ['Workday starts at hour', user.attendance_cutover ?? 'Office default'], ...(isAdmin() ? [['Status', user.active ? 'Active' : 'Inactive'], ['Asana email', user.asana_email]] : [])];
-    host.innerHTML = `<p class="page-sub"><strong>${esc(user.name)}</strong>${exitTag(user)}</p><dl class="employee-info">${fields.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? '—') || '—'}</dd></div>`).join('')}</dl><div class="row-actions"><button class="btn btn-primary" id="employeeEditProfile">${isAdmin() ? 'Edit employee' : 'Edit my details'}</button>${isAdmin() ? '<button class="btn btn-ghost" id="employeePassword">Reset password</button>' : ''}</div>`;
+    const contact = [['Email', user.email], ['Phone', user.phone], ['Department', user.department], ['Employee code', user.emp_code]];
+    const work = [['Birthday', fmtDate(user.birthday)], ['Role', cap(user.role)], ['Joining date', fmtDate(user.join_date)],
+      ['Last working day', fmtDate(user.exit_date)], ['Shift start', user.shift_start], ['Attendance timezone', user.attendance_timezone || 'Office default'],
+      ['Workday starts at hour', user.attendance_cutover ?? 'Office default'],
+      ...(isAdmin() ? [['Status', user.active ? 'Active' : 'Inactive'], ['Asana email', user.asana_email]] : [])];
+    const fields = list => `<dl class="employee-info">${list.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? '—') || '—'}</dd></div>`).join('')}</dl>`;
+    host.innerHTML = `<h3>${esc(user.name)}${exitTag(user)}</h3>
+      <p class="page-sub">${esc(user.title || '')}</p>
+      ${fields(contact)}
+      <div class="row-actions"><button class="btn btn-primary" id="employeeEditProfile">${isAdmin() ? 'Edit employee' : 'Edit my details'}</button>${isAdmin() ? '<button class="btn btn-ghost" id="employeePassword">Reset password</button>' : ''}</div>
+      <details class="employee-summary"><summary>Employment details</summary>${fields(work)}</details>`;
     $('#employeeEditProfile').addEventListener('click', () => isAdmin() ? openEmployeeModal(user) : openMyProfile());
     $('#employeePassword')?.addEventListener('click', () => openPasswordModal(user));
-    await Promise.all([loadMyPerf(), loadEmployeeLeaveDetails(), mountEmployeeSalary()]);
+    await loadActiveEmployeeTab();
   }
 
   async function loadMyPerf() {
     const current = ++performanceVersion, host = $('#myCal'), month = myPerfMonth, userId = myPerfUserId;
     if (!host) return;
-    host.innerHTML = '<p role="status">Loading performance…</p>';
-    const cardsHost = $('#myKpiCards'); if (cardsHost) cardsHost.innerHTML = '';
-    const start = `${myPerfMonth}-01`;
-    const endDt = new Date(Number(myPerfMonth.slice(0, 4)), Number(myPerfMonth.slice(5, 7)), 0);
-    const end = `${myPerfMonth}-${String(endDt.getDate()).padStart(2, '0')}`;
-    const who = isAdmin() && myPerfUserId ? `&user_id=${myPerfUserId}` : '';
+    host.innerHTML = '<p role="status">Loading calendar…</p>';
+    const cards = $('#myKpiCards');
+    if (cards) cards.innerHTML = '';
+    const start = `${month}-01`;
+    const days = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
+    const who = isAdmin() && userId ? `&user_id=${userId}` : '';
     try {
-      const [kpi, att] = await Promise.all([
-        api.get(`/kpi/me?month=${myPerfMonth}${who}`),
-        api.get(`/reports/my-attendance?start=${start}&end=${end}${who}`),
-      ]);
+      const att = await api.get(`/reports/my-attendance?start=${start}&end=${month}-${days}${who}`);
       if (current !== performanceVersion || !host.isConnected || month !== myPerfMonth || userId !== myPerfUserId) return;
+      renderMyCalendar(att);
+      if ($('#employeePerformanceSummary')?.open) loadPerformanceSummary();
+    } catch (e) { if (current === performanceVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
+  }
+
+  async function loadPerformanceSummary() {
+    const current = performanceVersion, cards = $('#myKpiCards'), month = myPerfMonth, userId = myPerfUserId;
+    if (!cards || cards.dataset.version === String(current)) return;
+    cards.dataset.version = String(current);
+    cards.innerHTML = '<p role="status">Loading summary…</p>';
+    const who = isAdmin() && userId ? `&user_id=${userId}` : '';
+    try {
+      const kpi = await api.get(`/kpi/me?month=${month}${who}`);
+      if (current !== performanceVersion || !cards.isConnected || month !== myPerfMonth || userId !== myPerfUserId) return;
       const r = kpi.rows[0];
-      const cards = $('#myKpiCards');
-      if (cards) {
-        cards.innerHTML = r ? `
+      cards.innerHTML = r ? `
           ${r.invalidAttendanceDays || r.employmentWarning ? '<p style="color:var(--danger);">Attendance needs review; totals may be incomplete.</p>' : ''}
           ${statCard('Days present', r.daysPresent, 'value')}
           ${statCard('Hours worked', r.hoursWorked, 'value')}
@@ -2778,9 +2921,12 @@
           ${statCard('Late days', r.lateDays, 'value')}
           ${statCard('Tasks done', r.tasksDone, 'value')}
           ${statCard('Points', r.points, 'value')}` : `<div class="empty">No KPI data for this month.</div>`;
+    } catch (e) {
+      if (current === performanceVersion && cards.isConnected) {
+        delete cards.dataset.version;
+        cards.innerHTML = `<p role="alert">${esc(e.message)}</p>`;
       }
-      renderMyCalendar(att);
-    } catch (e) { if (current === performanceVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
+    }
   }
 
   // Month grid: each day coloured by what happened — yellow for a late clock-in,
@@ -2817,7 +2963,7 @@
       else if (r.status === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
       else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }
       else if (r.noClockOut) { cls = 'pcal-noout'; tag = 'No clock-out'; }
-      else if (r.lateOverride) { cls = 'pcal-ok'; tag = 'Normal · admin'; }
+      else if (r.lateOverride) { cls = 'pcal-ok'; tag = r.fullDayOverride ? 'Full day' : 'Late excused'; }
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
       if (['PRESENT', 'FUTURE'].includes(r.status) && r.leaveKind === 'FULL') { cls = 'pcal-leave'; tag = 'Leave'; }
@@ -2826,13 +2972,17 @@
         if (r.status === 'PRESENT' && !r.late && !r.noClockOut) cls = 'pcal-short';
         tag = [tag === 'Short day' ? '' : tag, `Approved Short Day · ${r.approvedShortMinutes}m`].filter(Boolean).join(' · ');
       }
+      if (r.lateExplanation?.status === 'PENDING') tag = [tag, 'Explanation pending'].filter(Boolean).join(' · ');
       const inTime = r.firstIn ? attendanceTime(r.firstIn, r.timezone) : '';
+      const clockLabel = r.firstIn ? new Date(r.firstIn).toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', timeZone: r.timezone || undefined,
+      }) : '';
       const can = clickable(r);
       const action = canRecord ? 'click to manage attendance or leave' : isAdmin() ? 'click to fix punches' : 'click to request a correction';
       const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
       return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}${can ? ' pcal-clickable' : ''}" title="${esc(title)}"${can ? ` data-fixday="${iso}" role="button" tabindex="0"` : ''}>
         <span class="dn">${dayNum}</span>
-        ${inTime && r.status !== 'WEEKEND' ? `<span class="mins">${inTime}</span>` : ''}
+        ${clockLabel && r.status !== 'WEEKEND' ? `<span class="mins">${esc(clockLabel)}</span>` : ''}
         ${r.workedMinutes ? `<span class="mins">${fmtMins(r.workedMinutes)}</span>` : ''}
         ${tag ? `<span class="tag">${esc(tag)}</span>` : ''}
       </div>`;
@@ -2868,23 +3018,55 @@
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Open a date to manage attendance or record leave.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Open a date to manage attendance or record leave.' : 'Open a late date to submit an explanation.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       if ($('#perfMonth')) $('#perfMonth').value = myPerfMonth;
-      loadMyPerf(); mountEmployeeSalary();
+      loadMyPerf();
     };
     $('#calPrev').addEventListener('click', () => shiftMonth(-1));
     $('#calNext').addEventListener('click', () => shiftMonth(1));
     // Fix a day straight from the calendar.
     const openDay = (iso) => {
       if (isAdmin()) openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso], canRecord ? employee : null);
+      else if (byDay[iso]?.lateExplanation || (byDay[iso]?.late && !byDay[iso]?.approvedShortMinutes && !byDay[iso]?.leaveKind)) openLateExplanation(byDay[iso]);
       else openPunchRequestModal(iso);
     };
     el.querySelectorAll('[data-fixday]').forEach((c) => {
       c.addEventListener('click', () => openDay(c.dataset.fixday));
       c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDay(c.dataset.fixday); } });
+    });
+  }
+
+  function lateResolutionLabel(explanation) {
+    if (explanation.status !== 'RESOLVED') return '';
+    return { FULL_DAY: 'Marked full day', HALF_DAY: 'Marked half day', SHORT_DAY: 'Marked Short Day', LEAVE: 'Marked leave' }[explanation.resolution] || 'Reviewed';
+  }
+
+  function openLateExplanation(row) {
+    const explanation = row.lateExplanation;
+    modal(`<h3>${esc(fmtDate(row.day))}</h3>
+      <p><strong>Late by ${explanation?.minutes_late ?? row.minutesLate} min</strong></p>
+      ${explanation ? `<p>${badge(explanation.status)} ${lateResolutionLabel(explanation)}</p><p class="late-reason">${esc(explanation.reason)}</p>` : `
+        <div class="field"><label for="lateReason">Why were you late?</label><textarea id="lateReason" maxlength="500" rows="3" placeholder="Enter a brief explanation"></textarea></div>
+        <p role="alert" id="lateReasonError"></p>`}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="latePunchCorrection">Correct a punch</button>
+        ${explanation ? '<button class="btn btn-primary" id="lateDone">Done</button>' : '<button class="btn btn-primary" id="lateSend">Submit explanation</button>'}
+      </div>`);
+    $('#lateDone')?.addEventListener('click', closeModal);
+    $('#latePunchCorrection').addEventListener('click', () => openPunchRequestModal(row.day));
+    $('#lateSend')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const reason = $('#lateReason').value.trim(), error = $('#lateReasonError');
+      if (!reason) { error.textContent = 'Enter a reason before submitting.'; $('#lateReason').focus(); return; }
+      button.disabled = true;
+      try { await api.post('/reports/late-explanations', { day: row.day, reason }); }
+      catch (e) { error.textContent = e.message; button.disabled = false; return; }
+      if (button.isConnected) closeModal();
+      toast('Explanation sent for approval');
+      await loadMyPerf();
     });
   }
 

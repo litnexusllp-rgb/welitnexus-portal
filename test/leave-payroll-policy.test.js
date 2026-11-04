@@ -18,6 +18,7 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
   const row=(id,month='2026-10')=>buildSalaries(db,month,id).rows[0];
   const express=require('express'), app=express(); app.use(express.json(),require('cookie-parser')(),auth.loadUser);
   app.use('/api/leaves',require('../src/routes/leaves')); app.use('/api/short-days',require('../src/routes/shortDays')); app.use('/api/salaries',require('../src/routes/salaries'));
+  app.use('/api/reports',require('../src/routes/reports')); app.use('/api/attendance',require('../src/routes/attendance'));
   const server=app.listen(0,'127.0.0.1'); await new Promise((r,j)=>{server.once('listening',r);server.once('error',j);});
   const req=async(id,url,method='GET',body)=>{
     const r=await fetch(`http://127.0.0.1:${server.address().port}/api/${url}`,{method,headers:{'content-type':'application/json',...(id?{cookie:auth.COOKIE+'='+auth.issueToken(db.prepare('SELECT * FROM users WHERE id=?').get(id))}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -46,7 +47,7 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal(short.body.request.decided_by, admin);
     assert.ok(short.body.request.decided_ts > short.body.request.start_ts);
     assert.equal((await req(admin, 'short-days/admin', 'POST', shortDay)).status, 409);
-    assert.equal((await req(admin, 'short-days/admin', 'POST', { ...shortDay, date: '2026-10-15', minutes: 61 })).status, 409);
+    assert.equal((await req(admin, 'short-days/admin', 'POST', { ...shortDay, start_time: '19:00', minutes: 61 })).status, 409);
     assert.equal((await req(admin, 'short-days/admin', 'POST', { ...shortDay, date: '2026-10-13' })).status, 409);
     assert.equal(row(id).approved_short_day_minutes, 60);
   });
@@ -80,6 +81,73 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
       ['2026-11-17', '2026-11-17', 'HALF'],
       ['2026-11-18', '2026-11-18', 'FULL'],
     ]);
+  });
+
+  await t.test('additional approved Short Days use quarter-day leave, including split paid and unpaid time', async () => {
+    const id = add();
+    salary(id);
+    const draft = (date, start_time = '16:00') => ({ user_id: id, date, start_time, minutes: 60 });
+    const record = async (date, time) => {
+      assert.equal((await req(admin, 'short-days/admin', 'POST', draft(date, time))).status, 200);
+    };
+    await record('2026-10-05');
+    await record('2026-10-06'); // First-twelve charge is unpaid.
+    await record('2026-10-06', '18:00'); // Second time slot is the same Short Day.
+    await record('2026-10-13'); // 0.25 paid.
+    leave(id, '2026-10-14'); // 1.0 paid.
+    const draftHalf = { user_id: id, start_date: '2026-10-15', kind: 'HALF' };
+    const preview = await req(admin, 'leaves/preview', 'POST', draftHalf);
+    assert.equal(preview.body.leave.paid_days, 0.25);
+    assert.equal(preview.body.leave.unpaid_days, 0.25);
+    assert.equal(preview.body.leave.deduction_estimate.total_paise, 25000);
+    assert.equal((await req(admin, 'leaves/admin', 'POST', draftHalf)).status, 200);
+    await record('2026-10-16'); // No paid credit remains.
+    assert.equal((await req(id, 'short-days', 'POST', draft('2026-11-03'))).status, 200);
+    const report = row(id);
+    assert.equal(report.approved_short_day_count, 4);
+    assert.equal(report.short_day_paid_days, 0.25);
+    assert.equal(report.short_day_unpaid_days, 0.5);
+    assert.equal(report.paid_leave_days, 1.5);
+    assert.equal(report.unpaid_leave_days, 0.75);
+    assert.equal(report.deduction_paise, 75000);
+    assert.deepEqual(policy.balances(id, '2026-10-31').short_day, { paid_days: 0.25, unpaid_days: 0.5 });
+    assert.equal(row(id, '2026-11').deduction_paise, 0);
+  });
+
+  await t.test('late explanation approval and full-day marking record decisions without changing punches', async () => {
+    const id = add(), other = add();
+    const punch = db.prepare('INSERT INTO events(user_id,type,ts,day) VALUES(?,?,?,?)');
+    db.prepare("UPDATE users SET shift_start='16:00' WHERE id=?").run(id);
+    for (const day of ['2026-10-06', '2026-10-07']) {
+      punch.run(id, 'IN', Date.parse(day+'T16:19:00+05:30'), day);
+      punch.run(id, 'OUT', Date.parse(day+'T20:19:00+05:30'), day);
+    }
+    const reportUrl = 'reports/my-attendance?start=2026-10-06&end=2026-10-07';
+    const before = (await req(id, reportUrl)).body.rows;
+    assert.equal(before[0].late, true);
+    const explanation = { day: '2026-10-06', reason: 'Train delayed', user_id: other };
+    assert.equal((await req(other, 'reports/late-explanations', 'POST', explanation)).status, 409);
+    assert.equal((await req(id, 'reports/late-explanations', 'POST', explanation)).status, 201);
+    assert.equal((await req(id, 'reports/late-explanations', 'POST', explanation)).status, 409);
+    assert.equal((await req(other, 'reports/late-explanations/pending')).status, 403);
+    const pending = (await req(admin, 'reports/late-explanations/pending')).body.requests;
+    const request = pending.find(r => r.user_id === id);
+    assert.ok(request);
+    const approve = 'reports/late-explanations/'+request.id+'/approve';
+    assert.equal((await req(id, approve, 'POST', {})).status, 403);
+    assert.equal((await req(admin, approve, 'POST', {})).status, 200);
+    assert.equal((await req(admin, approve, 'POST', {})).status, 409);
+    assert.equal((await req(id, 'reports/late-explanations', 'POST', { day:'2026-10-07', reason:'Traffic' })).status, 201);
+    assert.equal((await req(admin, 'attendance/admin/full-day', 'POST', { day:'2026-10-07', user_id:id })).status, 200);
+    const after = (await req(id, reportUrl)).body.rows;
+    assert.equal(after[0].lateExplanation.status, 'APPROVED');
+    assert.equal(after[0].late, false);
+    assert.equal(after[0].short, true);
+    assert.equal(after[1].fullDayOverride, true);
+    assert.equal(after[1].short, false);
+    assert.equal(after[1].lateExplanation.resolution, 'FULL_DAY');
+    assert.deepEqual(after.map(r => r.workedMinutes), before.map(r => r.workedMinutes));
+    assert.equal((await req(other, reportUrl + '&user_id=' + id)).body.rows[0].lateExplanation, null);
   });
 
   await t.test('regular cap spans split requests; special categories stay separate; first twelve always unpaid',()=>{
@@ -160,7 +228,7 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.doesNotThrow(()=>policy.normalizeLeave(l('2026-11-23','2026-11-25')));
     assert.doesNotThrow(()=>policy.normalizeLeave(l('2026-10-01'),{allowPast:true}));
   });
-  await t.test('Short Day requires advance approval, reserves only 120 minutes, and stays separate from paid leave',async()=>{
+  await t.test('Short Day requires advance approval and enforces 120 minutes per date',async()=>{
     const id=add(),other=add();salary(id);
     const draft=(date,minutes,start_time='16:00')=>({date,start_time,minutes,reason:'Synthetic'});
     assert.equal((await req(null,'short-days')).status,401);assert.equal((await req(id,'short-days/pending')).status,403);
@@ -170,7 +238,7 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal((await req(id,'short-days','POST',draft('2026-11-03',121))).status,400);
     const first=await req(id,'short-days','POST',draft('2026-11-03',80));assert.equal(first.status,200);
     const second=await req(id,'short-days','POST',draft('2026-11-04',40));assert.equal(second.status,200);
-    assert.equal((await req(id,'short-days','POST',draft('2026-11-05',1))).status,409);
+    assert.equal((await req(id,'short-days','POST',draft('2026-11-03',41,'18:00'))).status,409);
     assert.equal((await req(other,`short-days/${first.body.request.id}/cancel`,'POST',{})).status,404);
     const before=row(id,'2026-11');
     assert.equal((await req(admin,`short-days/${first.body.request.id}/decide`,'POST',{decision:'APPROVED'})).status,200);
@@ -186,6 +254,6 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal((await req(admin,`short-days/${expired.body.request.id}/decide`,'POST',{decision:'REJECTED'})).status,200);
     Settings.now=()=>Date.parse('2026-11-02T09:00:00+05:30');
     const otherRequests=await req(other,'short-days');assert.equal(otherRequests.body.requests.length,0);
-    const races=await Promise.all([req(other,'short-days','POST',draft('2026-11-03',80)),req(other,'short-days','POST',draft('2026-11-04',80))]);assert.deepEqual(races.map(r=>r.status).sort(),[200,409]);
+    const races=await Promise.all([req(other,'short-days','POST',draft('2026-11-03',80)),req(other,'short-days','POST',draft('2026-11-03',80,'18:00'))]);assert.deepEqual(races.map(r=>r.status).sort(),[200,409]);
   });
 });

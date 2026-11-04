@@ -62,6 +62,21 @@ CREATE TABLE IF NOT EXISTS attendance_day_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_attendance_overrides_day ON attendance_day_overrides(day);
 
+CREATE TABLE IF NOT EXISTS late_explanations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  day TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  minutes_late INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','APPROVED','RESOLVED')),
+  resolution TEXT,
+  created_ts INTEGER NOT NULL,
+  decided_by INTEGER REFERENCES users(id),
+  decided_ts INTEGER,
+  UNIQUE(user_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_late_explanations_pending ON late_explanations(status, day);
+
 CREATE TABLE IF NOT EXISTS leaves (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL,
@@ -335,6 +350,9 @@ CREATE INDEX IF NOT EXISTS idx_bonus_month ON bonuses(month);`);
 
 // Leave categories are separate from FULL/HALF duration. Legacy requests retain
 // their original dates/status/reason and use the regular pool unless reviewed.
+if (!db.pragma('table_info(attendance_day_overrides)').some(c => c.name === 'full_day')) {
+  db.exec('ALTER TABLE attendance_day_overrides ADD COLUMN full_day INTEGER NOT NULL DEFAULT 0 CHECK(full_day IN (0,1))');
+}
 if (!db.pragma('table_info(leaves)').some(c => c.name === 'category')) {
   db.exec("ALTER TABLE leaves ADD COLUMN category TEXT NOT NULL DEFAULT 'REGULAR'");
 }

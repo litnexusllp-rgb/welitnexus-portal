@@ -555,7 +555,7 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .employee-controls { flex-wrap: wrap; justify-content: flex-start; align-items: end; gap: 12px; }
 .employee-controls .field { margin: 0; }
 .employee-controls select { max-width: 100%; min-width: min(250px, 100%); }
-.employee-section-links { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.employee-section-links { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .employee-section { scroll-margin-top: 24px; }
 .employee-section:focus { outline: none; }
 .employee-section h3 { color: var(--navy); margin: 20px 0 12px; }
@@ -570,3 +570,50 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .salary-slip-download { margin: 16px 0; }
 .salary-table [data-salary-slip] { margin-top: 8px; }
 [data-salary-slip][aria-disabled="true"] { opacity: .65; cursor: wait; }
+
+.employee-section-links [role="tab"] {
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--slate);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.employee-section-links [role="tab"]:hover { background: var(--mist); color: var(--navy); }
+.employee-section-links [aria-selected="true"] { background: var(--mist); color: var(--navy); border-bottom-color: var(--teal-dark); }
+.employee-section[hidden] { display: none; }
+.employee-summary, .date-punch-details { margin-top: 16px; }
+.employee-summary > summary, .date-punch-details > summary { color: var(--navy); font-weight: 650; cursor: pointer; margin-bottom: 12px; }
+.date-explanation, .date-action-panel { border: 1px solid var(--line); border-radius: 12px; margin: 12px 0; padding: 16px; }
+.date-explanation { background: var(--mist); }
+.date-explanation p, .late-reason { white-space: pre-wrap; overflow-wrap: anywhere; }
+.date-action-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.date-action-tabs button {
+  min-height: 66px;
+  padding: 10px;
+  text-align: left;
+  background: var(--mist);
+  color: var(--navy);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.date-action-tabs button:hover:not(:disabled) { border-color: var(--teal-dark); }
+.date-action-tabs button:disabled { opacity: .45; cursor: default; }
+.date-action-tabs span { display: block; font-size: .78rem; color: var(--slate); margin-top: 4px; }
+#fixDateError:empty { display: none; }
+#fixDateError, #lateReasonError { color: var(--danger); }
+@media (max-width: 640px) {
+  .date-action-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .employee-section-links [role="tab"] { padding: 10px; }
+}
+.salary-summary-table { width: 100%; max-width: 700px; margin: 12px 0; }
+.salary-summary-table td:last-child, .salary-summary-table thead th:last-child { text-align: right; }
+.salary-summary-table tbody th, .salary-summary-table tfoot th { text-align: left; }
+.salary-summary-table tfoot { background: var(--mist); color: var(--navy); font-weight: 700; }
+.salary-source-details { margin: 14px 0; }
+.salary-source-details summary { cursor: pointer; color: var(--navy); font-weight: 650; }

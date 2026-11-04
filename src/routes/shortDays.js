@@ -4,7 +4,9 @@ const router = require('express').Router();
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { DateTime, ZONE, now, todayStr } = require('../time');
-const { calendarFrom, scheduledDays } = require('../leaveCalculation');
+const { EFFECTIVE, calendarFrom, scheduledDays } = require('../leaveCalculation');
+const { balances, syncBalance } = require('../leavePolicy');
+const { resolveLateExplanation } = require('../lateExplanations');
 const { settings, daySettings } = require('../attendanceSession');
 const { employmentStatus } = require('../employment');
 const { notify } = require('../notify');
@@ -15,9 +17,13 @@ const user = id => db.prepare('SELECT * FROM users WHERE id=?').get(id);
 const allowance = (id,month,exclude=null) => db.prepare(`SELECT COALESCE(SUM(CASE WHEN status='APPROVED' THEN minutes ELSE 0 END),0) AS used,
   COALESCE(SUM(CASE WHEN status='PENDING' THEN minutes ELSE 0 END),0) AS pending FROM short_day_requests
   WHERE user_id=? AND substr(date,1,7)=? AND status IN ('APPROVED','PENDING') AND id<>?`).get(id,month,exclude || 0);
-function checkCredit(id,month,minutes,exclude=null) {
-  const a = allowance(id,month,exclude);
-  if (a.used+a.pending+minutes > 120) fail(`Short Day allowance is two hours per month. ${Math.max(0,120-a.used-a.pending)} minute(s) available.`,409);
+function checkDuration(id, date, minutes, exclude = null) {
+  const legacy = date < EFFECTIVE;
+  const where = legacy ? 'substr(date,1,7)=?' : 'date=?';
+  const { used } = db.prepare(`SELECT COALESCE(SUM(minutes),0) AS used FROM short_day_requests
+    WHERE user_id=? AND ${where} AND status IN ('APPROVED','PENDING') AND id<>?`)
+    .get(id, legacy ? date.slice(0,7) : date, exclude || 0);
+  if (used + minutes > 120) fail(`Up to 120 Short Day minutes are allowed per ${legacy ? 'month' : 'date'}. ${120-used} minute(s) available.`,409);
 }
 function checkLeave(id,date) {
   if (db.prepare("SELECT 1 FROM leaves WHERE user_id=? AND status IN ('APPROVED','PENDING') AND start_date<=? AND end_date>=? LIMIT 1").get(id,date,date)) fail('A full/half-day leave request already covers this date. Resolve it before requesting Short Day time.',409);
@@ -33,8 +39,10 @@ router.get('/', (req,res) => {
     const month = req.query.month || todayStr().slice(0,7);
     if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) fail('Choose a valid month.');
     const a = allowance(id,month);
-    res.json({month,timezone:settings(user(id)).timezone,limit_minutes:120,used_minutes:a.used,pending_minutes:a.pending,available_minutes:Math.max(0,120-a.used-a.pending),
-      requests:db.prepare('SELECT * FROM short_day_requests WHERE user_id=? ORDER BY date DESC,id DESC').all(id)});
+    const requests = db.prepare('SELECT * FROM short_day_requests WHERE user_id=? ORDER BY date DESC,id DESC').all(id);
+    const count = new Set(requests.filter(r => r.date.startsWith(month) && r.status === 'APPROVED').map(r => r.date)).size;
+    res.json({month,approved_days:count,leave_charge:balances(id,month+'-01').short_day,timezone:settings(user(id)).timezone,limit_minutes:120,used_minutes:a.used,pending_minutes:a.pending,available_minutes:Math.max(0,120-a.used-a.pending),
+      requests});
   } catch(e) { error(res,e); }
 });
 function recordShortDay(req, res, admin) {
@@ -57,7 +65,7 @@ function recordShortDay(req, res, admin) {
     if (!scheduledDays(date,calendarFrom(db))) fail('This date has no scheduled working time.');
     const reason = String(req.body.reason || '').trim().slice(0,500);
     const record = db.transaction(() => {
-      checkCredit(id,date.slice(0,7),minutes); checkLeave(id,date);
+      checkDuration(id,date,minutes); checkLeave(id,date);
       const overlapping = db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND status IN ('APPROVED','PENDING') AND start_ts<? AND start_ts+minutes*60000>? LIMIT 1")
         .get(id,start.toMillis()+minutes*60000,start.toMillis());
       if (overlapping) fail('An existing Short Day request overlaps this time.',409);
@@ -69,6 +77,10 @@ function recordShortDay(req, res, admin) {
         id, date, time, timezone, start.toMillis(), minutes, reason, recordedAt,
         status, admin ? req.user.id : null, admin ? recordedAt : null, note,
       );
+      if (admin) {
+        resolveLateExplanation(id, date, req.user.id, 'SHORT_DAY', recordedAt);
+        syncBalance(id);
+      }
       return get(result.lastInsertRowid);
     }).immediate();
     res.json({request:record});
@@ -99,10 +111,14 @@ router.post('/:id/decide', requireAdmin, require('../requestValidation').validat
       if (decision === 'APPROVED') {
         if (r.start_ts <= now().toMillis()) fail('Short Day time must be approved before it starts. Reject this expired request and review any attendance discrepancy.',409);
         if (employmentStatus(user(r.user_id),r.date) || !scheduledDays(r.date,calendarFrom(db))) fail('The employment dates or working calendar changed. Review this request.',409);
-        checkCredit(r.user_id,r.date.slice(0,7),r.minutes,r.id); checkLeave(r.user_id,r.date);
+        checkDuration(r.user_id,r.date,r.minutes,r.id); checkLeave(r.user_id,r.date);
       }
       db.prepare('UPDATE short_day_requests SET status=?,decided_by=?,decided_ts=?,admin_note=? WHERE id=?')
         .run(decision,req.user.id,now().toMillis(),String(req.body.note || '').trim().slice(0,300),r.id);
+      if (decision === 'APPROVED') {
+        resolveLateExplanation(r.user_id, r.date, req.user.id, 'SHORT_DAY');
+        syncBalance(r.user_id);
+      }
       return get(r.id);
     }).immediate();
     notify(result.user_id,{type:'LEAVE',title:'Short Day '+decision.toLowerCase(),body:`${result.date}, ${result.minutes} minutes: ${decision.toLowerCase()}.`,link:'employees'});

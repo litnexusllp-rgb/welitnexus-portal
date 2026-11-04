@@ -16,7 +16,7 @@ function harness(admin) {
   const esc = value => String(value ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const c = { VIEWS: {}, ME: me, isAdmin: () => admin, thisMonthISO: () => '2026-12', employeeSection: 'employeePerformance', esc, cap: value => value, fmtDate: value => value || '—', exitTag: () => '',
     setMain(title, sub, body) { html = body; element('employeesRoot'); },
-    $: selector => element(selector.slice(1)), document: { getElementById: () => null },
+    $: selector => element(selector.slice(1)), document: { getElementById: element },
     api: { get: async url => { calls.push(url); return { users }; } },
     window: { Salaries: { mount: async (root, options) => salaries.push(options) } },
     loadMyPerf: async () => calls.push('performance'), loadEmployeeLeaveDetails: async () => calls.push('leave'),
@@ -26,11 +26,15 @@ function harness(admin) {
   return { c, calls, salaries, elements, get html() { return elements.employeesRoot?.innerHTML || html; } };
 }
 
-test('Employees keeps all sections on one page, with role-specific actions and selected salary', async () => {
+test('Employees opens Calendar first and loads salary only when selected', async () => {
   for (const admin of [true, false]) {
     const h = harness(admin); await h.c.VIEWS.employees();
     const order = ['employeePerformance', 'employeeLeaves', 'employeeSalary', 'employeePersonal'];
     assert.ok(order.every((id, i) => i === 0 || h.html.indexOf(`id="${id}"`) > h.html.indexOf(`id="${order[i - 1]}"`)));
+    assert.equal(h.salaries.length, 0);
+    assert.ok(!h.calls.includes('leave'));
+    assert.ok(h.calls.includes('performance'));
+    await h.c.showEmployeeTab('employeeSalary');
     if (admin) {
       assert.ok(h.html.includes('Mark leave')); assert.ok(!h.html.includes('Apply for leave'));
       assert.equal(h.elements.perfUser.value, '2'); assert.equal(h.salaries[0].userId, 2); assert.equal(h.salaries[0].month, '2026-12');
@@ -51,14 +55,14 @@ test('performance ignores responses for an earlier employee or month and a detac
   const performance = source.slice(source.indexOf('  async function loadMyPerf()'), source.indexOf('  // Month grid:'));
   const pending = [], rendered = [], host = { innerHTML: '', isConnected: true }, cards = { innerHTML: '' };
   const c = { performanceVersion: 0, myPerfMonth: '2026-12', myPerfUserId: '2', isAdmin: () => true,
-    $: selector => selector === '#myCal' ? host : cards, api: { get: () => new Promise(resolve => pending.push(resolve)) },
+    $: selector => selector === '#myCal' ? host : selector === '#myKpiCards' ? cards : null, api: { get: () => new Promise(resolve => pending.push(resolve)) },
     renderMyCalendar: report => rendered.push(report.marker), statCard: () => '', esc: String, Date };
   vm.createContext(c); vm.runInContext(performance, c);
   const first = c.loadMyPerf(); c.myPerfUserId = '3'; const second = c.loadMyPerf();
-  pending[2]({ rows: [] }); pending[3]({ marker: 'current' }); await second;
-  pending[0]({ rows: [] }); pending[1]({ marker: 'stale employee' }); await first;
+  pending[1]({ marker: 'current' }); await second;
+  pending[0]({ marker: 'stale employee' }); await first;
   assert.deepEqual(rendered, ['current']);
-  const third = c.loadMyPerf(); c.myPerfMonth = '2027-02'; pending[4]({ rows: [] }); pending[5]({ marker: 'stale month' }); await third;
-  const fourth = c.loadMyPerf(); host.isConnected = false; pending[6]({ rows: [] }); pending[7]({ marker: 'detached' }); await fourth;
+  const third = c.loadMyPerf(); c.myPerfMonth = '2027-02'; pending[2]({ marker: 'stale month' }); await third;
+  const fourth = c.loadMyPerf(); host.isConnected = false; pending[3]({ marker: 'detached' }); await fourth;
   assert.deepEqual(rendered, ['current']);
 });
