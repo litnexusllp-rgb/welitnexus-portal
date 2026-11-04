@@ -3,7 +3,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
-const { now, todayStr, inclusiveDays } = require('../time');
+const { DateTime, ZONE, now, todayStr, inclusiveDays } = require('../time');
 const { employmentStatus } = require('../employment');
 const { notify } = require('../notify');
 const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
@@ -163,6 +163,54 @@ router.post('/admin', requireAdmin, (req, res) => {
     link: 'leaves',
   });
   res.json({ leave: recordedLeave, balances: syncBalance(user.id) });
+});
+
+// Split an approved full-day request without rewriting the original decision.
+router.post('/:id/half-day', requireAdmin, require('../requestValidation').validateParams, (req, res) => {
+  const { day } = req.body;
+  if (!require('../requestValidation').day(day)) return res.status(400).json({ error: 'Choose a valid date.' });
+  try {
+    const result = db.transaction(() => {
+      const original = getLeave.get(Number(req.params.id));
+      if (!original) throw Object.assign(new Error('Leave request not found.'), { status: 404 });
+      if (original.status !== 'APPROVED' || original.kind !== 'FULL' || day < original.start_date || day > original.end_date) {
+        throw Object.assign(new Error('This date is no longer covered by this approved full-day request. Refresh the calendar.'), { status: 409 });
+      }
+      const date = DateTime.fromISO(day, { zone: ZONE });
+      const segments = [];
+      if (original.start_date < day) {
+        segments.push({ start_date: original.start_date, end_date: date.minus({ days: 1 }).toISODate(), kind: 'FULL' });
+      }
+      segments.push({ start_date: day, end_date: day, kind: 'HALF' });
+      if (day < original.end_date) {
+        segments.push({ start_date: date.plus({ days: 1 }).toISODate(), end_date: original.end_date, kind: 'FULL' });
+      }
+
+      const adjustedAt = now().toMillis();
+      const auditNote = `Adjusted ${day} to half-day leave.`;
+      const updateNote = db.prepare('UPDATE leaves SET admin_note=? WHERE id=?');
+      db.prepare("UPDATE leaves SET status='CANCELLED' WHERE id=?").run(original.id);
+      if (overlappingLeaves.get(original.user_id, original.end_date, original.start_date)) {
+        throw Object.assign(new Error('Another leave request overlaps these dates. Resolve it before adjusting this request.'), { status: 409 });
+      }
+      checkShortDays(original.user_id, original);
+      const ids = segments.map(segment => {
+        const id = insertApprovedLeave.run({
+          ...original,
+          ...segment,
+          days: segment.kind === 'HALF' ? 0.5 : inclusiveDays(segment.start_date, segment.end_date),
+          decided_by: req.user.id,
+          decided_ts: adjustedAt,
+          deduction_quote_json: null,
+        }).lastInsertRowid;
+        updateNote.run(`Replaces request #${original.id}. ${auditNote}`, id);
+        return id;
+      });
+      updateNote.run([original.admin_note, `${auditNote} Replaced by ${ids.map(id => '#' + id).join(', ')}.`].filter(Boolean).join(' '), original.id);
+      return { leaves: present(ids.map(id => getLeave.get(id))), balances: syncBalance(original.user_id) };
+    }).immediate();
+    res.json(result);
+  } catch (e) { return fail(res, e); }
 });
 
 // ADMIN: run the no-show check now (normally runs daily on a schedule).

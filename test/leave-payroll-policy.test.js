@@ -51,6 +51,37 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal(row(id).approved_short_day_minutes, 60);
   });
 
+  await t.test('adjusting one date splits approved leave and recalculates payroll without duplicating it', async () => {
+    const id = add();
+    salary(id);
+    const original = leave(id, '2026-10-12', 'FULL', 'APPROVED', 'REGULAR', '2026-10-15');
+    const adjust = actor => req(actor, `leaves/${original}/half-day`, 'POST', { day: '2026-10-15' });
+    assert.equal(row(id).unpaid_leave_days, 2.5);
+    assert.equal((await adjust(id)).status, 403);
+    assert.equal((await req(admin, `leaves/${original}/half-day`, 'POST', { day: '2026-10-16' })).status, 409);
+
+    const outcomes = await Promise.all([adjust(admin), adjust(admin)]);
+    assert.deepEqual(outcomes.map(result => result.status).sort(), [200, 409]);
+    const saved = outcomes.find(result => result.status === 200).body.leaves;
+    assert.deepEqual(saved.map(l => [l.start_date, l.end_date, l.kind, l.days]), [
+      ['2026-10-12', '2026-10-14', 'FULL', 3],
+      ['2026-10-15', '2026-10-15', 'HALF', 0.5],
+    ]);
+    assert.equal(db.prepare('SELECT status FROM leaves WHERE id=?').get(original).status, 'CANCELLED');
+    assert.equal(row(id).paid_leave_days, 1.5);
+    assert.equal(row(id).unpaid_leave_days, 2);
+    assert.equal(row(id).deduction_paise, 200000);
+
+    const middle = leave(id, '2026-11-16', 'FULL', 'APPROVED', 'REGULAR', '2026-11-18');
+    const split = await req(admin, `leaves/${middle}/half-day`, 'POST', { day: '2026-11-17' });
+    assert.equal(split.status, 200);
+    assert.deepEqual(split.body.leaves.map(l => [l.start_date, l.end_date, l.kind]), [
+      ['2026-11-16', '2026-11-16', 'FULL'],
+      ['2026-11-17', '2026-11-17', 'HALF'],
+      ['2026-11-18', '2026-11-18', 'FULL'],
+    ]);
+  });
+
   await t.test('regular cap spans split requests; special categories stay separate; first twelve always unpaid',()=>{
     const id=add();salary(id);
     leave(id,'2026-10-05');leave(id,'2026-10-13');leave(id,'2026-10-14');leave(id,'2026-10-15','HALF');
