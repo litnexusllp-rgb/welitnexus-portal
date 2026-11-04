@@ -18,6 +18,9 @@ const allowance = (id,month,exclude=null) => db.prepare(`SELECT COALESCE(SUM(CAS
   COALESCE(SUM(CASE WHEN status='PENDING' THEN minutes ELSE 0 END),0) AS pending FROM short_day_requests
   WHERE user_id=? AND substr(date,1,7)=? AND status IN ('APPROVED','PENDING') AND id<>?`).get(id,month,exclude || 0);
 function checkDuration(id, date, minutes, exclude = null) {
+  if (db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND date=? AND status='APPROVED' AND start_time IS NULL").get(id, date)) {
+    fail('This date is already marked as a Short Day.',409);
+  }
   const legacy = date < EFFECTIVE;
   const where = legacy ? 'substr(date,1,7)=?' : 'date=?';
   const { used } = db.prepare(`SELECT COALESCE(SUM(minutes),0) AS used FROM short_day_requests
@@ -51,30 +54,47 @@ function recordShortDay(req, res, admin) {
     const id = admin ? Number(req.body.user_id) : req.user.id;
     const employee = user(id);
     if (!employee || employee.role !== 'EMPLOYEE') fail('Employee not found.',404);
-    const date = String(req.body.date || ''), time = String(req.body.start_time || ''), minutes = Number(req.body.minutes);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) fail('Enter a valid date and start time.');
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 120) fail('Choose between one and 120 minutes.');
+    const date = String(req.body.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !DateTime.fromISO(date, { zone: ZONE }).isValid) fail('Enter a valid date.');
+    const dateOnly = admin && req.body.start_time === undefined && req.body.minutes === undefined;
+    const time = dateOnly ? null : String(req.body.start_time || '');
+    const minutes = dateOnly ? null : Number(req.body.minutes);
     const timezone = admin ? daySettings(employee, date).timezone : settings(employee).timezone;
-    const start = DateTime.fromISO(`${date}T${time}`,{zone:timezone});
-    if (!start.isValid || start.toFormat('yyyy-MM-dd HH:mm') !== `${date} ${time}` || start.getPossibleOffsets().length !== 1) fail('Choose an unambiguous local date/time outside a daylight-saving transition.');
-    if (start.plus({minutes}).minus({milliseconds:1}).toISODate() !== date) fail('Split Short Day time crossing midnight into separate requests for each date.');
+    let startTs = null;
+    if (!dateOnly) {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) fail('Enter a valid start time.');
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 120) fail('Choose between one and 120 minutes.');
+      const start = DateTime.fromISO(`${date}T${time}`,{zone:timezone});
+      if (!start.isValid || start.toFormat('yyyy-MM-dd HH:mm') !== `${date} ${time}` || start.getPossibleOffsets().length !== 1) fail('Choose an unambiguous local date/time outside a daylight-saving transition.');
+      if (start.plus({minutes}).minus({milliseconds:1}).toISODate() !== date) fail('Split Short Day time crossing midnight into separate requests for each date.');
+      startTs = start.toMillis();
+    }
     const recordedAt = now().toMillis();
-    const past = start.toMillis() <= recordedAt;
+    const past = startTs !== null && startTs <= recordedAt;
     if (!admin && past) fail('Request Short Day time in advance so management can approve it before it starts.');
     if (employmentStatus(employee,date)) fail('Confirm employment dates before requesting Short Day time.');
     if (!scheduledDays(date,calendarFrom(db))) fail('This date has no scheduled working time.');
     const reason = String(req.body.reason || '').trim().slice(0,500);
     const record = db.transaction(() => {
-      checkDuration(id,date,minutes); checkLeave(id,date);
-      const overlapping = db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND status IN ('APPROVED','PENDING') AND start_ts<? AND start_ts+minutes*60000>? LIMIT 1")
-        .get(id,start.toMillis()+minutes*60000,start.toMillis());
-      if (overlapping) fail('An existing Short Day request overlaps this time.',409);
+      if (dateOnly) {
+        const existing = db.prepare("SELECT * FROM short_day_requests WHERE user_id=? AND date=? AND status='APPROVED' ORDER BY id LIMIT 1").get(id,date);
+        if (existing) return existing;
+        if (db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND date=? AND status='PENDING'").get(id,date)) {
+          fail('A Short Day request is pending for this date. Review it in Employees → Requests.',409);
+        }
+      } else {
+        checkDuration(id,date,minutes);
+        const overlapping = db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND status IN ('APPROVED','PENDING') AND start_ts<? AND start_ts+minutes*60000>? LIMIT 1")
+          .get(id,startTs+minutes*60000,startTs);
+        if (overlapping) fail('An existing Short Day request overlaps this time.',409);
+      }
+      checkLeave(id,date);
       const status = admin ? 'APPROVED' : 'PENDING';
       const note = admin ? (past ? 'Recorded by admin after the start time.' : 'Recorded and approved by admin.') : '';
       const result = db.prepare(`INSERT INTO short_day_requests
         (user_id,date,start_time,timezone,start_ts,minutes,reason,created_ts,status,decided_by,decided_ts,admin_note)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        id, date, time, timezone, start.toMillis(), minutes, reason, recordedAt,
+        id, date, time, timezone, startTs, minutes, reason, recordedAt,
         status, admin ? req.user.id : null, admin ? recordedAt : null, note,
       );
       if (admin) {

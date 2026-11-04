@@ -134,7 +134,8 @@ function buildAttendanceReport(user, req) {
     // Forgot to clock out: a finished day that still ends IN or on BREAK. The
     // recorded hours are incomplete, so flag that rather than calling it short.
     const noClockOut = !!(!excluded && s && s.firstIn != null && liveForDay(user, day) === null && day < localToday && s.state !== 'OUT');
-    const fullDayOverride = lateNormalDays.get(day)?.full_day === 1 && !leave && !shortMinutesByDay.get(day);
+    const approvedShortDay = shortMinutesByDay.has(day);
+    const fullDayOverride = lateNormalDays.get(day)?.full_day === 1 && !leave && !approvedShortDay;
     const short = !fullDayOverride && !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && s.state === 'OUT' && day < localToday && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
     return {
       day, timezone: c.timezone, shiftStart: c.shift_start,
@@ -142,6 +143,7 @@ function buildAttendanceReport(user, req) {
       status,
       leaveKind: leave?.kind || null,
       ...(req.user.role === 'ADMIN' && leave ? { approvedLeave: { id: leave.id, start: leave.start_date, end: leave.end_date } } : {}),
+      approvedShortDay,
       approvedShortMinutes: shortMinutesByDay.get(day) || 0,
       attendanceError: s?.error || null,
       configWarning,

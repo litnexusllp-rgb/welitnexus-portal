@@ -1016,7 +1016,7 @@
 
   function shortDayTable(records, team = false) {
     if (!records.length) return '<p class="empty">No Short Day requests.</p>';
-    return `<div class="table-wrap"><table><thead><tr>${team ? '<th>Employee</th>' : ''}<th>Date / local start</th><th>Minutes</th><th>Status</th><th>Action / note</th></tr></thead><tbody>${records.map(r => `<tr>${team ? `<td>${esc(r.name)}</td>` : ''}<td>${fmtDate(r.date)} · ${esc(r.start_time)}<div class="leave-balance-note">${esc(r.timezone)}</div></td><td>${r.minutes}</td><td>${badge(r.status)}</td><td>${r.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-short-approve="${r.id}">Approve Short Day</button><button class="btn btn-danger btn-sm" data-short-reject="${r.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-short-cancel="${r.id}">Cancel</button>`) : esc(r.admin_note || '—')}${r.reason ? `<div class="leave-balance-note">${esc(r.reason)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="table-wrap"><table><thead><tr>${team ? '<th>Employee</th>' : ''}<th>Date / local start</th><th>Minutes</th><th>Status</th><th>Action / note</th></tr></thead><tbody>${records.map(r => `<tr>${team ? `<td>${esc(r.name)}</td>` : ''}<td>${fmtDate(r.date)}${r.start_time ? ` · ${esc(r.start_time)}<div class="leave-balance-note">${esc(r.timezone)}</div>` : ''}</td><td>${r.minutes ?? '—'}</td><td>${badge(r.status)}</td><td>${r.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-short-approve="${r.id}">Approve Short Day</button><button class="btn btn-danger btn-sm" data-short-reject="${r.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-short-cancel="${r.id}">Cancel</button>`) : esc(r.admin_note || '—')}${r.reason ? `<div class="leave-balance-note">${esc(r.reason)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
   }
   function wireShortDays(root) {
     root.querySelectorAll('[data-short-approve],[data-short-reject],[data-short-cancel]').forEach(button => {
@@ -1045,22 +1045,20 @@
       wireShortDays(root);
     } catch(e) { if (root.isConnected) root.textContent = e.message; }
   }
-  function openShortDayRequest(timezone, target = null) {
-    modal(`<h3>${target ? 'Mark Short Day' : 'Request Short Day'}</h3>
-      ${target ? `<p><strong>${esc(target.user.name)}</strong> · Saves as approved. For a past start time, the record shows when it was entered.</p>` : ''}
-      <p>Up to two hours per date. First approved Short Day of the month is free. ${target ? '' : 'Management approval is required before the start. '}Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${esc(target?.day || todayISO())}" ${target ? 'readonly' : ''}></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="${target ? '' : '60'}"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">${target ? 'Mark Short Day' : 'Submit request'}</button></div>`);
+  function openShortDayRequest(timezone) {
+    modal(`<h3>Request Short Day</h3>
+      <p>Up to two hours per date. First approved Short Day of the month is free. Management approval is required before the start. Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${esc(todayISO())}"></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="60"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">Submit request</button></div>`);
     $('#mCancel').addEventListener('click',closeModal);
     $('#sdSubmit').addEventListener('click', async () => {
       const button = $('#sdSubmit'); button.disabled = true;
       const status = $('#sdStatus');
       try {
-        await api.post(target ? '/short-days/admin' : '/short-days', {
-          date: target?.day || $('#sdDate').value, start_time: $('#sdTime').value,
+        await api.post('/short-days', {
+          date: $('#sdDate').value, start_time: $('#sdTime').value,
           minutes: Number($('#sdMinutes').value), reason: $('#sdReason').value,
-          ...(target ? { user_id: target.user.id } : {}),
         });
         if (button.isConnected) closeModal();
-        toast(target ? 'Short Day marked' : 'Short Day requested');
+        toast('Short Day requested');
         await refreshEmployeeLeaveData();
       } catch (e) { status.textContent = e.message; button.disabled = false; }
     });
@@ -2439,7 +2437,7 @@
         ${existingFullLeave ? '<button class="btn btn-primary btn-sm" id="fixAdjustLeave">Adjust to half day</button>' : `<div class="date-action-tabs">
           <button id="fixWorkedFull" ${future || !data.firstIn || data.fullDay ? 'disabled' : ''}><strong>Full day</strong><span>Excuse lateness</span></button>
           <button id="fixHalfLeave"><strong>Half day</strong><span>0.5 day of leave</span></button>
-          <button id="fixShortDay"><strong>Short day</strong><span>Record approved time</span></button>
+          <button id="fixShortDay" ${performanceRow?.approvedShortDay ? 'disabled' : ''}><strong>Short day</strong><span>${performanceRow?.approvedShortDay ? 'Already approved' : 'Mark as approved'}</span></button>
           <button id="fixFullLeave"><strong>Leave</strong><span>1 day of leave</span></button>
         </div>`}
         <p id="fixDateError" role="alert"></p>
@@ -2469,7 +2467,8 @@
     $('#fixAdjustLeave')?.addEventListener('click', () => openHalfDayAdjustment(target, existingFullLeave));
     $('#fixFullLeave')?.addEventListener('click', () => openMarkLeaveModal(target));
     $('#fixHalfLeave')?.addEventListener('click', () => openMarkLeaveModal(target, 'HALF'));
-    $('#fixShortDay')?.addEventListener('click', () => openShortDayRequest(data.timezone, target));
+    $('#fixShortDay')?.addEventListener('click', event => saveDateAction(event.currentTarget,
+      '/short-days/admin', { user_id: userId, date: day }, 'Short Day marked'));
     $('#lateNormalBtn')?.addEventListener('click', async () => {
       try {
         await api.post('/attendance/admin/late-normal', { user_id: userId, day, normal: !data.lateNormal });
@@ -2978,9 +2977,10 @@
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
       if (['PRESENT', 'FUTURE'].includes(r.status) && r.leaveKind === 'FULL') { cls = 'pcal-leave'; tag = 'Leave'; }
       if (r.status === 'FUTURE' && r.leaveKind === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
-      if (r.approvedShortMinutes) {
-        if (r.status === 'PRESENT' && !r.late && !r.noClockOut) cls = 'pcal-short';
-        tag = [tag === 'Short day' ? '' : tag, `Approved Short Day · ${r.approvedShortMinutes}m`].filter(Boolean).join(' · ');
+      if (r.approvedShortDay) {
+        if (['PRESENT', 'ABSENT', 'FUTURE'].includes(r.status) && !r.late && !r.noClockOut) cls = 'pcal-short';
+        const approved = r.approvedShortMinutes ? `Approved Short Day · ${r.approvedShortMinutes}m` : 'Approved Short Day';
+        tag = [tag === 'Short day' || tag === 'Absent' ? '' : tag, approved].filter(Boolean).join(' · ');
       }
       if (r.lateExplanation?.status === 'PENDING') tag = [tag, 'Explanation pending'].filter(Boolean).join(' · ');
       const inTime = r.firstIn ? attendanceTime(r.firstIn, r.timezone) : '';
@@ -3040,7 +3040,7 @@
     // Fix a day straight from the calendar.
     const openDay = (iso) => {
       if (isAdmin()) openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso], canRecord ? employee : null);
-      else if (byDay[iso]?.lateExplanation || (byDay[iso]?.late && !byDay[iso]?.approvedShortMinutes && !byDay[iso]?.leaveKind)) openLateExplanation(byDay[iso]);
+      else if (byDay[iso]?.lateExplanation || (byDay[iso]?.late && !byDay[iso]?.approvedShortDay && !byDay[iso]?.leaveKind)) openLateExplanation(byDay[iso]);
       else openPunchRequestModal(iso);
     };
     el.querySelectorAll('[data-fixday]').forEach((c) => {
