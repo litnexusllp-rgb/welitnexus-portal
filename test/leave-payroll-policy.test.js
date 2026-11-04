@@ -26,6 +26,31 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
   };
   t.after(async()=>{Settings.now=originalNow;await new Promise(r=>server.close(r));db.close();fs.rmSync(dir,{recursive:true,force:true});});
 
+  await t.test('calendar gives staff and admins the payroll breakdown for each approved leave date', async () => {
+    const id = add(), other = add();
+    leave(id, '2026-10-09', 'FULL', 'APPROVED', 'REGULAR', '2026-10-10');
+    leave(id, '2026-10-13', 'FULL', 'APPROVED', 'REGULAR', '2026-10-15');
+    leave(id, '2026-10-16', 'HALF', 'PENDING');
+    const range = 'start=2026-10-09&end=2026-10-16';
+    const own = await req(id, 'reports/my-attendance?' + range);
+    const staffReport = await req(admin, 'reports/attendance?user_id=' + id + '&' + range);
+    assert.equal(own.status, 200);
+    assert.equal(staffReport.status, 200);
+    const expected = [
+      ['2026-10-09', 0, 1, 0],
+      ['2026-10-10', 0, 0, 1],
+      ['2026-10-13', 1, 0, 0],
+      ['2026-10-14', 0.5, 0.5, 0],
+      ['2026-10-15', 0, 1, 0],
+    ];
+    for (const report of [own, staffReport]) {
+      assert.deepEqual(report.body.rows.filter(r => r.leavePay).map(({ day, leavePay }) =>
+        [day, leavePay.paid_days, leavePay.unpaid_days, leavePay.non_working_days]), expected);
+    }
+    assert.equal((await req(other, 'reports/attendance?user_id=' + id + '&' + range)).status, 403);
+    assert.equal(own.body.rows.find(r => r.day === '2026-10-13').approvedLeave, undefined);
+  });
+
   await t.test('calendar records approved leave and Short Day with admin permissions and existing limits', async () => {
     const id = add();
     salary(id);

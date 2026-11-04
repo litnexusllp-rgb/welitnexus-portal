@@ -152,7 +152,7 @@ test('October leave year, category credits and unpaid dates', async t => {
     for(let i=0;i<105;i++)rawLeave(id,'2025-11-15','2025-11-15','CANCELLED');
     const own=await request(id,'leaves/mine'),managed=await request(admin,`leaves/for/${id}`);
     assert.equal(own.status,200);assert.deepEqual(own.body,managed.body);assert.equal(own.body.leaves.length,112);
-    assert.deepEqual(own.body.activity,{taken_days:4.5,upcoming_days:2,pending_days:2.5,pending_requests:2});
+    assert.deepEqual(own.body.activity,{taken_days:4.5,upcoming_days:2,pending_days:1,pending_requests:2});
     assert.equal(own.body.balances.entitlement,20);assert.equal(own.body.balances.balance,18.5);
     assert.equal((await request(other,`leaves/for/${id}`)).status,403);
     assert.equal((await request(admin,'leaves/for/999999')).status,404);

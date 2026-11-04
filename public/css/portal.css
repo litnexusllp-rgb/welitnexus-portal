@@ -226,8 +226,10 @@ tbody tr:hover { background: #eef5fb; }
 .pcal-noout .tag { font-weight: 800; }
 .pcal-short   { background: #fdf1d8; border-color: #f0dcae; }
 .pcal-short .tag, .pcal-short .mins { color: #9a6b00; }
-.pcal-leave   { background: #7f1d1d; border-color: #651414; }
-.pcal-leave .dn, .pcal-leave .tag, .pcal-leave .mins { color: #fff7f7; }
+.pcal-leave   { background: #fee8eb; border-color: #eab1ba; }
+.pcal-leave .dn, .pcal-leave .tag, .pcal-leave .mins { color: #861c32; }
+.pcal-unpaid  { background: #ffebd7; border-color: #eba66b; }
+.pcal-unpaid .dn, .pcal-unpaid .tag, .pcal-unpaid .mins { color: #803a0a; }
 /* Half day — worked part of the day, so it reads between "present" and "leave" */
 .pcal-half    { background: #dbeafe; border-color: #93c5fd; border-left: 4px solid #2563eb; }
 .pcal-half .dn, .pcal-half .tag, .pcal-half .mins { color: #1d4ed8; }
@@ -280,9 +282,27 @@ tbody tr:hover { background: #eef5fb; }
 .cal-cell .hn { font-size: 0.72rem; color: var(--info); margin-top: 2px; line-height: 1.2; }
 
 /* ---------- Modal ---------- */
-.leave-balance-panel .cards { margin-bottom: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
 .leave-table-wrap { max-width: 100%; overflow-x: auto; }
 .leave-balance-panel .page-sub { margin-bottom: 14px; }
+.leave-annual-summary { background: #eafaf3; border: 1px solid #b7e6d4; border-radius: 12px; padding: 16px 20px; margin: 0 0 16px; }
+.employee-section .leave-annual-summary h3 { margin: 0; color: var(--navy); font-size: .95rem; }
+.leave-annual-summary p { margin: 5px 0 0; color: var(--slate); }
+.leave-annual-summary .leave-annual-number { color: var(--navy); font-size: 1.25rem; }
+.leave-annual-number strong { color: var(--teal-dark); font-size: 2rem; font-variant-numeric: tabular-nums; }
+.leave-calculations { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); margin-bottom: 12px; }
+.leave-calculation { min-width: 0; }
+.leave-calculation table { margin: 0; }
+.leave-calculation caption { text-align: left; padding-bottom: 8px; color: var(--navy); font-size: .95rem; font-weight: 700; }
+.leave-calculation :is(th,td) { padding: 9px 8px; }
+.leave-calculation tbody th, .leave-calculation tfoot th { text-transform: none; letter-spacing: normal; }
+.leave-calculation tfoot { background: var(--mist); font-weight: 700; }
+.leave-calculation .leave-value { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 540px) {
+  .leave-annual-table { table-layout: fixed; }
+  .leave-annual-table thead th:first-child { width: 29%; }
+  .leave-annual-table :is(th,td) { padding: 8px 4px; overflow-wrap: anywhere; }
+  .leave-annual-table th { font-size: .7rem; text-transform: none; letter-spacing: normal; }
+}
 .leave-balance-note, .leave-policy-note { font-size: .8rem; line-height: 1.5; color: var(--slate); margin-top: 8px; }
 .leave-policy-note { margin: 0 0 12px; }
 .leave-payment-preview { background: var(--mist); border: 1px solid var(--line); padding: 12px; border-radius: 9px; font-size: .85rem; line-height: 1.5; }
@@ -624,8 +644,6 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
 .employee-info > div { padding: 12px 0; border-bottom: 1px solid var(--line); min-width: 0; }
 .employee-info dt { font-size: .8rem; color: var(--slate); margin-bottom: 6px; }
 .employee-info dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
-.employee-leave-stats { margin-top: 18px; }
-
 .salary-slip-download { margin: 16px 0; }
 .salary-table [data-salary-slip] { margin-top: 8px; }
 [data-salary-slip][aria-disabled="true"] { opacity: .65; cursor: wait; }
