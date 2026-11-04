@@ -2375,6 +2375,7 @@
     if (!body?.isConnected) return;
     const target = employee?.role === 'EMPLOYEE' ? { user: employee, day } : null;
     const future = performanceRow?.status === 'FUTURE';
+    const existingFullLeave = target && performanceRow?.leaveKind === 'FULL' ? performanceRow.approvedLeave : null;
     const punchControls = future ? '' : `${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
         ${data.events.map((e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
           <div class="field attendance-punch-type"><label for="fixType${e.id}">Punch type</label><select id="fixType${e.id}" data-etype="${e.id}">${typeOpts(e.type)}</select></div>
@@ -2403,14 +2404,16 @@
       ${target ? `<div class="attendance-punctuality">
         <div><strong>Record leave or Short Day</strong></div>
         <div class="row-actions" style="flex-wrap:wrap;">
+          ${existingFullLeave ? '<button class="btn btn-primary btn-sm" id="fixAdjustLeave">Adjust to half day</button>' : `
           <button class="btn btn-ghost btn-sm" id="fixFullLeave">Mark leave</button>
           <button class="btn btn-ghost btn-sm" id="fixHalfLeave">Mark half day</button>
-          <button class="btn btn-ghost btn-sm" id="fixShortDay">Mark Short Day</button>
+          <button class="btn btn-ghost btn-sm" id="fixShortDay">Mark Short Day</button>`}
         </div>
       </div>` : ''}
       ${punchControls}
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
 
+    $('#fixAdjustLeave')?.addEventListener('click', () => openHalfDayAdjustment(target, existingFullLeave));
     $('#fixFullLeave')?.addEventListener('click', () => openMarkLeaveModal(target));
     $('#fixHalfLeave')?.addEventListener('click', () => openMarkLeaveModal(target, 'HALF'));
     $('#fixShortDay')?.addEventListener('click', () => openShortDayRequest(data.timezone, target));
@@ -2440,6 +2443,34 @@
       catch (e) { toast(e.message, true); }
     });
     $('#fixDone').addEventListener('click', () => { closeModal(); if (onDone) onDone(); else { loadEmpReport(); loadRegister(); } });
+  }
+
+  function openHalfDayAdjustment(target, leave) {
+    const range = leave.start === leave.end ? fmtDate(leave.start) : `${fmtDate(leave.start)} to ${fmtDate(leave.end)}`;
+    modal(`<h3>Adjust approved leave to half day</h3>
+      <p><strong>${esc(target.user.name)}</strong> · ${esc(fmtDate(target.day))}</p>
+      <p>Approved full-day leave: ${esc(range)}. Only the selected date will become half-day leave. Leave balances and salary calculations will update.</p>
+      <p role="alert" id="adjustLeaveError"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="adjustLeaveCancel">Cancel</button>
+        <button class="btn btn-primary" id="adjustLeaveSave">Save half-day adjustment</button>
+      </div>`);
+    $('#adjustLeaveCancel').addEventListener('click', closeModal);
+    const save = $('#adjustLeaveSave'), error = $('#adjustLeaveError');
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      error.textContent = '';
+      try {
+        await api.post(`/leaves/${leave.id}/half-day`, { day: target.day });
+      } catch (e) {
+        error.textContent = e.message;
+        save.disabled = false;
+        return;
+      }
+      if (save.isConnected) closeModal();
+      toast('Half-day adjustment saved');
+      await refreshEmployeeLeaveData();
+    });
   }
 
   function exportEmpCsv() {

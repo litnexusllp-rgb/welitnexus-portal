@@ -38,7 +38,7 @@ const allEventsBetween = db.prepare(
   `SELECT user_id, type, ts, day FROM events WHERE day >= ? AND day <= ? ORDER BY user_id, ts, id`
 );
 const approvedLeavesOverlapping = db.prepare(
-  `SELECT user_id, start_date, end_date, kind FROM leaves
+  `SELECT id, user_id, start_date, end_date, kind FROM leaves
    WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
 );
 const holidaysBetween = db.prepare(`SELECT date, name, duration FROM holidays WHERE date >= ? AND date <= ?`);
@@ -97,7 +97,7 @@ function buildAttendanceReport(user, req) {
   for (const l of approvedLeavesOverlapping.all(end, start)) {
     if (l.user_id !== user.id) continue;
     for (const d of eachDay(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date)) {
-      leaveByDay[d] = l.kind;
+      leaveByDay[d] = l;
     }
   }
   const lateNormalDays = new Set(lateNormalOverridesBetween.all(user.id, start, end).map((r) => r.day));
@@ -110,7 +110,8 @@ function buildAttendanceReport(user, req) {
     const c = daySettings(user, day);
     const localToday = attendanceToday(c);
     const s = byDay[day] ? summarize(byDay[day], liveForDay(user, day)) : null;
-    const status = classify(day, s, leaveByDay[day], holidaySet[day], day > localToday, !!workingSet[day], user);
+    const leave = leaveByDay[day];
+    const status = classify(day, s, leave?.kind, holidaySet[day], day > localToday, !!workingSet[day], user);
     const excluded = status === 'NOT_EMPLOYED' || status === 'INVALID' || status === 'EMPLOYMENT_UNKNOWN';
     addAttendanceTotals(totals, status, !excluded && s ? s.workedMinutes : 0);
     const halfHoliday = holidaySet[day]?.duration === 'HALF';
@@ -132,7 +133,8 @@ function buildAttendanceReport(user, req) {
       day, timezone: c.timezone, shiftStart: c.shift_start,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
       status,
-      leaveKind: leaveByDay[day] || null,
+      leaveKind: leave?.kind || null,
+      ...(req.user.role === 'ADMIN' && leave ? { approvedLeave: { id: leave.id, start: leave.start_date, end: leave.end_date } } : {}),
       approvedShortMinutes: shortMinutesByDay.get(day) || 0,
       attendanceError: s?.error || null,
       configWarning,
