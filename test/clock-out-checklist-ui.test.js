@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../public/js/app.js'), 'utf8');
-const flow = source.slice(source.indexOf('  function confirmClockOut(status)'), source.indexOf('  async function punch(type)'));
+const flow = source.slice(source.indexOf('  function confirmClockOut(status)'), source.indexOf('  function chooseBreak()'));
 function harness(allowed = ['OUT', 'BREAK_START']) {
-  let elements, html, closed = 0;
+  let elements, html, closed = 0, breakChoices = 0;
   const punches = [];
   const c = {
     $: s => elements[s.slice(1)],
@@ -18,11 +18,12 @@ function harness(allowed = ['OUT', 'BREAK_START']) {
         addEventListener(event, callback) { this.listeners[event] = callback; }
       }]));
     },
-    closeModal: () => { closed++; }, punch: type => punches.push(type)
+    closeModal: () => { closed++; }, punch: type => punches.push(type),
+    chooseBreak: () => { breakChoices++; },
   };
   vm.createContext(c); vm.runInContext(flow, c);
   const open = () => c.confirmClockOut({ allowed }); open();
-  return { open, punches, get html() { return html; }, get closed() { return closed; },
+  return { open, punches, get html() { return html; }, get closed() { return closed; }, get breakChoices() { return breakChoices; },
     get disabled() { return elements.coConfirm.disabled; },
     tick(id, checked = true) { elements[id].checked = checked; elements[id].listeners.change(); },
     click(id) { elements[id].listeners.click(); }
@@ -46,7 +47,7 @@ test('cancel does not punch and a new clock-out attempt requires fresh ticks', (
   assert.deepEqual(h.punches, []); h.open(); assert.equal(h.disabled, true);
   h.click('coConfirm'); assert.deepEqual(h.punches, []);
 });
-test('Start Break still works without making clock-out confirmations', () => {
-  const h = harness(); h.click('coBreak'); assert.deepEqual(h.punches, ['BREAK_START']);
+test('Start Break instead opens break choices without punching or confirming clock-out', () => {
+  const h = harness(); h.click('coBreak'); assert.deepEqual(h.punches, []); assert.equal(h.breakChoices, 1);
   const onBreak = harness(['BREAK_END', 'OUT']); assert.doesNotMatch(onBreak.html, /id="coBreak"/);
 });

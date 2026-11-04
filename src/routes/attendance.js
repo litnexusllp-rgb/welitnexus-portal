@@ -17,6 +17,9 @@ const router = express.Router();
 const insertEvent = db.prepare(
   `INSERT INTO events (user_id, type, ts, day, note, device) VALUES (?, ?, ?, ?, ?, ?)`
 );
+const insertBreak = db.prepare('INSERT INTO event_break_details (event_id, break_type, break_reason) VALUES (?, ?, ?)');
+const removeBreak = db.prepare('DELETE FROM event_break_details WHERE event_id = ?');
+const breakTypes = new Set(['REGULAR', 'OTHER', 'COMPANY_APPROVED']);
 
 // Classify the punching device from the browser's User-Agent header.
 // Phones/tablets send "Mobi"/"Android"/"iPhone"/"iPad"; everything else is a PC.
@@ -26,10 +29,12 @@ function deviceFrom(req) {
   return /Mobi|Android|iPhone|iPad|iPod/i.test(ua) ? 'MOBILE' : 'PC';
 }
 const eventsForUserDay = db.prepare(
-  `SELECT * FROM events WHERE user_id = ? AND day = ? ORDER BY ts ASC, id ASC`
+  `SELECT events.*, break_type, break_reason FROM events LEFT JOIN event_break_details ON event_id = events.id
+   WHERE user_id = ? AND day = ? ORDER BY ts ASC, id ASC`
 );
 const eventsForUserBetween = db.prepare(
-  `SELECT * FROM events WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts ASC, id ASC`
+  `SELECT events.*, break_type, break_reason FROM events LEFT JOIN event_break_details ON event_id = events.id
+   WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts ASC, id ASC`
 );
 const getLateNormalOverride = db.prepare(
   `SELECT ignore_late, full_day FROM attendance_day_overrides WHERE user_id = ? AND day = ?`
@@ -49,6 +54,14 @@ router.post('/punch', requireAuth, (req, res) => {
   if (!['IN', 'OUT', 'BREAK_START', 'BREAK_END'].includes(type)) {
     return res.status(400).json({ error: 'Invalid punch type' });
   }
+  const breakType = type === 'BREAK_START' ? req.body.break_type ?? 'REGULAR' : null;
+  const breakReason = breakType === 'OTHER' && typeof req.body.break_reason === 'string' ? req.body.break_reason.trim() : null;
+  if (type === 'BREAK_START' && !breakTypes.has(breakType)) {
+    return res.status(400).json({ error: 'Choose a valid break type.' });
+  }
+  if (breakType === 'OTHER' && (!breakReason || breakReason.length > 200)) {
+    return res.status(400).json({ error: 'Enter a reason of up to 200 characters for Other break.' });
+  }
   try {
     const result = db.transaction(() => {
       const ts = now().toMillis(); // server UTC instant; never trust a browser clock
@@ -58,6 +71,7 @@ router.post('/punch', requireAuth, (req, res) => {
       const day = type === 'IN' ? attendanceToday(settings(req.user)) : session.day;
       snapshot(req.user, day);
       const event = changeAttendance(req.user.id, [day], () => insertEvent.run(req.user.id, type, ts, day, note, deviceFrom(req)));
+      if (breakType) insertBreak.run(event.lastInsertRowid, breakType, breakReason);
       queueAttendanceAlert(db, event.lastInsertRowid, req.user.name, type, ts);
       return currentSession(req.user, ts);
     }).immediate();
@@ -67,6 +81,7 @@ router.post('/punch', requireAuth, (req, res) => {
 
 // GET my timesheet for a range of attendance days (defaults to last 14).
 router.get('/timesheet', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const end = String(req.query.end || attendanceToday(settings(req.user)));
   const start = String(req.query.start || DateTime.fromISO(end).minus({ days: 13 }).toISODate());
   const rows = eventsForUserBetween.all(req.user.id, start, end);
@@ -75,6 +90,8 @@ router.get('/timesheet', requireAuth, (req, res) => {
   // The in-progress day gets a live tail; finished days stop at their last punch.
   const days = Object.keys(byDay).sort().map((day) => ({
     day, ...daySettings(req.user, day), ...summarize(byDay[day], liveForDay(req.user, day)),
+    breaks: byDay[day].filter(event => event.type === 'BREAK_START' && event.break_type)
+      .map(({ ts, break_type, break_reason }) => ({ ts, break_type, break_reason })),
   }));
   res.json({ start, end, days });
 });
@@ -114,6 +131,7 @@ const getUserName = db.prepare(`SELECT id, name, shift_start, attendance_timezon
 
 // GET one employee's punches for a day (admin view for editing).
 router.get('/admin/day', requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const user = getUserName.get(Number(req.query.user_id));
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   const day = String(req.query.day || '');
@@ -186,7 +204,13 @@ router.put('/admin/event/:id', require('../requestValidation').validateParams, r
   const ts = req.body.time ? wallTime(ev.day, String(req.body.time), daySettings(user, ev.day), req.body.event_date || DateTime.fromMillis(ev.ts, { zone: daySettings(user, ev.day).timezone }).toISODate()) : ev.ts;
   if (ts === null) return res.status(400).json({ error: 'Valid time (HH:mm) required' });
   const day = ev.day;
-  try { changeAttendance(ev.user_id, [ev.day, day], () => { snapshot(user, day); return updateEvent.run(type, ts, day, `edited by ${req.user.name}`, ev.id); }); }
+  try {
+    changeAttendance(ev.user_id, [day], () => {
+      snapshot(user, day);
+      updateEvent.run(type, ts, day, `edited by ${req.user.name}`, ev.id);
+      if (ev.type === 'BREAK_START' && type !== ev.type) removeBreak.run(ev.id);
+    });
+  }
   catch (e) { return attendanceError(e, res); }
   const events = eventsForUserDay.all(ev.user_id, day);
   res.json({ day, events: withTimes(events, daySettings(user, day)), ...summarize(events, liveForDay(user, day)) });

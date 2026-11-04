@@ -2,7 +2,8 @@
 const { db } = require('./db');
 const { DateTime, ZONE, ATT_CUTOVER, now, attendanceToday, attendanceDayFromTs } = require('./time');
 const { summarize, VALID } = require('./compute');
-const latest = db.prepare('SELECT * FROM events WHERE user_id=? ORDER BY ts DESC,id DESC LIMIT 1');
+const latest = db.prepare(`SELECT events.*, break_type FROM events LEFT JOIN event_break_details ON event_id=events.id
+  WHERE user_id=? ORDER BY ts DESC,id DESC LIMIT 1`);
 const dayEvents = db.prepare('SELECT * FROM events WHERE user_id=? AND day=? ORDER BY ts,id');
 const saved = db.prepare('SELECT timezone,cutover,shift_start FROM attendance_day_settings WHERE user_id=? AND day=?');
 const save = db.prepare('INSERT OR IGNORE INTO attendance_day_settings(user_id,day,timezone,cutover,shift_start) VALUES(?,?,?,?,?)');
@@ -37,6 +38,7 @@ function currentSession(user, ts = now().toMillis()) {
   const c = daySettings(user, day);
   return { day, ...summary, allowed: VALID[summary.state], events, ...c,
     currentDay, ongoing: !!open,
+    activeBreakType: summary.state === 'BREAK' ? last?.break_type || 'REGULAR' : null,
     needsReview, lastPunchTs: last?.ts ?? null };
 }
 function liveForDay(user, day, ts = now().toMillis()) {

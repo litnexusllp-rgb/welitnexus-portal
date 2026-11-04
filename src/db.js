@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_user_day ON events(user_id, day);
 CREATE INDEX IF NOT EXISTS idx_events_day      ON events(day);
 
+CREATE TABLE IF NOT EXISTS event_break_details (
+  event_id INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  break_type TEXT NOT NULL CHECK(break_type IN ('REGULAR','OTHER','COMPANY_APPROVED')),
+  break_reason TEXT,
+  CHECK (
+    (break_type = 'OTHER' AND break_reason IS NOT NULL AND length(trim(break_reason)) BETWEEN 1 AND 200)
+    OR (break_type <> 'OTHER' AND break_reason IS NULL)
+  )
+);
+
 CREATE TABLE IF NOT EXISTS attendance_slack_alerts (
   event_id INTEGER PRIMARY KEY,
   employee_name TEXT NOT NULL,

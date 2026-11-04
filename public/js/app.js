@@ -620,6 +620,7 @@
   };
 
   const PUNCH_LABEL = { IN: 'Clock in', OUT: 'Clock out', BREAK_START: 'Break start', BREAK_END: 'Break end' };
+  const BREAK_LABEL = { REGULAR: 'Regular break', OTHER: 'Other break', COMPANY_APPROVED: 'Company-approved break' };
   const REQ_BADGE = { PENDING: 'b-pending', APPROVED: 'b-approved', REJECTED: 'b-high' };
   function openPunchRequestModal(presetDay) {
     modal(`<h3>Request an attendance correction</h3>
@@ -713,11 +714,13 @@
       <span class="state-badge b-${status.state.toLowerCase()}">${labels[status.state] || status.state}</span>
       <div class="now" id="liveClock">--:--:--</div>
       <div class="meta">Workday ${esc(status.day)} · ${esc(status.timezone)}${status.ongoing && status.day !== status.currentDay ? ' · ongoing session from an earlier workday' : ''}</div>
+      ${status.activeBreakType ? `<div class="meta">${esc(BREAK_LABEL[status.activeBreakType])}</div>` : ''}
       ${status.needsReview ? '<p style="color:var(--danger);">This session has been open over 24 hours. Review the punches before using its totals.</p>' : ''}
       <div class="meta">Total break this workday: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
       ${status.valid === false ? `<p style="color:var(--danger);">${esc(status.error)} Ask an administrator to correct today’s punches.</p>` : ''}<div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
     card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
+      if (b.dataset.punch === 'BREAK_START') return chooseBreak();
       punch(b.dataset.punch);
     }));
     clearInterval(clockTimer);
@@ -748,7 +751,7 @@
         <button class="btn btn-danger" id="coConfirm" disabled>⏹ Yes, clock out</button>
       </div>`);
     $('#coCancel').addEventListener('click', closeModal);
-    if (canBreak) $('#coBreak').addEventListener('click', () => { closeModal(); punch('BREAK_START'); });
+    if (canBreak) $('#coBreak').addEventListener('click', () => { closeModal(); chooseBreak(); });
     const files = $('#coFiles');
     const timesheet = $('#coTimesheet');
     const confirm = $('#coConfirm');
@@ -762,8 +765,57 @@
     });
   }
 
-  async function punch(type) {
-    try { await api.post('/attendance/punch', { type }); toast('Recorded ✓'); await renderClock(); loadTimesheet(); }
+  function chooseBreak() {
+    modal(`<h3>Start break</h3>
+      <form id="breakForm">
+        <div class="field"><label for="breakType">Break type</label>
+          <select id="breakType">${Object.entries(BREAK_LABEL).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
+        </div>
+        <div class="field" id="breakReasonField" hidden><label for="breakReason">Reason (required)</label>
+          <textarea id="breakReason" rows="3" maxlength="200" disabled></textarea>
+        </div>
+        <p class="page-sub" id="breakApprovalHint" hidden>Choose this if your break has already been approved by the company.</p>
+        <p role="alert" id="breakError"></p>
+        <div class="modal-actions"><button class="btn btn-ghost" type="button" id="breakCancel">Cancel</button>
+          <button class="btn btn-primary" type="submit" id="breakSubmit">Start break</button></div>
+      </form>`);
+    const form = $('#breakForm'), type = $('#breakType'), reason = $('#breakReason');
+    const submit = $('#breakSubmit'), error = $('#breakError');
+    type.addEventListener('change', () => {
+      const other = type.value === 'OTHER';
+      $('#breakReasonField').hidden = !other;
+      reason.disabled = !other;
+      reason.required = other;
+      $('#breakApprovalHint').hidden = type.value !== 'COMPANY_APPROVED';
+      error.textContent = '';
+    });
+    $('#breakCancel').addEventListener('click', closeModal);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      const value = reason.value.trim();
+      if (type.value === 'OTHER' && !value) {
+        error.textContent = 'Enter a reason for Other break.';
+        reason.focus();
+        return;
+      }
+      const details = { break_type: type.value };
+      if (type.value === 'OTHER') details.break_reason = value;
+      submit.disabled = true;
+      error.textContent = '';
+      await punch('BREAK_START', details, () => { if (form.isConnected) closeModal(); });
+      submit.disabled = false;
+    });
+  }
+
+  async function punch(type, details = {}, onRecorded) {
+    try {
+      await api.post('/attendance/punch', { type, ...details });
+      onRecorded?.();
+      toast('Recorded ✓');
+      await renderClock();
+      loadTimesheet();
+    }
     catch (e) { toast(e.message, true); }
   }
 
@@ -777,7 +829,9 @@
           <td>${esc(d.day)}</td>
           <td>${attendanceTime(d.firstIn, d.timezone)}</td>
           <td>${attendanceTime(d.lastOut, d.timezone)}</td>
-          <td>${fmtMins(d.workedMinutes)}</td><td>${fmtMins(d.breakMinutes)}</td></tr>`).join('')}
+          <td>${fmtMins(d.workedMinutes)}</td><td>${fmtMins(d.breakMinutes)}${d.breaks?.length ? `<details><summary>Break details</summary>
+            <ul>${d.breaks.map(b => `<li>${attendanceTime(b.ts, d.timezone)} · ${esc(BREAK_LABEL[b.break_type])}${b.break_reason ? ' · ' + esc(b.break_reason) : ''}</li>`).join('')}</ul>
+          </details>` : ''}</td></tr>`).join('')}
       </tbody></table>`;
     } catch (e) { toast(e.message, true); }
   }
@@ -2457,7 +2511,8 @@
     const existingFullLeave = target && performanceRow?.leaveKind === 'FULL' ? performanceRow.approvedLeave : null;
     const punchControls = future ? '' : `${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
         ${data.events.map((e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
-          <div class="field attendance-punch-type"><label for="fixType${e.id}">Punch type</label><select id="fixType${e.id}" data-etype="${e.id}">${typeOpts(e.type)}</select></div>
+          <div class="field attendance-punch-type"><label for="fixType${e.id}">Punch type</label><select id="fixType${e.id}" data-etype="${e.id}">${typeOpts(e.type)}</select>
+            ${e.break_type ? `<div class="attendance-editor-hint">${esc(BREAK_LABEL[e.break_type])}${e.break_reason ? ' · ' + esc(e.break_reason) : ''}</div>` : ''}</div>
           <div class="field"><label for="fixDate${e.id}">Date</label><input id="fixDate${e.id}" type="date" data-edate="${e.id}" value="${esc(e.event_date)}"></div>
           <div class="field"><label for="fixTime${e.id}">Time</label><input id="fixTime${e.id}" type="time" data-etime="${e.id}" value="${esc(e.time)}"></div>
           <div class="attendance-punch-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}" aria-label="Save punch ${i + 1}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}" aria-label="Delete punch ${i + 1}">Delete</button></div>
