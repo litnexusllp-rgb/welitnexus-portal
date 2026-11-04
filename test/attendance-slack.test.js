@@ -37,14 +37,25 @@ test('successful clock actions queue one Slack alert each for the Attendance cha
   await once(server, 'listening');
   let timestamp = Date.parse('2026-10-19T16:00:00+05:30');
   Settings.now = () => timestamp;
-  const punch = type => fetch('http://127.0.0.1:' + server.address().port + '/api/attendance/punch', {
-    method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ type, note: 'private note' }),
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const punch = (type, details = {}) => fetch(base + '/api/attendance/punch', {
+    method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ type, note: 'private note', ...details }),
   });
   for (const type of ['IN', 'BREAK_START', 'BREAK_END', 'OUT']) {
-    assert.equal((await punch(type)).status, 200, type);
+    if (type === 'BREAK_START') {
+      assert.equal((await punch(type, { break_type: 'OTHER', break_reason: '  ' })).status, 400);
+      assert.equal((await punch(type, { break_type: 'UNKNOWN' })).status, 400);
+    }
+    const response = await punch(type, type === 'BREAK_START' ? { break_type: 'OTHER', break_reason: '  Private break reason  ' } : {});
+    assert.equal(response.status, 200, type);
+    assert.equal((await response.json()).activeBreakType, type === 'BREAK_START' ? 'OTHER' : null);
     timestamp += 60_000;
   }
   assert.equal((await punch('BREAK_END')).status, 409);
+  const timesheet = await (await fetch(base + '/api/attendance/timesheet', { headers: { cookie } })).json();
+  assert.deepEqual(timesheet.days[0].breaks.map(({ break_type, break_reason }) => [break_type, break_reason]), [
+    ['OTHER', 'Private break reason'],
+  ]);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM attendance_slack_alerts').get().n, 4);
   assert.equal(config({ SLACK_BOT_TOKEN: 'test', SLACK_EOD_CHANNEL: 'CTESTEOD' }), null);
   assert.equal(config({ ...process.env, SLACK_ATTENDANCE_ALERTS: 'off' }), null);
@@ -59,7 +70,7 @@ test('successful clock actions queue one Slack alert each for the Attendance cha
     assert.equal(message.channel, 'CTESTATTENDANCE');
     assert.equal(message.parse, 'none');
     assert.match(message.text, /Synthetic &lt;@staff&gt;/);
-    assert.doesNotMatch(message.text, /private note|attendance@example/);
+    assert.doesNotMatch(message.text, /private note|private break reason|attendance@example/i);
     posts.push(message.text);
     return new Response(JSON.stringify({ ok: true, ts: '100.' + posts.length }));
   };
