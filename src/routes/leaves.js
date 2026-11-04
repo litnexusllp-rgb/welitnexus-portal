@@ -4,6 +4,7 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now, todayStr, inclusiveDays } = require('../time');
+const { employmentStatus } = require('../employment');
 const { notify } = require('../notify');
 const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
 const { CATEGORIES, describeLeave, describeLeaves, syncBalance, syncAllBalancesAsync, normalizeLeave, assertAvailable } = require('../leavePolicy');
@@ -126,27 +127,42 @@ const insertApprovedLeave = db.prepare(
 );
 router.post('/admin', requireAdmin, (req, res) => {
   const user = getUser.get(Number(req.body.user_id));
-  if (!user || !user.active) return res.status(404).json({ error: 'Employee not found' });
+  if (!user) return res.status(404).json({ error: 'Employee not found' });
   if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   let leaveId;
   let leave;
   try {
     leave = { ...normalizeLeave(req.body, { allowPast: true, requireReason: false }), user_id:user.id, status:'APPROVED' };
     db.transaction(() => {
+      const endpoints = [leave.start_date, leave.end_date].map(date => employmentStatus(user, date));
+      if (endpoints.includes('NOT_EMPLOYED') || (!user.active && endpoints.some(Boolean))) {
+        throw Object.assign(new Error('Choose dates within the employee’s employment period.'), { status: 400 });
+      }
       checkShortDays(user.id,leave);
-      if (overlappingLeaves.get(user.id, leave.end_date, leave.start_date)) throw Object.assign(new Error(`${user.name} already has a leave covering some of these dates.`), { status: 409 });
+      const overlap = overlappingLeaves.get(user.id, leave.end_date, leave.start_date);
+      if (overlap && req.body.replace_auto_absence === true && leave.start_date === leave.end_date) {
+        const existing = getLeave.get(overlap.id);
+        if (existing.status === 'PENDING' && existing.start_date === leave.start_date && existing.end_date === leave.end_date
+          && existing.reason === `Auto-flagged: no clock-in on ${leave.start_date}`) {
+          setStatus.run('CANCELLED', req.user.id, now().toMillis(), 'Replaced by admin-recorded leave.', existing.id);
+        }
+      }
+      if (overlappingLeaves.get(user.id, leave.end_date, leave.start_date)) {
+        throw Object.assign(new Error(`${user.name} already has a pending or approved leave covering these dates.`), { status: 409 });
+      }
       assertAvailable(user.id, leave);
       leaveId = insertApprovedLeave.run({ ...leave, user_id: user.id, decided_by: req.user.id, decided_ts: now().toMillis(), created_ts: now().toMillis(), deduction_quote_json: JSON.stringify(estimateDeduction(user.id, leave)) }).lastInsertRowid;
       syncBalance(user.id);
     }).immediate();
   } catch (e) { return fail(res, e); }
+  const recordedLeave = presentLeave(getLeave.get(leaveId));
   notify(user.id, {
     type: 'LEAVE',
     title: 'Leave recorded for you',
-    body: `${req.user.name} recorded ${CATEGORIES[leave.category]}: ${leave.start_date}${leave.end_date !== leave.start_date ? ' to ' + leave.end_date : ''}. ${describeLeave(leave).paid_days} paid, ${describeLeave(leave).unpaid_days} unpaid day(s).`,
+    body: `${req.user.name} recorded ${CATEGORIES[leave.category]}: ${leave.start_date}${leave.end_date !== leave.start_date ? ' to ' + leave.end_date : ''}. ${recordedLeave.paid_days} paid, ${recordedLeave.unpaid_days} unpaid day(s).`,
     link: 'leaves',
   });
-  res.json({ leave: presentLeave(getLeave.get(leaveId)), balances: syncBalance(user.id) });
+  res.json({ leave: recordedLeave, balances: syncBalance(user.id) });
 });
 
 // ADMIN: run the no-show check now (normally runs daily on a schedule).

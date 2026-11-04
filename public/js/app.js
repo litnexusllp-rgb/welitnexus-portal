@@ -873,30 +873,36 @@
 
   // Admin records a leave directly (e.g. someone phoned in sick).
   let LEAVE_BALANCES = []; // cached from /leaves/summary for the balance hint
-  async function openMarkLeaveModal() {
-    if (!LEAVE_BALANCES.length) {
+  async function openMarkLeaveModal(target = null, kind = 'FULL') {
+    if (!target && !LEAVE_BALANCES.length) {
       try { LEAVE_BALANCES = (await api.get('/leaves/summary')).rows; } catch (e) { return toast(e.message, true); }
     }
-    modal(`<h3>Mark leave for an employee</h3>
+    const choices = target ? [target.user] : LEAVE_BALANCES;
+    const date = target?.day || todayISO();
+    const locked = target ? 'disabled' : '';
+    const title = target ? (kind === 'HALF' ? 'Mark half-day leave' : 'Mark full-day leave') : 'Mark leave for an employee';
+    modal(`<h3>${title}</h3>
       <p class="leave-form-intro">Saves as approved and notifies the employee.</p>
-      <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser">${LEAVE_BALANCES.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>Duration</label><select id="mlKind"><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
+      <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser" ${locked}>${choices.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Duration</label><select id="mlKind" ${locked}><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
       <div class="form-row one"><div class="field"><label>Leave category</label><select id="mlCategory">${leaveCategoryOptions()}</select></div></div>
-      <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${todayISO()}"></div>
-        <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${todayISO()}"></div></div>
+      <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${esc(date)}" ${locked}></div>
+        <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${esc(date)}" ${locked}></div></div>
       <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
       <div class="form-row one"><div class="field"><label for="mlEmergency">Emergency exception</label><select id="mlEmergency"><option value="NONE">None — planned leave</option><option value="HEALTH">Health emergency</option><option value="OTHER">Other emergency</option></select></div></div>
       <div id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
-    if (LEAVE_BALANCES.some(user => String(user.id) === myPerfUserId)) $('#mlUser').value = myPerfUserId;
+    if (!target && LEAVE_BALANCES.some(user => String(user.id) === myPerfUserId)) $('#mlUser').value = myPerfUserId;
+    $('#mlKind').value = kind;
     const form = wireLeavePreview('ml', '#mSave', true);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       if (!form.ready()) return;
       form.saving(true);
       try {
-        await api.post('/leaves/admin', form.payload());
-        closeModal(); toast('Leave marked ✓');
+        await api.post('/leaves/admin', { ...form.payload(), ...(target ? { replace_auto_absence: true } : {}) });
+        if (form.connected()) closeModal();
+        toast('Leave marked ✓');
         LEAVE_BALANCES = []; // refetch next time — balance changed
         refreshEmployeeLeaveData();
       } catch (e) { toast(e.message, true); } finally { form.saving(false); }
@@ -1013,13 +1019,24 @@
       wireShortDays(root);
     } catch(e) { if (root.isConnected) root.textContent = e.message; }
   }
-  function openShortDayRequest(timezone) {
-    modal(`<h3>Request Short Day</h3><p>Up to two hours per month, with management approval before the start. Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${todayISO()}"></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="60"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">Submit request</button></div>`);
+  function openShortDayRequest(timezone, target = null) {
+    modal(`<h3>${target ? 'Mark Short Day' : 'Request Short Day'}</h3>
+      ${target ? `<p><strong>${esc(target.user.name)}</strong> · Saves as approved. For a past start time, the record shows when it was entered.</p>` : ''}
+      <p>Up to two hours per month. ${target ? '' : 'Management approval is required before the start. '}Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${esc(target?.day || todayISO())}" ${target ? 'readonly' : ''}></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="${target ? '' : '60'}"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">${target ? 'Mark Short Day' : 'Submit request'}</button></div>`);
     $('#mCancel').addEventListener('click',closeModal);
     $('#sdSubmit').addEventListener('click', async () => {
       const button = $('#sdSubmit'); button.disabled = true;
-      try { await api.post('/short-days',{date:$('#sdDate').value,start_time:$('#sdTime').value,minutes:Number($('#sdMinutes').value),reason:$('#sdReason').value}); closeModal(); toast('Short Day requested'); await refreshEmployeeLeaveData(); }
-      catch(e) { $('#sdStatus').textContent = e.message; button.disabled = false; }
+      const status = $('#sdStatus');
+      try {
+        await api.post(target ? '/short-days/admin' : '/short-days', {
+          date: target?.day || $('#sdDate').value, start_time: $('#sdTime').value,
+          minutes: Number($('#sdMinutes').value), reason: $('#sdReason').value,
+          ...(target ? { user_id: target.user.id } : {}),
+        });
+        if (button.isConnected) closeModal();
+        toast(target ? 'Short Day marked' : 'Short Day requested');
+        await refreshEmployeeLeaveData();
+      } catch (e) { status.textContent = e.message; button.disabled = false; }
     });
   }
 
@@ -1032,12 +1049,13 @@
     const reason = $('#' + prefix + 'Reason'), preview = $('#' + prefix + 'Preview');
     const user = admin ? $('#mlUser') : null, button = $(buttonSelector);
     let valid = false, busy = false, version = 0;
+    const fixedDate = start.disabled;
     const payload = () => ({ start_date: start.value, end_date: kind.value === 'HALF' ? start.value : end.value, kind: kind.value, category: category.value, reason: reason.value, emergency_type:emergency.value, ...(admin ? { user_id: Number(user.value) } : {}) });
     const updateButton = () => { button.disabled = !valid || busy; };
     const refresh = async () => {
       const current = ++version;
       valid = false; updateButton();
-      end.disabled = kind.value === 'HALF';
+      end.disabled = fixedDate || kind.value === 'HALF';
       if (end.disabled || end.value < start.value) end.value = start.value;
       const reasonLabel = $('#lReasonLabel');
       if (!admin && reasonLabel) { const flexi = category.value === 'FLEXI'; reasonLabel.textContent = flexi ? 'Reason (optional)' : 'Reason *'; reason.required = !flexi; reason.placeholder = flexi ? 'Optional — no explanation needed for Flexi leave' : 'Required — e.g. family function, medical, personal work'; }
@@ -1053,7 +1071,7 @@
     };
     [start, end, kind, category, emergency, user].filter(Boolean).forEach(el => el.addEventListener('change', refresh));
     refresh();
-    return { payload, ready: () => valid && !busy, saving: value => { busy = value; updateButton(); } };
+    return { payload, ready: () => valid && !busy, connected: () => button.isConnected, saving: value => { busy = value; updateButton(); } };
   }
 
   function openApplyLeave() {
@@ -2341,22 +2359,23 @@
   // Admin modal to add/edit/delete an employee's punches for one day.
   // onDone: what to refresh after editing (defaults to the Reports page views,
   // but the calendar passes its own reloader).
-  async function openAttendanceEditor(userId, day, onDone, performanceRow) {
+  async function openAttendanceEditor(userId, day, onDone, performanceRow, employee) {
     modal(`<h3>Fix attendance</h3><div id="fixBody">Loading…</div>`);
     $('#modal').classList.add('attendance-editor');
-    renderAttendanceEditor(userId, day, onDone, performanceRow);
+    renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
   }
 
-  async function renderAttendanceEditor(userId, day, onDone, performanceRow) {
+  async function renderAttendanceEditor(userId, day, onDone, performanceRow, employee) {
+    const body = $('#fixBody');
     let data;
     try { data = await api.get(`/attendance/admin/day?user_id=${userId}&day=${day}`); }
     catch (e) { return toast(e.message, true); }
     const typeOpts = (sel) => ['IN', 'OUT', 'BREAK_START', 'BREAK_END']
       .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`).join('');
-    const body = $('#fixBody'); if (!body) return;
-    body.innerHTML = `
-      <p class="attendance-editor-summary"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
-      ${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
+    if (!body?.isConnected) return;
+    const target = employee?.role === 'EMPLOYEE' ? { user: employee, day } : null;
+    const future = performanceRow?.status === 'FUTURE';
+    const punchControls = future ? '' : `${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
         ${data.events.map((e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
           <div class="field attendance-punch-type"><label for="fixType${e.id}">Punch type</label><select id="fixType${e.id}" data-etype="${e.id}">${typeOpts(e.type)}</select></div>
           <div class="field"><label for="fixDate${e.id}">Date</label><input id="fixDate${e.id}" type="date" data-edate="${e.id}" value="${esc(e.event_date)}"></div>
@@ -2378,32 +2397,46 @@
           <div class="field"><label for="newTime">Time</label><input type="time" id="newTime"></div>
           <div class="attendance-punch-actions"><button class="btn btn-navy btn-sm" id="addPunch">Add</button></div>
         </div>
-      </section>
+      </section>`;
+    body.innerHTML = `
+      <p class="attendance-editor-summary"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
+      ${target ? `<div class="attendance-punctuality">
+        <div><strong>Record leave or Short Day</strong></div>
+        <div class="row-actions" style="flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" id="fixFullLeave">Mark leave</button>
+          <button class="btn btn-ghost btn-sm" id="fixHalfLeave">Mark half day</button>
+          <button class="btn btn-ghost btn-sm" id="fixShortDay">Mark Short Day</button>
+        </div>
+      </div>` : ''}
+      ${punchControls}
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
 
+    $('#fixFullLeave')?.addEventListener('click', () => openMarkLeaveModal(target));
+    $('#fixHalfLeave')?.addEventListener('click', () => openMarkLeaveModal(target, 'HALF'));
+    $('#fixShortDay')?.addEventListener('click', () => openShortDayRequest(data.timezone, target));
     $('#lateNormalBtn')?.addEventListener('click', async () => {
       try {
         await api.post('/attendance/admin/late-normal', { user_id: userId, day, normal: !data.lateNormal });
         toast(data.lateNormal ? 'Automatic late status restored' : 'Marked as normal ✓');
         if (onDone) await onDone();
-        renderAttendanceEditor(userId, day, onDone, performanceRow);
+        renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
       } catch (e) { toast(e.message, true); }
     });
     body.querySelectorAll('[data-esave]').forEach((b) => b.addEventListener('click', async () => {
       const id = b.dataset.esave;
       try {
         await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, event_date: body.querySelector(`[data-edate="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
-        toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow);
+        toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
       } catch (e) { toast(e.message, true); }
     }));
     body.querySelectorAll('[data-edel]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day, onDone, performanceRow); }
+      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day, onDone, performanceRow, employee); }
       catch (e) { toast(e.message, true); }
     }));
-    $('#addPunch').addEventListener('click', async () => {
+    $('#addPunch')?.addEventListener('click', async () => {
       const time = $('#newTime').value;
       if (!time) return toast('Pick a time', true);
-      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time, event_date: $('#newEventDate').value || undefined }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow); }
+      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time, event_date: $('#newEventDate').value || undefined }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow, employee); }
       catch (e) { toast(e.message, true); }
     });
     $('#fixDone').addEventListener('click', () => { closeModal(); if (onDone) onDone(); else { loadEmpReport(); loadRegister(); } });
@@ -2731,9 +2764,11 @@
     const todayISOv = att.today || todayISO();
     const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
-    // Clicking a past/today cell opens the fix editor (admins) or a correction
-    // request (employees) for that exact date — no need to visit Reports.
-    const clickable = (r) => r && !['FUTURE', 'NOT_EMPLOYED'].includes(r.status);
+    // Admins can record leave on future dates. Punch edits and employee
+    // corrections remain limited to current or past workdays.
+    const employee = selectedEmployee();
+    const canRecord = isAdmin() && employee?.role === 'EMPLOYEE' && employee.id === att.user.id;
+    const clickable = (r) => r && r.status !== 'NOT_EMPLOYED' && (r.status !== 'FUTURE' || canRecord);
     const cellFor = (r, dayNum, iso) => {
       if (!r) return `<div class="pcal-cell"><span class="dn">${dayNum}</span></div>`;
       let cls = 'pcal-ok'; let tag = '';
@@ -2754,9 +2789,15 @@
       else if (r.lateOverride) { cls = 'pcal-ok'; tag = 'Normal · admin'; }
       else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
+      if (['PRESENT', 'FUTURE'].includes(r.status) && r.leaveKind === 'FULL') { cls = 'pcal-leave'; tag = 'Leave'; }
+      if (r.status === 'FUTURE' && r.leaveKind === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
+      if (r.approvedShortMinutes) {
+        if (r.status === 'PRESENT' && !r.late && !r.noClockOut) cls = 'pcal-short';
+        tag = [tag === 'Short day' ? '' : tag, `Approved Short Day · ${r.approvedShortMinutes}m`].filter(Boolean).join(' · ');
+      }
       const inTime = r.firstIn ? attendanceTime(r.firstIn, r.timezone) : '';
       const can = clickable(r);
-      const action = isAdmin() ? 'click to fix punches' : 'click to request a correction';
+      const action = canRecord ? 'click to manage attendance or leave' : isAdmin() ? 'click to fix punches' : 'click to request a correction';
       const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
       return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}${can ? ' pcal-clickable' : ''}" title="${esc(title)}"${can ? ` data-fixday="${iso}" role="button" tabindex="0"` : ''}>
         <span class="dn">${dayNum}</span>
@@ -2796,7 +2837,7 @@
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Click any day to fix its punches.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Open a date to manage attendance or record leave.' : 'Click any day to request a correction.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -2807,7 +2848,7 @@
     $('#calNext').addEventListener('click', () => shiftMonth(1));
     // Fix a day straight from the calendar.
     const openDay = (iso) => {
-      if (isAdmin()) openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso]);
+      if (isAdmin()) openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso], canRecord ? employee : null);
       else openPunchRequestModal(iso);
     };
     el.querySelectorAll('[data-fixday]').forEach((c) => {

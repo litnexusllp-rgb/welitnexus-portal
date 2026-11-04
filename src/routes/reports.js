@@ -101,6 +101,9 @@ function buildAttendanceReport(user, req) {
     }
   }
   const lateNormalDays = new Set(lateNormalOverridesBetween.all(user.id, start, end).map((r) => r.day));
+  const shortDays = db.prepare(`SELECT date, SUM(minutes) AS minutes FROM short_day_requests
+    WHERE user_id=? AND status='APPROVED' AND date BETWEEN ? AND ? GROUP BY date`).all(user.id, start, end);
+  const shortMinutesByDay = new Map(shortDays.map(row => [row.date, row.minutes]));
 
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
@@ -129,6 +132,8 @@ function buildAttendanceReport(user, req) {
       day, timezone: c.timezone, shiftStart: c.shift_start,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
       status,
+      leaveKind: leaveByDay[day] || null,
+      approvedShortMinutes: shortMinutesByDay.get(day) || 0,
       attendanceError: s?.error || null,
       configWarning,
       employmentWarning: employmentStatus(user, day) === 'EMPLOYMENT_UNKNOWN' ? 'Employment dates need review.' : null,

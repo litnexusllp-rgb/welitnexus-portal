@@ -25,6 +25,32 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
   };
   t.after(async()=>{Settings.now=originalNow;await new Promise(r=>server.close(r));db.close();fs.rmSync(dir,{recursive:true,force:true});});
 
+  await t.test('calendar records approved leave and Short Day with admin permissions and existing limits', async () => {
+    const id = add();
+    salary(id);
+    const flagged = leave(id, '2026-10-13', 'FULL', 'PENDING');
+    db.prepare('UPDATE leaves SET reason=? WHERE id=?').run('Auto-flagged: no clock-in on 2026-10-13', flagged);
+    const halfDay = { user_id: id, start_date: '2026-10-13', kind: 'HALF', replace_auto_absence: true };
+    assert.equal((await req(id, 'leaves/admin', 'POST', halfDay)).status, 403);
+    const half = await req(admin, 'leaves/admin', 'POST', halfDay);
+    assert.equal(half.status, 200);
+    assert.equal(half.body.leave.paid_days, 0.5);
+    assert.equal(db.prepare('SELECT status FROM leaves WHERE id=?').get(flagged).status, 'CANCELLED');
+    assert.equal((await req(admin, 'leaves/admin', 'POST', halfDay)).status, 409);
+
+    const shortDay = { user_id: id, date: '2026-10-14', start_time: '17:00', minutes: 60 };
+    assert.equal((await req(id, 'short-days/admin', 'POST', shortDay)).status, 403);
+    const short = await req(admin, 'short-days/admin', 'POST', shortDay);
+    assert.equal(short.status, 200);
+    assert.equal(short.body.request.status, 'APPROVED');
+    assert.equal(short.body.request.decided_by, admin);
+    assert.ok(short.body.request.decided_ts > short.body.request.start_ts);
+    assert.equal((await req(admin, 'short-days/admin', 'POST', shortDay)).status, 409);
+    assert.equal((await req(admin, 'short-days/admin', 'POST', { ...shortDay, date: '2026-10-15', minutes: 61 })).status, 409);
+    assert.equal((await req(admin, 'short-days/admin', 'POST', { ...shortDay, date: '2026-10-13' })).status, 409);
+    assert.equal(row(id).approved_short_day_minutes, 60);
+  });
+
   await t.test('regular cap spans split requests; special categories stay separate; first twelve always unpaid',()=>{
     const id=add();salary(id);
     leave(id,'2026-10-05');leave(id,'2026-10-13');leave(id,'2026-10-14');leave(id,'2026-10-15','HALF');
