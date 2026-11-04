@@ -28,31 +28,45 @@
   <div class="app" id="app">
     <aside class="sidebar">
       <img src="/img/lit-logo-white.png" alt="LIT Nexus" class="sidebar-logo" />
-      <nav id="nav">
-        <a class="nav-item active" data-view="dashboard" href="#/dashboard"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.6V20h12V9.6"/></svg></span> Dashboard</a>
-        <a class="nav-item" data-view="clock" href="#/clock"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span> Clock</a>
-        <a class="nav-item" data-view="employees" href="#/employees"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M20.5 19a5.5 5.5 0 0 0-3.5-5.1"/></svg></span> Employees</a>
-        <a class="nav-item" data-view="tasks" href="#/tasks"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span> Tasks</a>
-        <button type="button" class="nav-item staff-more" id="staffMore" aria-expanded="false" aria-controls="nav-achievements nav-noticeboard nav-calendar nav-directory">
-          <span class="ico" aria-hidden="true">•••</span> More
-        </button>
-        <a class="nav-item admin-only" data-view="clients" href="#/clients"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></span> Clients</a>
-        <a class="nav-item nav-secondary" id="nav-achievements" data-view="achievements" href="#/achievements"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><path d="M9 13.2 7.5 21 12 18.2 16.5 21 15 13.2"/></svg></span> Achievements</a>
-        <a class="nav-item nav-secondary" id="nav-noticeboard" data-view="noticeboard" href="#/noticeboard"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a2 2 0 0 1 2-2h2l9-4v14l-9-4H5a2 2 0 0 1-2-2z"/><path d="M8 15v4a1.5 1.5 0 0 0 3 0v-3"/></svg></span> Notice board</a>
-        <a class="nav-item admin-only" data-view="taskreview" href="#/taskreview"><span class="ico" aria-hidden="true">↻</span> Task review</a>
-        <a class="nav-item admin-only" data-view="operations" href="#/operations"><span class="ico" aria-hidden="true">◉</span> Operations</a>
-        <a class="nav-item admin-only" data-view="bonuses" href="#/bonuses"><span class="ico" aria-hidden="true">🎁</span> Bonus history</a>
-        <a class="nav-item admin-only" data-view="kpi" href="#/kpi"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20v-5M12 20V8M17 20v-9"/></svg></span> KPIs</a>
-        <a class="nav-item admin-only" data-view="reports" href="#/reports"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16 10 10l4 4 6-7"/><path d="M16 7h4v4"/></svg></span> Reports</a>
-        <a class="nav-item nav-secondary" id="nav-calendar" data-view="calendar" href="#/calendar"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="15" rx="2.5"/><path d="M4 10h16M8.5 3v4.5M15.5 3v4.5"/></svg></span> Holidays</a>
-        <a class="nav-item nav-secondary" id="nav-directory" data-view="directory" href="#/directory"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M20.5 19a5.5 5.5 0 0 0-3.5-5.1"/></svg></span> Directory</a>
-        <a class="nav-item admin-only" data-view="admin" href="#/admin"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M19 7h1"/><path d="M4 17h7M17 17h3"/><circle cx="16" cy="7" r="2.2"/><circle cx="13" cy="17" r="2.2"/></svg></span> Admin</a>
-      </nav>
       <button class="nav-item bell" id="bellBtn" aria-label="Notifications">
         <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></span>
         Notifications <span class="bell-badge" id="bellBadge" hidden>0</span>
       </button>
+      <button class="nav-item admin-drawer-toggle admin-only" type="button" id="adminMenuButton" aria-expanded="false" aria-controls="nav">Menu</button>
+      <nav id="nav" aria-label="Main navigation">
+        <a class="nav-item active" data-view="dashboard" href="#/dashboard"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.6V20h12V9.6"/></svg></span> Dashboard</a>
+        <a class="nav-item" data-view="clock" href="#/clock"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span> Clock</a>
+        <a class="nav-item" data-view="employees" href="#/employees"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M20.5 19a5.5 5.5 0 0 0-3.5-5.1"/></svg></span> Employees</a>
+        <div class="nav-group">
+          <a class="nav-item" data-view="tasks" href="#/tasks"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span> Tasks</a>
+          <button class="nav-group-toggle admin-only" type="button" aria-expanded="false" aria-controls="nav-tasks-pages" aria-label="Task pages">⌄</button>
+          <div class="nav-sub" id="nav-tasks-pages" hidden>
+            <a class="nav-item" data-view="clients" href="#/clients"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></span> Clients</a>
+            <a class="nav-item" data-view="taskreview" href="#/taskreview"><span class="ico" aria-hidden="true">↻</span> Task review</a>
+          </div>
+        </div>
+        <a class="nav-item admin-only" data-view="operations" href="#/operations"><span class="ico" aria-hidden="true">◉</span> Operations</a>
+        <div class="nav-group admin-only">
+          <a class="nav-item" data-view="reports" href="#/reports"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16 10 10l4 4 6-7"/><path d="M16 7h4v4"/></svg></span> Reports</a>
+          <button class="nav-group-toggle admin-only" type="button" aria-expanded="false" aria-controls="nav-reports-pages" aria-label="Report pages">⌄</button>
+          <div class="nav-sub" id="nav-reports-pages" hidden>
+            <a class="nav-item" data-view="kpi" href="#/kpi"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20v-5M12 20V8M17 20v-9"/></svg></span> KPIs</a>
+            <a class="nav-item" data-view="bonuses" href="#/bonuses"><span class="ico" aria-hidden="true">🎁</span> Bonus history</a>
+          </div>
+        </div>
+        <button type="button" class="nav-item staff-more" id="staffMore" aria-expanded="false" aria-controls="nav-achievements nav-noticeboard nav-calendar nav-directory">
+          <span class="ico" aria-hidden="true">•••</span> More
+        </button>
+        <a class="nav-item nav-secondary" id="nav-achievements" data-view="achievements" href="#/achievements"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><path d="M9 13.2 7.5 21 12 18.2 16.5 21 15 13.2"/></svg></span> Achievements</a>
+        <a class="nav-item nav-secondary" id="nav-noticeboard" data-view="noticeboard" href="#/noticeboard"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a2 2 0 0 1 2-2h2l9-4v14l-9-4H5a2 2 0 0 1-2-2z"/><path d="M8 15v4a1.5 1.5 0 0 0 3 0v-3"/></svg></span> Notice board</a>
+        <a class="nav-item nav-secondary" id="nav-calendar" data-view="calendar" href="#/calendar"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="15" rx="2.5"/><path d="M4 10h16M8.5 3v4.5M15.5 3v4.5"/></svg></span> Holidays</a>
+        <a class="nav-item nav-secondary" id="nav-directory" data-view="directory" href="#/directory"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M20.5 19a5.5 5.5 0 0 0-3.5-5.1"/></svg></span> Directory</a>
+      </nav>
       <div class="spacer"></div>
+      <a class="nav-item admin-only nav-settings" id="navSettings" data-view="admin" href="#/admin"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M19 7h1"/><path d="M4 17h7M17 17h3"/><circle cx="16" cy="7" r="2.2"/><circle cx="13" cy="17" r="2.2"/></svg></span> Settings</a>
+      <details class="nav-account">
+        <summary>Account</summary>
+        <div class="nav-account-panel">
       <div class="me">
         <div class="nm" id="meName">—</div>
         <div class="rl" id="meRole">—</div>
@@ -60,6 +74,8 @@
       <button class="logout" id="myProfileBtn" style="margin-bottom:8px;">My profile</button>
       <button class="logout" id="changePwBtn" style="margin-bottom:8px;">Change password</button>
       <button class="logout" id="logoutBtn">Sign out</button>
+        </div>
+      </details>
     </aside>
 
     <main class="main" id="main"><!-- views injected by app.js --></main>

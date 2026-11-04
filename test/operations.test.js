@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
 test('Asana collection and private operations dashboard',async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ems-ops-'));process.env.DB_PATH=path.join(dir,'test.db');process.env.JWT_SECRET='test-only';process.env.ASANA_TOKEN='test-only';process.env.ASANA_PROJECT_GID='1215327082632826';process.env.EOD_ENABLED='false';
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ems-ops-'));process.env.DB_PATH=path.join(dir,'test.db');process.env.JWT_SECRET='test-only';process.env.ASANA_TOKEN='test-only';process.env.ASANA_PROJECT_GID='1215327082632826';process.env.EOD_ENABLED='false';process.env.SLACK_ATTENDANCE_ALERTS='off';
  const {db}=require('../src/db');const realFetch=global.fetch;
  t.after(()=>{global.fetch=realFetch;db.close();fs.rmSync(dir,{recursive:true,force:true});});
  const fresh=()=>{delete require.cache[require.resolve('../src/asana')];return require('../src/asana');};
@@ -30,13 +30,20 @@ test('Asana collection and private operations dashboard',async t=>{
  db.prepare("INSERT INTO achievements(user_id,date,title,created_ts) VALUES(?,'2025-01-01','Old pending',0)").run(emp);
  db.prepare("INSERT INTO leaves(user_id,start_date,end_date,days,created_ts) VALUES(?,'2025-01-01','2025-01-01',1,0)").run(emp);
  db.prepare("INSERT INTO punch_requests(user_id,day,type,time,created_ts) VALUES(?,'2025-01-01','IN','16:00',0)").run(emp);
+ db.prepare("INSERT INTO late_explanations(user_id,day,reason,minutes_late,created_ts) VALUES(?,'2025-01-01','Delay',5,0)").run(emp);
  const express=require('express');const app=express();app.use(require('cookie-parser')(),auth.loadUser);app.use('/api/operations',require('../src/routes/operations'));const server=app.listen(0,'127.0.0.1');await new Promise((r,j)=>{server.once('listening',r);server.once('error',j);});t.after(()=>new Promise(r=>server.close(r)));
- const req=async(session=cookie(admin))=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/operations`,{headers:{cookie:session}});return {status:r.status,body:await r.json(),cache:r.headers.get('cache-control')};};
+ const req=async(session=cookie(admin),suffix='')=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/operations${suffix}`,{headers:{cookie:session}});return {status:r.status,body:await r.json(),cache:r.headers.get('cache-control')};};
  await t.test('admin-only aggregation retains old approvals and sends no Slack messages',async()=>{
-  assert.equal((await req('')).status,401);assert.equal((await req(cookie(emp))).status,403);const r=await req();assert.equal(r.cache,'no-store');assert.equal(r.body.approvals.length,3);assert.deepEqual(r.body.asana.counts,{pending:3,overdue:1,dueToday:1,unassigned:1,missingDue:1});assert.equal(r.body.slack.eodEnabled,false);assert.equal(r.body.slack.newAlertsEnabled,false);assert.equal(r.body.bonuses[0].lastMonth,null);
+  assert.equal((await req('')).status,401);assert.equal((await req(cookie(emp))).status,403);const r=await req();assert.equal(r.cache,'no-store');assert.equal(r.body.approvals.length,4);assert.deepEqual(r.body.asana.counts,{pending:3,overdue:1,dueToday:1,unassigned:1,missingDue:1});assert.equal(r.body.slack.eodEnabled,false);assert.equal(r.body.slack.attendanceConfigured,false);assert.equal(r.body.bonuses[0].lastMonth,null);
  });
  await t.test('Asana failure preserves portal approvals with unknown counts',async()=>{
-  asana.allTasks=async()=>{throw Error('offline');};const r=await req();assert.equal(r.status,200);assert.equal(r.body.approvals.length,3);assert.equal(r.body.asana.state,'error');assert.equal(r.body.asana.counts,null);assert.equal(r.body.asana.tasks,null);
+  asana.allTasks=async()=>{throw Error('offline');};const r=await req();assert.equal(r.status,200);assert.equal(r.body.approvals.length,4);assert.equal(r.body.asana.state,'error');assert.equal(r.body.asana.counts,null);assert.equal(r.body.asana.tasks,null);
+ });
+ await t.test('dashboard counts are admin-only and do not fetch Asana',async()=>{
+  asana.allTasks=async()=>{throw Error('must not fetch Asana');};
+  assert.equal((await req(cookie(emp),'/dashboard-approvals')).status,403);
+  assert.deepEqual((await req(cookie(admin),'/dashboard-approvals')).body,{late:1,leave:1,punch:1});
+  assert.equal((await req(cookie(admin),'/attendance-slack/check')).status,503);
  });
  await t.test('unapproved project scope is not fetched',async()=>{
   asana.syncStatus=()=>({project:'999'});let called=false;asana.allTasks=async()=>{called=true;return [];};const r=await req();assert.equal(called,false);assert.equal(r.body.asana.state,'error');

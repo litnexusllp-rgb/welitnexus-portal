@@ -343,14 +343,37 @@
 
   // ---------- navigation ----------
   let employeeSection = 'employeePerformance';
+  const navigation = $('#nav');
   const staffMore = $('#staffMore');
+  const adminMenuButton = $('#adminMenuButton');
+  const navGroups = navigation.querySelectorAll('.nav-group-toggle');
+
+  function showNavGroup(button, open) {
+    button.setAttribute('aria-expanded', String(open));
+    button.nextElementSibling.hidden = !open;
+  }
+  navGroups.forEach(button => button.addEventListener('click', () => showNavGroup(button, button.getAttribute('aria-expanded') === 'false')));
+
+  function closeAdminMenu() {
+    if (adminMenuButton?.getAttribute('aria-expanded') !== 'true') return;
+    if (adminMenuButton.getClientRects().length && document.activeElement?.matches('#nav *, #navSettings')) adminMenuButton.focus();
+    adminMenuButton.setAttribute('aria-expanded', 'false');
+  }
+  adminMenuButton?.addEventListener('click', () => {
+    adminMenuButton.setAttribute('aria-expanded', String(adminMenuButton.getAttribute('aria-expanded') === 'false'));
+  });
+  adminMenuButton?.parentElement.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAdminMenu();
+  });
+
   function showStaffMore(open) {
-    $('#nav').classList.toggle('more-open', open);
+    navigation.classList.toggle('more-open', open);
     staffMore.setAttribute('aria-expanded', String(open));
   }
   staffMore?.addEventListener('click', () => showStaffMore(staffMore.getAttribute('aria-expanded') === 'false'));
   staffMore?.parentElement.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || staffMore.getAttribute('aria-expanded') !== 'true') return;
+    e.stopPropagation();
     showStaffMore(false);
     staffMore.focus();
   });
@@ -358,7 +381,7 @@
     return window.location.hash.replace(/^#\//, '') || 'dashboard';
   }
 
-  $('#nav').addEventListener('click', (e) => {
+  navigation.addEventListener('click', (e) => {
     const link = e.target.closest('a.nav-item');
     // Let the browser handle Command/Ctrl-click, Shift-click and middle-click.
     if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -371,6 +394,7 @@
 
   function navigate(view, fromAddress = false) {
     if (!ME) return;
+    closeAdminMenu();
     if (staffMore?.getAttribute('aria-expanded') === 'true') {
       if (document.activeElement?.matches('#nav .nav-secondary')) staffMore.focus();
       showStaffMore(false);
@@ -393,6 +417,7 @@
       else b.removeAttribute('aria-current');
     });
     const selected = document.querySelector('.nav-item.active');
+    navGroups.forEach(button => showNavGroup(button, isAdmin() && button.parentElement.contains(selected)));
     document.title = (selected ? selected.textContent.trim() + ' · ' : '') + 'WeLitNexus Portal';
     closeModal();
     clearInterval(clockTimer);
@@ -439,7 +464,7 @@
           ${a.state === 'ok' ? `<label for="opsFilter">Show</label> <select id="opsFilter"><option value="overdue">Overdue (${c.overdue})</option><option value="dueToday">Due today (${c.dueToday})</option><option value="unassigned">No owner (${c.unassigned})</option><option value="missingDue">No due date (${c.missingDue})</option><option value="all">All pending (${c.pending})</option></select><div id="opsTasks"></div>` : `<p role="alert">${esc(a.error || 'Asana is not configured. Add the existing Asana integration credentials in Railway.')}${a.retryAt ? ' Retry after ' + esc(new Date(a.retryAt).toLocaleTimeString()) : ''}</p>`}</div>
           <div class="section"><h2>Waiting for admin review · all months</h2><p class="page-sub">Oldest requests first. Open the relevant section to review using its existing approval controls.</p>${d.approvals.length ? `<div class="table-wrap"><table><thead><tr><th>Waiting</th><th>Type</th><th>Employee</th><th>Request</th><th></th></tr></thead><tbody>${d.approvals.map(r=>`<tr><td>${r.waitingDays} days</td><td>${esc(r.kind)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td><a href="#/${esc(r.view)}">Review</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No pending approvals.</div>'}</div>
           <div class="section"><h2>Bonus rotation</h2><p class="page-sub">Payment history helps you avoid repeating recipients. Final decisions remain with admins. <a href="#/bonuses">Open bonus history</a></p><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest recorded bonus month</th></tr></thead><tbody>${d.bonuses.map(b=>`<tr><td>${esc(b.name)}</td><td>${esc(b.lastMonth || 'No record')}</td></tr>`).join('')}</tbody></table></div></div>
-          <div class="section"><h2>Automation status</h2><p>New Slack alerts: off. Existing EOD automation: <strong>${d.slack.eodEnabled ? 'enabled' : 'off'}</strong>.</p><p class="page-sub">These checks do not send messages, change Asana tasks, approve requests or make payments. A task’s blocker must be recorded by its owner; an overdue date alone does not explain why it is pending.</p></div>`;
+          <div class="section"><h2>Automation status</h2><p>Slack attendance alerts: <strong>${d.slack.attendanceConfigured ? 'configured' : 'off'}</strong> · ${d.slack.attendancePending} queued · ${d.slack.attendanceReview} need delivery review. <a href="/api/operations/attendance-slack/check" target="_blank" rel="noopener">Check bot connection</a></p><p>EOD reports: <strong>${d.slack.eodEnabled ? 'enabled' : 'off'}</strong>.</p><p class="page-sub">Operations is read-only. A task’s blocker must be recorded by its owner.</p></div>`;
         if (a.state === 'ok') {
           const render = () => {
             const rows = a.tasks.filter(t=>taskFilter==='all'||t[taskFilter]);
@@ -459,20 +484,21 @@
   // ---------- Dashboard ----------
   VIEWS.dashboard = () => {
     setMain(`Hi ${ME.name.split(' ')[0]} 👋`, new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      '<div id="dashControlCenter" aria-busy="true"><p>Loading dashboard…</p></div><div id="dashLeaveBalances"></div><div id="dashAdmin"></div>');
-    const leaveHost = $('#dashLeaveBalances');
-    // Share the initial reads between the summary and live admin panel.
-    // The live panel's later refreshes read fresh data.
-    const requests = new Map();
+      '<div id="dashControlCenter" class="dashboard" aria-busy="true"><p>Loading dashboard…</p></div>');
+    // The first expansion can reuse a recent team snapshot.
+    let teamRead;
     const read = (path) => {
-      if (!requests.has(path)) requests.set(path, api.get(path));
-      return requests.get(path);
+      const response = api.get(path);
+      if (path === '/attendance/today') teamRead = { response, ts: Date.now() };
+      return response;
     };
     window.Dashboard.render($('#dashControlCenter'), {
-      read, admin: isAdmin(), adminHost: $('#dashAdmin'),
-      showLeaveBalances: (balances) => { leaveHost.innerHTML = leaveBalanceMarkup(balances); },
+      read, admin: isAdmin(),
+      openTeam: () => startLiveAttendance('dashAdmin', true, path => {
+        if (path === '/attendance/today' && teamRead && Date.now() - teamRead.ts < 10000) return teamRead.response;
+        return api.get(path);
+      }),
     });
-    if (isAdmin()) startLiveAttendance('dashAdmin', true, read);
   };
 
   // h m s from milliseconds, e.g. "2h 14m 06s".
@@ -501,6 +527,9 @@
       if (withApprovals) reqs.push(read('/leaves/pending'), read('/punch-requests/pending'), read('/reports/missing-clockouts?days=7'));
       const [today, pend, punchPend, missing] = await Promise.all(reqs);
       if (!host.isConnected) return;
+      host.closest('.dash-card')?.querySelectorAll('[data-team-count]').forEach(count => {
+        count.textContent = today.people.filter(person => person.state === count.dataset.teamCount).length;
+      });
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');

@@ -4,7 +4,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const FIELDS = 'name,created_at,modified_at,completed,completed_at,completed_by.name,assignee.name,assignee.email,due_on,due_at,notes,custom_fields.name,custom_fields.display_value,num_subtasks';
 
 function createApi(config, fetchImpl = fetch, wait = sleep) {
-  async function request(url, options = {}, posting = false) {
+  async function request(url, options = {}, posting = false, readScopes = false) {
     for (let attempt = 0; attempt < 4; attempt++) {
       let res;
       try { res = await fetchImpl(url, { ...options, signal: AbortSignal.timeout(30000) }); }
@@ -29,15 +29,15 @@ function createApi(config, fetchImpl = fetch, wait = sleep) {
         // Do not log upstream descriptions which can include personal data or tokens.
         throw new Error(`Remote API rejected request (${res.status}${body.error ? ', ' + String(body.error).replace(/[^a-z_]/gi, '').slice(0, 60) : ''})`);
       }
-      return body;
+      return readScopes ? { ...body, scopes: res.headers.get('x-oauth-scopes')?.split(/\s*,\s*/) || null } : body;
     }
   }
   const asana = path => request('https://app.asana.com/api/1.0' + path, { headers: { Authorization: `Bearer ${config.asanaToken}` } });
-  const slack = (method, args = {}, posting = false) => {
+  const slack = (method, args = {}, posting = false, readScopes = false) => {
     const url = 'https://slack.com/api/' + method;
     const headers = { Authorization: `Bearer ${config.slackToken}` };
     // Read methods use query parameters; Slack can ignore their JSON POST body.
-    if (!posting) return request(url + '?' + new URLSearchParams(args), { method: 'GET', headers });
+    if (!posting) return request(url + '?' + new URLSearchParams(args), { method: 'GET', headers }, false, readScopes);
     return request(url, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(args),
     }, true);
@@ -112,17 +112,31 @@ function createApi(config, fetchImpl = fetch, wait = sleep) {
     return { map, warnings };
   }
 
-  async function check() {
+  async function checkSlack() {
     await slack('auth.test');
     const info = await slack('conversations.info', { channel: config.channel });
     if (!info.channel?.is_member) throw new Error('Slack bot must be invited to the EOD channel');
     if (info.channel?.is_archived) throw new Error('Slack EOD channel is archived');
-    for (const gid of config.projects) await asana(`/projects/${encodeURIComponent(gid)}?opt_fields=name`);
     return { ok: true, channel: info.channel.name };
   }
 
+  async function checkBot() {
+    const identity = await slack('auth.test', {}, false, true);
+    if (!identity.bot_id || !identity.user_id) throw new Error('Slack attendance alerts require a bot token.');
+    if (identity.scopes && !identity.scopes.some(scope => scope === 'chat:write' || scope === 'bot')) {
+      throw new Error('The Slack bot needs permission to post messages.');
+    }
+    return { botUserId: identity.user_id };
+  }
+
+  async function check() {
+    const connection = await checkSlack();
+    for (const gid of config.projects) await asana(`/projects/${encodeURIComponent(gid)}?opt_fields=name`);
+    return connection;
+  }
+
   const post = (text, threadTs) => slack('chat.postMessage', { channel: config.channel, text, ...(threadTs ? { thread_ts: threadTs } : {}), parse: 'none', unfurl_links: false, unfurl_media: false }, true);
-  return { collect, resolveUsers, post, check, wait };
+  return { collect, resolveUsers, post, check, checkBot, wait };
 }
 
 module.exports = { createApi };
