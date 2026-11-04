@@ -5,7 +5,7 @@ const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { DateTime, ZONE, now, todayStr } = require('../time');
 const { calendarFrom, scheduledDays } = require('../leaveCalculation');
-const { settings } = require('../attendanceSession');
+const { settings, daySettings } = require('../attendanceSession');
 const { employmentStatus } = require('../employment');
 const { notify } = require('../notify');
 const fail = (message,status=400) => { throw Object.assign(new Error(message),{status}); };
@@ -37,31 +37,45 @@ router.get('/', (req,res) => {
       requests:db.prepare('SELECT * FROM short_day_requests WHERE user_id=? ORDER BY date DESC,id DESC').all(id)});
   } catch(e) { error(res,e); }
 });
-router.post('/', (req,res) => {
+function recordShortDay(req, res, admin) {
   try {
-    if (req.user.role !== 'EMPLOYEE') fail('Use an employee account to request Short Day time.',403);
+    if (!admin && req.user.role !== 'EMPLOYEE') fail('Use an employee account to request Short Day time.',403);
+    const id = admin ? Number(req.body.user_id) : req.user.id;
+    const employee = user(id);
+    if (!employee || employee.role !== 'EMPLOYEE') fail('Employee not found.',404);
     const date = String(req.body.date || ''), time = String(req.body.start_time || ''), minutes = Number(req.body.minutes);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) fail('Enter a valid date and start time.');
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 120) fail('Choose between one and 120 minutes.');
-    const u = user(req.user.id), timezone = settings(u).timezone;
+    const timezone = admin ? daySettings(employee, date).timezone : settings(employee).timezone;
     const start = DateTime.fromISO(`${date}T${time}`,{zone:timezone});
     if (!start.isValid || start.toFormat('yyyy-MM-dd HH:mm') !== `${date} ${time}` || start.getPossibleOffsets().length !== 1) fail('Choose an unambiguous local date/time outside a daylight-saving transition.');
     if (start.plus({minutes}).minus({milliseconds:1}).toISODate() !== date) fail('Split Short Day time crossing midnight into separate requests for each date.');
-    if (start.toMillis() <= now().toMillis()) fail('Request Short Day time in advance so management can approve it before it starts.');
-    if (employmentStatus(u,date)) fail('Confirm employment dates before requesting Short Day time.');
+    const recordedAt = now().toMillis();
+    const past = start.toMillis() <= recordedAt;
+    if (!admin && past) fail('Request Short Day time in advance so management can approve it before it starts.');
+    if (employmentStatus(employee,date)) fail('Confirm employment dates before requesting Short Day time.');
     if (!scheduledDays(date,calendarFrom(db))) fail('This date has no scheduled working time.');
     const reason = String(req.body.reason || '').trim().slice(0,500);
     const record = db.transaction(() => {
-      checkCredit(u.id,date.slice(0,7),minutes); checkLeave(u.id,date);
+      checkCredit(id,date.slice(0,7),minutes); checkLeave(id,date);
       const overlapping = db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND status IN ('APPROVED','PENDING') AND start_ts<? AND start_ts+minutes*60000>? LIMIT 1")
-        .get(u.id,start.toMillis()+minutes*60000,start.toMillis());
+        .get(id,start.toMillis()+minutes*60000,start.toMillis());
       if (overlapping) fail('An existing Short Day request overlaps this time.',409);
-      return get(db.prepare('INSERT INTO short_day_requests(user_id,date,start_time,timezone,start_ts,minutes,reason,created_ts) VALUES(?,?,?,?,?,?,?,?)')
-        .run(u.id,date,time,timezone,start.toMillis(),minutes,reason,now().toMillis()).lastInsertRowid);
+      const status = admin ? 'APPROVED' : 'PENDING';
+      const note = admin ? (past ? 'Recorded by admin after the start time.' : 'Recorded and approved by admin.') : '';
+      const result = db.prepare(`INSERT INTO short_day_requests
+        (user_id,date,start_time,timezone,start_ts,minutes,reason,created_ts,status,decided_by,decided_ts,admin_note)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        id, date, time, timezone, start.toMillis(), minutes, reason, recordedAt,
+        status, admin ? req.user.id : null, admin ? recordedAt : null, note,
+      );
+      return get(result.lastInsertRowid);
     }).immediate();
     res.json({request:record});
   } catch(e) { error(res,e); }
-});
+}
+router.post('/', (req,res) => recordShortDay(req,res,false));
+router.post('/admin', requireAdmin, (req,res) => recordShortDay(req,res,true));
 router.post('/:id/cancel', require('../requestValidation').validateParams, (req,res) => {
   try {
     const result = db.transaction(() => {
