@@ -52,6 +52,36 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal(row(id).approved_short_day_minutes, 60);
   });
 
+  await t.test('admin can mark a date as Short Day without saving a time or changing punches', async () => {
+    const id = add();
+    salary(id);
+    const day = '2026-10-06';
+    const mark = (date, actor = admin) => req(actor, 'short-days/admin', 'POST', { user_id: id, date });
+    assert.equal((await mark(day,id)).status, 403);
+    assert.equal((await req(id, 'short-days', 'POST', { date: day })).status, 400);
+    assert.equal((await mark('2026-10-04')).status, 400); // Sunday.
+    assert.equal((await mark('2026-10-05')).status, 200);
+    const [first, second] = await Promise.all([mark(day), mark(day)]);
+    for (const result of [first, second]) {
+      assert.equal(result.status, 200);
+      assert.equal(result.body.request.status, 'APPROVED');
+      assert.equal(result.body.request.decided_by, admin);
+      for (const field of ['start_time', 'start_ts', 'minutes']) assert.equal(result.body.request[field], null);
+    }
+    assert.equal(first.body.request.id, second.body.request.id);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM events WHERE user_id=?').get(id).count, 0);
+    const calendar = await req(id, 'reports/my-attendance?start=2026-10-06&end=2026-10-06');
+    assert.equal(calendar.body.rows[0].approvedShortDay, true);
+    assert.equal(calendar.body.rows[0].approvedShortMinutes, 0);
+    assert.equal(row(id).approved_short_day_count, 2);
+    assert.equal(row(id).approved_short_day_minutes, 0);
+    assert.equal(row(id).short_day_unpaid_days, 0.25);
+    assert.equal(row(id).deduction_paise, 25000);
+    assert.equal((await req(admin, 'short-days/admin', 'POST', { user_id:id, date:day, start_time:'17:00', minutes:30 })).status, 409);
+    assert.equal((await req(id, 'short-days', 'POST', { date:'2026-11-03', start_time:'17:00', minutes:30 })).status, 200);
+    assert.equal((await mark('2026-11-03')).status, 409);
+  });
+
   await t.test('adjusting one date splits approved leave and recalculates payroll without duplicating it', async () => {
     const id = add();
     salary(id);

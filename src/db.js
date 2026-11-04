@@ -359,22 +359,38 @@ if (!db.pragma('table_info(leaves)').some(c => c.name === 'category')) {
 if (!db.pragma('table_info(leaves)').some(c => c.name === 'emergency_type')) {
   db.exec("ALTER TABLE leaves ADD COLUMN emergency_type TEXT NOT NULL DEFAULT 'NONE' CHECK(emergency_type IN ('NONE','HEALTH','OTHER'))");
 }
+const legacyShortDays = db.pragma('table_info(short_day_requests)').some(c => c.name === 'start_time' && c.notnull);
+const shortDaySequence = legacyShortDays ? db.prepare("SELECT seq FROM sqlite_sequence WHERE name='short_day_requests'").get()?.seq : null;
+if (legacyShortDays) db.exec('ALTER TABLE short_day_requests RENAME TO short_day_requests_legacy');
 db.exec(`CREATE TABLE IF NOT EXISTS short_day_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
   date TEXT NOT NULL,
-  start_time TEXT NOT NULL,
+  start_time TEXT,
   timezone TEXT NOT NULL,
-  start_ts INTEGER NOT NULL,
-  minutes INTEGER NOT NULL CHECK(minutes BETWEEN 1 AND 120),
+  start_ts INTEGER,
+  minutes INTEGER,
   reason TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','APPROVED','REJECTED','CANCELLED')),
   created_ts INTEGER NOT NULL,
   decided_by INTEGER REFERENCES users(id),
   decided_ts INTEGER,
-  admin_note TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_short_day_employee_date ON short_day_requests(user_id,date);`);
+  admin_note TEXT NOT NULL DEFAULT '',
+  CHECK (
+    (start_time IS NOT NULL AND start_ts IS NOT NULL AND minutes IS NOT NULL AND minutes BETWEEN 1 AND 120)
+    OR (start_time IS NULL AND start_ts IS NULL AND minutes IS NULL AND status='APPROVED' AND decided_by IS NOT NULL)
+  )
+);`);
+if (legacyShortDays) {
+  const columns = 'id,user_id,date,start_time,timezone,start_ts,minutes,reason,status,created_ts,decided_by,decided_ts,admin_note';
+  db.exec(`INSERT INTO short_day_requests (${columns}) SELECT ${columns} FROM short_day_requests_legacy;
+    DROP TABLE short_day_requests_legacy;`);
+  if (shortDaySequence) {
+    const updated = db.prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='short_day_requests'").run(shortDaySequence);
+    if (!updated.changes) db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('short_day_requests',?)").run(shortDaySequence);
+  }
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_short_day_employee_date ON short_day_requests(user_id,date)');
 db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
   user_id INTEGER NOT NULL REFERENCES users(id),
   period_start TEXT NOT NULL,
