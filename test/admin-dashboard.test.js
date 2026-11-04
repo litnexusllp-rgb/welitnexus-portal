@@ -14,13 +14,16 @@ test('employee keeps own performance and own Asana endpoint',async()=>{
  const r=await render(false);assert.ok(r.html.includes('My performance'));assert.ok(!r.html.includes('Needs your attention'));assert.ok(r.requests.includes('/asana/my-tasks'));assert.ok(!r.requests.includes('/asana/admin-work'));assert.ok(!r.requests.includes('/operations'));
  assert.ok(r.requests.includes('/leaves/mine'));assert.ok(r.html.includes('Regular paid leave · month'));assert.ok(r.html.includes('0.5 / 1.5'));assert.ok(r.html.includes('18.5 annual paid days left'));assert.ok(!r.html.includes('Manage employee leave'));
 });
-test('employee workspace retains the team leave management loaders',async()=>{
+test('employee workspace loads secondary team leave views when opened', async () => {
  const source=fs.readFileSync(path.join(__dirname,'../public/js/app.js'),'utf8');
  const view=source.slice(source.indexOf('  function mountTeamLeaves()'),source.indexOf('  async function refreshEmployeeLeaveData()'));
  const loads=[],actions=[];
- const c={$:s=>({addEventListener:()=>actions.push(s)}),openMarkLeaveModal(){},loadAdminLeaves:()=>loads.push('approvals'),loadOnLeave:()=>loads.push('upcoming'),loadLeaveSummary:()=>loads.push('balances')};
- vm.createContext(c);vm.runInContext(view,c);await c.mountTeamLeaves();
- assert.deepEqual(loads,['approvals','upcoming','balances']);assert.deepEqual(actions,['#markLeaveBtn','#flagAbsBtn']);
+ const team = { open: false, addEventListener(event, handler) { this[event] = handler; } };
+ const c={$:s=>s === '#employeeTeamLeave' ? team : {addEventListener:()=>actions.push(s)},openMarkLeaveModal(){},loadOnLeave:()=>loads.push('upcoming'),loadLeaveSummary:()=>loads.push('balances')};
+ vm.createContext(c);vm.runInContext(view,c);c.mountTeamLeaves();
+ assert.deepEqual(loads,[]);assert.deepEqual(actions,['#markLeaveBtn','#flagAbsBtn']);
+ team.open = true; team.toggle();
+ assert.deepEqual(loads,['upcoming','balances']);
 });
 test('failed admin work read is not displayed as no open work',async()=>{
  const r=await render(true,true);assert.ok(r.html.includes('Unable to load work'));assert.ok(!r.html.includes('No open work.'));

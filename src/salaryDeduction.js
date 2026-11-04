@@ -43,33 +43,33 @@ function salaryHistory(userId) {
 }
 
 // Use the actual calendar length of each leave month and its effective salary.
-// A common denominator for 28/29/30/31-day months and half days keeps even
+// A common denominator for 28/29/30/31-day months and quarter days keeps even
 // cross-month requests exact. Round the complete request once to paise.
 function estimateDeduction(userId, leave) {
   const rates = salaryRows.all(userId), groups = new Map(), missing = [];
   const calculated = calculationFor(userId, leave).result;
   if (calculated.pay_status === 'REVIEW') fail('Invalid date range for deduction estimate.');
-  const denominator = 2n * 28n * 29n * 30n * 31n;
+  const denominator = 4n * 28n * 29n * 30n * 31n;
   let numerator = 0n, units = 0;
   for (const line of calculated.date_lines) {
     const iso = line.date, date = DateTime.fromISO(iso, { zone: ZONE });
     if (line.unpaid_days) {
-      const dayUnits = line.unpaid_days * 2;
+      const dayUnits = line.unpaid_days * 4;
       units += dayUnits;
       const rate = rates.find(rate => rate.effective_from <= iso);
       if (!rate) missing.push(iso);
       else {
         const month = iso.slice(0, 7), key = `${month}:${rate.id}`;
-        if (!groups.has(key)) groups.set(key, { month, divisor: date.daysInMonth, effective_from: rate.effective_from, monthly_gross_paise: rate.monthly_gross_paise, unpaid_half_day_units: 0, dates: [] });
-        const group = groups.get(key); group.unpaid_half_day_units += dayUnits; group.dates.push(iso);
-        numerator += BigInt(rate.monthly_gross_paise) * BigInt(dayUnits) * (denominator / BigInt(2 * date.daysInMonth));
+        if (!groups.has(key)) groups.set(key, { month, divisor: date.daysInMonth, effective_from: rate.effective_from, monthly_gross_paise: rate.monthly_gross_paise, unpaid_quarter_day_units: 0, dates: [] });
+        const group = groups.get(key); group.unpaid_quarter_day_units += dayUnits; group.dates.push(iso);
+        numerator += BigInt(rate.monthly_gross_paise) * BigInt(dayUnits) * (denominator / BigInt(4 * date.daysInMonth));
       }
     }
   }
   return { version: VERSION, basis: 'MONTHLY_GROSS', day_basis: 'CALENDAR_MONTH', currency: 'INR', estimated_ts: now().toMillis(),
-    status: missing.length ? 'MISSING_SALARY' : 'AVAILABLE', unpaid_days: units / 2,
+    status: missing.length ? 'MISSING_SALARY' : 'AVAILABLE', unpaid_days: units / 4,
     total_paise: missing.length ? null : Number((numerator + denominator / 2n) / denominator),
-    items: [...groups.values()].map(group => ({ ...group, unpaid_days: group.unpaid_half_day_units / 2 })), missing_salary_dates: missing };
+    items: [...groups.values()].map(group => ({ ...group, unpaid_half_day_units: group.unpaid_quarter_day_units / 2, unpaid_days: group.unpaid_quarter_day_units / 4 })), missing_salary_dates: missing };
 }
 
 function savedDeduction(leave) {

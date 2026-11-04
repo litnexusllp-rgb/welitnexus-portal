@@ -97,14 +97,14 @@ function renderSalarySlip(report, row) {
       }
       amountRow('Salary to pay', money(row.salary_to_pay_paise), true);
       y += 12;
-      paragraph(`Calendar basis: ${report.divisor} days in ${month}. Approved paid leave: ${dayCount(row.paid_leave_days)}. Approved Short Day: ${row.approved_short_day_minutes || 0} minutes (no deduction).`, { color: muted, size: 9 });
+      paragraph(`Calendar basis: ${report.divisor} days in ${month}. Approved paid leave: ${dayCount(row.paid_leave_days)}. Short Day charge: ${row.short_day_paid_days || 0} paid days and ${row.short_day_unpaid_days || 0} unpaid days.`, { color: muted, size: 9 });
       if (row.deduction_lines.length) {
         paragraph('Leave deduction calculation', { size: 11, bold: true });
         for (const item of row.deduction_lines) {
-          paragraph(`${money(item.monthly_gross_paise)} / ${report.divisor} calendar days x ${dayCount(item.unpaid_days)} unpaid\nLeave dates: ${item.date_details ? item.date_details.map(d => `${date(d.date)} (${d.unpaid_days} day; ${d.reasons.includes('FIRST_TWELVE') ? '1st-12th' : d.reasons.includes('MONTHLY_LIMIT') ? 'monthly paid limit' : 'annual entitlement'})`).join(', ') : item.dates.map(date).join(', ')}`, { size: 9, color: muted });
+          paragraph(`${money(item.monthly_gross_paise)} / ${report.divisor} calendar days x ${dayCount(item.unpaid_days)} unpaid\nLeave dates: ${item.date_details ? item.date_details.map(d => `${date(d.date)} (${d.unpaid_days} day; ${d.reasons.includes('SHORT_DAY') ? 'additional Short Day' : d.reasons.includes('FIRST_TWELVE') ? '1st-12th' : d.reasons.includes('MONTHLY_LIMIT') ? 'monthly paid limit' : 'annual entitlement'})`).join(', ') : item.dates.map(date).join(', ')}`, { size: 9, color: muted });
         }
       }
-      paragraph('Leave policy: the 1st-12th is unpaid. Outside it, regular paid leave is limited to 1.5 scheduled days per month; unused monthly allowance does not accumulate. Flexi and birthday/anniversary have separate annual entitlements. Only scheduled working time is charged; weekends and full holidays are excluded, and half holidays have 0.5 working day.', { size:8, color:muted });
+      paragraph('Leave policy: the 1st-12th is unpaid. Outside it, regular paid leave is limited to 1.5 scheduled days per month; unused monthly allowance does not accumulate. Flexi and birthday/anniversary have separate annual entitlements. Each approved Short Day after the first in a month charges 0.25 day. Only scheduled working time is charged; weekends and full holidays are excluded, and half holidays have 0.5 working day.', { size:8, color:muted });
       paragraph('Amounts are based on recorded monthly gross salary and approved unpaid leave. Tax, bonuses and other payroll adjustments are not recorded in this calculation. This slip does not confirm payment.', { size: 8, color: muted });
       const generated = DateTime.fromMillis(report.calculated_ts, { zone: ZONE }).toFormat('d LLL yyyy, HH:mm ZZZZ');
       paragraph('Generated ' + generated + (row.review?.reviewed_ts ? ' | Salary confirmed ' + DateTime.fromMillis(row.review.reviewed_ts, { zone: ZONE }).toFormat('d LLL yyyy') : ''), { size: 8, color: muted });

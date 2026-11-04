@@ -4,10 +4,11 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { DateTime, ZONE, now, todayStr, inclusiveDays } = require('../time');
+const { resolveLateExplanation } = require('../lateExplanations');
 const { employmentStatus } = require('../employment');
 const { notify } = require('../notify');
 const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
-const { CATEGORIES, describeLeave, describeLeaves, syncBalance, syncAllBalancesAsync, normalizeLeave, assertAvailable } = require('../leavePolicy');
+const { CATEGORIES, describeLeave, describeLeaves, balances: leaveBalances, syncBalance, syncAllBalancesAsync, normalizeLeave, assertAvailable } = require('../leavePolicy');
 const { estimateDeduction, savedDeduction } = require('../salaryDeduction');
 
 const router = express.Router();
@@ -48,8 +49,11 @@ function checkShortDays(userId, leave) {
   }
 }
 
-function employeeLeaveHistory(userId) {
-  const balances = syncBalance(userId), leaves = leavesForUser.all(userId), today = todayStr();
+function employeeLeaveHistory(userId, month) {
+  const current = syncBalance(userId);
+  const balances = require('../requestValidation').month(month) && month !== current.monthly_regular.month
+    ? leaveBalances(userId, month + '-01') : current;
+  const leaves = leavesForUser.all(userId), today = todayStr();
   const activity = { taken_days: 0, upcoming_days: 0, pending_days: 0, pending_requests: 0 };
   for (const leave of leaves) {
     const start = leave.start_date > balances.period.start ? leave.start_date : balances.period.start;
@@ -101,7 +105,7 @@ router.post('/', requireAuth, (req, res) => {
 // My leave history + balance.
 router.get('/mine', requireAuth, (req, res) => {
   if (req.user.role === 'ADMIN') return personalLeaveUnavailable(res);
-  res.json(employeeLeaveHistory(req.user.id));
+  res.json(employeeLeaveHistory(req.user.id, req.query.month));
 });
 
 // Employee cancels their own pending request.
@@ -152,6 +156,9 @@ router.post('/admin', requireAdmin, (req, res) => {
       }
       assertAvailable(user.id, leave);
       leaveId = insertApprovedLeave.run({ ...leave, user_id: user.id, decided_by: req.user.id, decided_ts: now().toMillis(), created_ts: now().toMillis(), deduction_quote_json: JSON.stringify(estimateDeduction(user.id, leave)) }).lastInsertRowid;
+      if (req.body.replace_auto_absence === true && leave.start_date === leave.end_date) {
+        resolveLateExplanation(user.id, leave.start_date, req.user.id, leave.kind === 'HALF' ? 'HALF_DAY' : 'LEAVE');
+      }
       syncBalance(user.id);
     }).immediate();
   } catch (e) { return fail(res, e); }
@@ -271,7 +278,7 @@ router.get('/summary', requireAdmin, require('../asyncRoute')(async (_req, res) 
 router.get('/for/:userId', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const user = getUser.get(Number(req.params.userId));
   if (!user) return res.status(404).json({ error: 'Employee not found' });
-  res.json(employeeLeaveHistory(user.id));
+  res.json(employeeLeaveHistory(user.id, req.query.month));
 });
 
 // ADMIN: approve / reject. Deducts balance on approval.

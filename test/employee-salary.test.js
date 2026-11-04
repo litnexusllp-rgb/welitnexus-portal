@@ -88,7 +88,10 @@ test('employee salary self-service and PDF slips enforce ownership and review st
   await t.test('employee view is escaped and read-only, with server-provided slip availability',()=>{
     const context={window:{}};vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/js/salaries.js'),'utf8'),context);
     const data=report();data.rows[0].name='<img onerror=x>';const html=context.window.Salaries.reportHtml(data,{readOnly:true});
-    assert.match(html,/Download salary slip \(PDF\)/);assert.match(html,/31 calendar days/);assert.match(html,/₹30,500/);assert.doesNotMatch(html,/<form|data-salary-form|Confirm salary|Reopen review|Edit review|<img|undefined/);
+    assert.match(html,/Download salary slip \(PDF\)/);
+    assert.match(html,/Calendar days in month<\/th><td>31<\/td>/);
+    assert.match(html,/₹30,500/);
+    assert.doesNotMatch(html,/<form|data-salary-form|Confirm salary|Reopen review|Edit review|<img|undefined/);
     const provisional=context.window.Salaries.reportHtml(report(employee,'2026-11'),{readOnly:true});assert.match(provisional,/month has ended/);assert.doesNotMatch(provisional,/download>/);
   });
 });

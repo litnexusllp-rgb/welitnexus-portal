@@ -12,6 +12,9 @@ const { requireAdmin, requireAuth } = require('../auth');
 const { now, attendanceToday, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const { halfHolidayStatus, addAttendanceTotals } = require('../holidayAttendance');
+const { day: validDay } = require('../requestValidation');
+const { notifyAdmins } = require('../notify');
+const { approveLateExplanation } = require('../lateExplanations');
 const { employmentStatus, overlapsEmployment } = require('../employment');
 
 const { settings, daySettings, liveForDay, shiftInstant } = require('../attendanceSession');
@@ -44,7 +47,7 @@ const approvedLeavesOverlapping = db.prepare(
 const holidaysBetween = db.prepare(`SELECT date, name, duration FROM holidays WHERE date >= ? AND date <= ?`);
 const workingDaysBetween = db.prepare(`SELECT id, date FROM working_days WHERE date >= ? AND date <= ?`);
 const lateNormalOverridesBetween = db.prepare(
-  `SELECT day FROM attendance_day_overrides WHERE user_id = ? AND ignore_late = 1 AND day >= ? AND day <= ?`
+  `SELECT day, full_day FROM attendance_day_overrides WHERE user_id = ? AND ignore_late = 1 AND day >= ? AND day <= ?`
 );
 
 function eachDay(start, end) {
@@ -100,10 +103,13 @@ function buildAttendanceReport(user, req) {
       leaveByDay[d] = l;
     }
   }
-  const lateNormalDays = new Set(lateNormalOverridesBetween.all(user.id, start, end).map((r) => r.day));
+  const lateNormalDays = new Map(lateNormalOverridesBetween.all(user.id, start, end).map(row => [row.day, row]));
   const shortDays = db.prepare(`SELECT date, SUM(minutes) AS minutes FROM short_day_requests
     WHERE user_id=? AND status='APPROVED' AND date BETWEEN ? AND ? GROUP BY date`).all(user.id, start, end);
   const shortMinutesByDay = new Map(shortDays.map(row => [row.date, row.minutes]));
+  const explanations = db.prepare(`SELECT id, day, reason, minutes_late, status, resolution FROM late_explanations
+    WHERE user_id=? AND day BETWEEN ? AND ?`).all(user.id, start, end);
+  const explanationByDay = new Map(explanations.map(row => [row.day, row]));
 
   const totals = { present: 0, leave: 0, absent: 0, holiday: 0, weekend: 0, workedMinutes: 0 };
   const rows = eachDay(start, end).map((day) => {
@@ -121,14 +127,15 @@ function buildAttendanceReport(user, req) {
     const expectedStart = shiftInstant(day, c);
     const configWarning = expectedStart === null && s?.firstIn ? 'Scheduled start falls in a daylight-saving transition; review punctuality.' : null;
     const lateOverride = lateNormalDays.has(day);
-    if (!lateOverride && !excluded && s && s.firstIn != null && status !== 'HALF' && !halfHoliday && expectedStart !== null) {
+    if (!lateOverride && !excluded && s && s.firstIn != null && !leave && !halfHoliday && expectedStart !== null) {
       const cutoff = expectedStart + SHIFT_GRACE_MIN * 60000;
       if (s.firstIn > cutoff) { late = true; minutesLate = Math.round((s.firstIn - cutoff) / 60000); }
     }
     // Forgot to clock out: a finished day that still ends IN or on BREAK. The
     // recorded hours are incomplete, so flag that rather than calling it short.
     const noClockOut = !!(!excluded && s && s.firstIn != null && liveForDay(user, day) === null && day < localToday && s.state !== 'OUT');
-    const short = !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && s.state === 'OUT' && day < localToday && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
+    const fullDayOverride = lateNormalDays.get(day)?.full_day === 1 && !leave && !shortMinutesByDay.get(day);
+    const short = !fullDayOverride && !noClockOut && ['PRESENT', 'HALF_HOLIDAY_PRESENT'].includes(status) && s && s.state === 'OUT' && day < localToday && s.workedMinutes < FULL_DAY_MIN * (halfHoliday ? 0.5 : 1);
     return {
       day, timezone: c.timezone, shiftStart: c.shift_start,
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
@@ -148,6 +155,8 @@ function buildAttendanceReport(user, req) {
       late,
       minutesLate,
       lateOverride,
+      fullDayOverride,
+      lateExplanation: explanationByDay.get(day) || null,
       short,
       noClockOut,
     };
@@ -155,8 +164,46 @@ function buildAttendanceReport(user, req) {
   return { user, today: attendanceToday(settings(user)), timezone: settings(user).timezone, start, end, rows, totals, needsReview: rows.some(r => r.attendanceError || r.employmentWarning || r.configWarning || r.noClockOut), shiftStart: fmtShift(shift), graceMin: SHIFT_GRACE_MIN, fullDayMinutes: FULL_DAY_MIN };
 }
 
+router.get('/late-explanations/pending', requireAdmin, (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const requests = db.prepare(`SELECT e.id,e.user_id,e.day,e.minutes_late,u.name
+    FROM late_explanations e JOIN users u ON u.id=e.user_id
+    WHERE e.status='PENDING' ORDER BY e.created_ts,e.id`).all();
+  res.json({ requests });
+});
+
+router.post('/late-explanations', requireAuth, (req, res) => {
+  const { day } = req.body;
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+  if (req.user.role !== 'EMPLOYEE') return res.status(403).json({ error: 'Employees submit explanations for their own dates.' });
+  if (!validDay(day) || !reason || reason.length > 500) return res.status(400).json({ error: 'Choose a date and enter a reason of up to 500 characters.' });
+  const result = db.transaction(() => {
+    const user = getUser.get(req.user.id);
+    const row = buildAttendanceReport(user, { user: req.user, query: { start: day, end: day } }).rows[0];
+    if (row.lateExplanation) return { status: 409, error: 'An explanation already exists for this date.' };
+    if (!row.late || row.leaveKind || row.approvedShortMinutes) {
+      return { status: 409, error: 'This date has no unresolved late arrival to explain.' };
+    }
+    db.prepare('INSERT INTO late_explanations (user_id,day,reason,minutes_late,created_ts) VALUES(?,?,?,?,?)')
+      .run(user.id, day, reason, row.minutesLate, now().toMillis());
+    notifyAdmins({ title: 'Late explanation to review', body: `${user.name} · ${day}`, link: 'late-requests' });
+    return { status: 201, ok: true };
+  }).immediate();
+  res.status(result.status).json(result.error ? { error: result.error } : { ok: true });
+});
+
+router.post('/late-explanations/:id/approve', requireAdmin, require('../requestValidation').validateParams, (req, res) => {
+  const approved = db.transaction(() => {
+    const request = db.prepare('SELECT user_id,day FROM late_explanations WHERE id=?').get(Number(req.params.id));
+    return request && approveLateExplanation(request.user_id, request.day, req.user.id);
+  }).immediate();
+  if (!approved) return res.status(409).json({ error: 'This explanation has already been handled or is no longer available.' });
+  res.json({ ok: true });
+});
+
 // ADMIN: any employee's day-by-day report.
 router.get('/attendance', requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const user = getUser.get(Number(req.query.user_id));
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   const data = buildAttendanceReport(user, req);
@@ -167,6 +214,7 @@ router.get('/attendance', requireAdmin, (req, res) => {
 // Day-by-day attendance for the personal calendar. Employees always get their
 // own; admins may pass ?user_id= to review any employee.
 router.get('/my-attendance', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const asked = Number(req.query.user_id);
   const targetId = (req.user.role === 'ADMIN' && asked) ? asked : req.user.id;
   const user = getUser.get(targetId);

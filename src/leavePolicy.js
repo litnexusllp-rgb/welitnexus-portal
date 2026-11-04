@@ -3,17 +3,20 @@
 const { db } = require('./db');
 const { DateTime, ZONE, now, todayStr, inclusiveDays } = require('./time');
 
-const { EFFECTIVE, ENTITLEMENT, MONTHLY_REGULAR, periodFor: leavePeriod, calendarFrom, scheduledDays, calculateLeaves } = require('./leaveCalculation');
+const { EFFECTIVE, ENTITLEMENT, MONTHLY_REGULAR, periodFor: leavePeriod, calendarFrom, scheduledDays, shortDayCharges, calculateLeaves } = require('./leaveCalculation');
 const CATEGORIES = Object.freeze({ REGULAR: 'Regular leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' });
 const getUser = db.prepare('SELECT id, leave_balance FROM users WHERE id=?');
 const getLeaves = db.prepare("SELECT * FROM leaves WHERE user_id=? AND status IN ('PENDING','APPROVED') ORDER BY start_date,id");
+const getShortDays = db.prepare("SELECT id,user_id,date,status FROM short_day_requests WHERE user_id=? AND status='APPROVED' AND date>=?");
 const periodFor = (date = todayStr()) => leavePeriod(date);
 
 function calculationFor(userId, candidate = null, excludeRequestId = null) {
   const leaves = getLeaves.all(userId).filter(l => l.id !== excludeRequestId && (!candidate?.id || l.id !== candidate.id));
   const proposed = candidate ? { ...candidate, user_id:userId, status:candidate.status || 'PENDING' } : null;
   if (proposed) leaves.push(proposed);
-  const ledger = calculateLeaves(leaves, calendarFrom(db));
+  const calendar = calendarFrom(db);
+  leaves.push(...shortDayCharges(getShortDays.all(userId, EFFECTIVE), calendar));
+  const ledger = calculateLeaves(leaves, calendar);
   return { leaves, ledger, proposed, result: proposed ? ledger.get(proposed) : null };
 }
 
@@ -41,7 +44,7 @@ function describeLeaves(leaves) {
   for (const userId of new Set(leaves.map(l => l.user_id))) {
     const active = getLeaves.all(userId), ids = new Set(active.map(l => l.id));
     const all = [...active, ...leaves.filter(l => l.user_id === userId && !ids.has(l.id))];
-    const ledger = calculateLeaves(all, calendar);
+    const ledger = calculateLeaves([...all, ...shortDayCharges(getShortDays.all(userId, EFFECTIVE), calendar)], calendar);
     groups.set(userId, new Map([...ledger].map(([l,result]) => [l.id,result])));
   }
   return leaves.map(l => ({ ...l, ...groups.get(l.user_id).get(l.id), policy_notes:policyNotes(l, calendar) }));
@@ -53,12 +56,17 @@ function balances(userId, date = todayStr(), excludeRequestId = null) {
   const buckets = Object.fromEntries(Object.entries(ENTITLEMENT).map(([key, entitlement]) => [key, { entitlement, used: 0, pending: 0, remaining: entitlement, available: entitlement }]));
   const { leaves, ledger } = calculationFor(userId, null, excludeRequestId);
   let monthUsed = 0, monthPending = 0;
+  const short_day = { paid_days: 0, unpaid_days: 0 };
   for (const leave of leaves) {
     if (leave.id === excludeRequestId) continue;
     const calculated = ledger.get(leave);
     for (const line of calculated.date_lines) {
       if (line.date.slice(0,7) === date.slice(0,7) && calculated.category === 'REGULAR') {
         if (leave.status === 'APPROVED') monthUsed += line.paid_days; else monthPending += line.paid_days;
+        if (leave.source === 'SHORT_DAY') {
+          short_day.paid_days += line.paid_days;
+          short_day.unpaid_days += line.unpaid_days;
+        }
       }
     }
     for (const c of calculated.charges) {
@@ -68,7 +76,7 @@ function balances(userId, date = todayStr(), excludeRequestId = null) {
   }
   for (const b of Object.values(buckets)) { b.remaining = b.entitlement - b.used; b.available = b.remaining - b.pending; }
   const total = key => Object.values(buckets).reduce((n, b) => n + b[key], 0);
-  return { monthly_regular: { month:date.slice(0,7), limit:MONTHLY_REGULAR, used:monthUsed, pending:monthPending, remaining:Math.max(0,MONTHLY_REGULAR-monthUsed), available:Math.max(0,MONTHLY_REGULAR-monthUsed-monthPending) }, period, buckets, balance: total('remaining'), pending: total('pending'), available: total('available'), entitlement: 20, effective: EFFECTIVE };
+  return { short_day, monthly_regular: { month:date.slice(0,7), limit:MONTHLY_REGULAR, used:monthUsed, pending:monthPending, remaining:Math.max(0,MONTHLY_REGULAR-monthUsed), available:Math.max(0,MONTHLY_REGULAR-monthUsed-monthPending) }, period, buckets, balance: total('remaining'), pending: total('pending'), available: total('available'), entitlement: 20, effective: EFFECTIVE };
 }
 
 // Rebuild the compatibility total from approved records, never from repeated

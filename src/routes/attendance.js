@@ -4,6 +4,9 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const { now, DateTime, attendanceToday } = require('../time');
+const { day: validDay } = require('../requestValidation');
+const { calendarFrom, scheduledDays } = require('../leaveCalculation');
+const { employmentStatus } = require('../employment');
 const { summarize } = require('../compute');
 const { changeAttendance, attendanceError } = require('../attendanceValidation');
 
@@ -28,16 +31,9 @@ const eventsForUserBetween = db.prepare(
   `SELECT * FROM events WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY ts ASC, id ASC`
 );
 const getLateNormalOverride = db.prepare(
-  `SELECT ignore_late FROM attendance_day_overrides WHERE user_id = ? AND day = ?`
+  `SELECT ignore_late, full_day FROM attendance_day_overrides WHERE user_id = ? AND day = ?`
 );
-const setLateNormalOverride = db.prepare(`
-  INSERT INTO attendance_day_overrides (user_id, day, ignore_late, updated_by, updated_ts)
-  VALUES (?, ?, ?, ?, ?)
-  ON CONFLICT(user_id, day) DO UPDATE SET
-    ignore_late = excluded.ignore_late,
-    updated_by = excluded.updated_by,
-    updated_ts = excluded.updated_ts
-`);
+const { setLateNormalOverride, markFullDay } = require('../lateExplanations');
 
 // GET the current attendance-day status for the signed-in user. "day" here is
 // the shift day (cutover-adjusted), so an overnight shift stays one day.
@@ -122,8 +118,9 @@ router.get('/admin/day', requireAdmin, (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day (yyyy-mm-dd) required' });
   const events = eventsForUserDay.all(user.id, day);
   const summary = summarize(events, liveForDay(user, day));
-  const lateNormal = getLateNormalOverride.get(user.id, day)?.ignore_late === 1;
-  res.json({ user, day, ...daySettings(user, day), events: withTimes(events, daySettings(user, day)), lateNormal, ...summary });
+  const override = getLateNormalOverride.get(user.id, day);
+  res.json({ user, day, ...daySettings(user, day), events: withTimes(events, daySettings(user, day)),
+    lateNormal: override?.ignore_late === 1, fullDay: override?.full_day === 1, ...summary });
 });
 
 // ADMIN: mark a day's late clock-in as normal for punctuality, or restore the
@@ -136,6 +133,26 @@ router.post('/admin/late-normal', requireAdmin, (req, res) => {
   if (typeof req.body.normal !== 'boolean') return res.status(400).json({ error: 'normal must be true or false' });
   setLateNormalOverride.run(user.id, day, req.body.normal ? 1 : 0, req.user.id, now().toMillis());
   res.json({ user_id: user.id, day, lateNormal: req.body.normal });
+});
+
+router.post('/admin/full-day', requireAdmin, (req, res) => {
+  const { day } = req.body;
+  if (!validDay(day)) return res.status(400).json({ error: 'Choose a valid date.' });
+  const result = db.transaction(() => {
+    const user = db.prepare("SELECT * FROM users WHERE id=? AND role='EMPLOYEE'").get(Number(req.body.user_id));
+    if (!user) return { status: 404, error: 'Employee not found.' };
+    const punches = eventsForUserDay.all(user.id, day);
+    if (employmentStatus(user, day) === 'NOT_EMPLOYED' || day > attendanceToday(daySettings(user, day))
+      || !scheduledDays(day, calendarFrom(db)) || !summarize(punches, null).firstIn) {
+      return { status: 409, error: 'Full day requires a clock-in on a scheduled workday.' };
+    }
+    const leave = db.prepare("SELECT 1 FROM leaves WHERE user_id=? AND status='APPROVED' AND start_date<=? AND end_date>=?").get(user.id, day, day);
+    const short = db.prepare("SELECT 1 FROM short_day_requests WHERE user_id=? AND status='APPROVED' AND date=?").get(user.id, day);
+    if (leave || short) return { status: 409, error: 'Approved leave or Short Day already covers this date.' };
+    markFullDay(user.id, day, req.user.id);
+    return { status: 200, ok: true };
+  }).immediate();
+  res.status(result.status).json(result.error ? { error: result.error } : { ok: true });
 });
 
 // ADMIN: add a punch for an employee.

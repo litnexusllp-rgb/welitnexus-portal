@@ -83,13 +83,21 @@ async function buildKpi(req) {
     const k = `${e.user_id}|${e.day}`;
     (byUserDay[k] = byUserDay[k] || []).push(e);
   }
-  // Approved half days are exempt from punctuality — arriving later (or leaving
-  // early) is exactly what was approved, so they count neither for nor against.
-  const halfDays = new Set();
+  // Approved leave dates are excluded from punctuality.
+  const leaveDates = new Set();
   const halfHolidays = new Set(db.prepare("SELECT date FROM holidays WHERE duration='HALF' AND date>=? AND date<=?").all(start, end).map(h => h.date));
   const lateNormalDays = new Set(lateNormalOverridesBetween.all(start, end).map((r) => `${r.user_id}|${r.day}`));
   for (const l of approvedLeaves.all(end, start)) {
-    if (l.kind === 'HALF') halfDays.add(`${l.user_id}|${l.start_date}`);
+    if (l.kind === 'HALF') {
+      leaveDates.add(`${l.user_id}|${l.start_date}`);
+      continue;
+    }
+    let date = DateTime.fromISO(l.start_date > start ? l.start_date : start, { zone: ZONE });
+    const last = l.end_date < end ? l.end_date : end;
+    while (date.isValid && date.toISODate() <= last) {
+      leaveDates.add(`${l.user_id}|${date.toISODate()}`);
+      date = date.plus({ days: 1 });
+    }
   }
   const attendance = {}; // user_id -> { days, minutes, present, onTime }
   for (const k of Object.keys(byUserDay)) {
@@ -102,7 +110,7 @@ async function buildKpi(req) {
     a.days += halfHolidays.has(day) ? 0.5 : 1;
     a.minutes += s.workedMinutes;
     // Punctuality: was the first clock-in by THIS employee's shift start (+ grace)?
-    if (s.firstIn != null && !halfDays.has(k) && !halfHolidays.has(day)) {
+    if (s.firstIn != null && !leaveDates.has(k) && !halfHolidays.has(day)) {
       const start = shiftInstant(day, daySettings(employee, day));
       if (start === null && !lateNormalDays.has(k)) continue; // ambiguous schedule is excluded from punctuality
       a.present += 1;

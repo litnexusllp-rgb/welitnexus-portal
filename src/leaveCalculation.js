@@ -26,6 +26,28 @@ function scheduledDays(iso, calendar) {
   return calendar.holidays.get(iso) === 'HALF' ? 0.5 : 1;
 }
 
+// The first approved Short Day date each month is free. Multiple approved
+// time slots on one date are one Short Day.
+function shortDayCharges(records, calendar) {
+  const seen = new Set(), dates = new Set(), charges = [];
+  const approved = records.filter(row => row.status === 'APPROVED' && row.date >= EFFECTIVE)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  for (const row of approved) {
+    const key = `${row.user_id}:${row.date}`;
+    if (dates.has(key) || !scheduledDays(row.date, calendar)) continue;
+    dates.add(key);
+    const month = key.slice(0, -3);
+    if (seen.has(month)) {
+      charges.push({
+        id: -row.id, user_id: row.user_id, start_date: row.date, end_date: row.date,
+        kind: 'QUARTER', category: 'REGULAR', status: 'APPROVED', source: 'SHORT_DAY',
+      });
+    }
+    seen.add(month);
+  }
+  return charges;
+}
+
 // Allocate approved records first, then reserve pending credit. Within each
 // status use leave date and id, so split requests cannot bypass a monthly cap.
 // Every consumer (balances, request previews and payroll) uses this ledger.
@@ -38,11 +60,12 @@ function calculateLeaves(leaves, calendar) {
     let paid = 0, unpaid = 0, nonWorking = 0;
     let date = DateTime.fromISO(leave.start_date, { zone: ZONE });
     const end = DateTime.fromISO(leave.end_date, { zone: ZONE });
-    const valid = date.isValid && end.isValid && end >= date && end.diff(date, 'days').days < 366 && ['FULL','HALF'].includes(leave.kind);
+    const valid = date.isValid && end.isValid && end >= date && end.diff(date, 'days').days < 366 &&
+      (['FULL','HALF'].includes(leave.kind) || (leave.kind === 'QUARTER' && leave.source === 'SHORT_DAY' && date.equals(end)));
     if (!valid) { results.set(leave, { ...leave, category, paid_days:0, unpaid_days:0, non_working_days:0, pay_status:'REVIEW', charges:[], date_lines:[] }); continue; }
     const counted = ['APPROVED','PENDING'].includes(leave.status);
     while (date <= end) {
-      const iso = date.toISODate(), requested = leave.kind === 'HALF' ? 0.5 : 1, period = periodFor(iso).start;
+      const iso = date.toISODate(), requested = leave.kind === 'QUARTER' ? 0.25 : leave.kind === 'HALF' ? 0.5 : 1, period = periodFor(iso).start;
       const scheduled = iso < EFFECTIVE ? requested : Math.min(requested, scheduledDays(iso, calendar));
       const month = iso.slice(0,7), annualKey = `${leave.user_id}:${period}:${bucket}`, monthlyKey = `${leave.user_id}:${month}`;
       let paidDays = scheduled, reason = null;
@@ -74,4 +97,4 @@ function calculateLeaves(leaves, calendar) {
   return results;
 }
 
-module.exports = { EFFECTIVE, VERSION, ENTITLEMENT, MONTHLY_REGULAR, bucketFor, periodFor, calendarFrom, scheduledDays, calculateLeaves };
+module.exports = { EFFECTIVE, VERSION, ENTITLEMENT, MONTHLY_REGULAR, bucketFor, periodFor, calendarFrom, scheduledDays, shortDayCharges, calculateLeaves };
