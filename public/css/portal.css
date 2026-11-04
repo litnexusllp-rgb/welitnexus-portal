@@ -46,6 +46,10 @@ button { font-family: var(--font); cursor: pointer; }
 .nav-item.active { background: var(--teal); color: var(--white); }
 .nav-item .ico { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .nav-item .ico svg { width: 19px; height: 19px; }
+body.is-admin .staff-more,
+body:not(.is-admin) #nav:not(.more-open) .nav-secondary { display: none; }
+body:not(.is-admin) #nav .nav-secondary { padding-left: 24px; }
+#nav:has(.nav-secondary[aria-current="page"]) .staff-more { background: rgba(255,255,255,.12); color: var(--white); }
 
 /* Visible keyboard focus on interactive elements (accessibility). */
 .btn:focus-visible, .nav-item:focus-visible, .logout:focus-visible,
@@ -509,6 +513,13 @@ tr.drag-over td { border-top: 2px solid var(--teal); }
      vertically and the sidebar swallows the top of the screen. */
   #nav { display: flex; flex-direction: row; gap: 6px; }
   .nav-item { white-space: nowrap; width: auto; flex-shrink: 0; margin-bottom: 0; }
+  body:not(.is-admin) .sidebar { display: grid; grid-template-columns: minmax(0,1fr) auto; }
+  body:not(.is-admin) .sidebar .bell { grid-area: 1 / 2; }
+  body:not(.is-admin) #nav { grid-column: 1 / -1; flex-wrap: wrap; gap: 4px; }
+  body:not(.is-admin) #nav .nav-item { flex: 1 0 auto; justify-content: center; padding: 8px 4px; min-height: 44px; font-size: .78rem; }
+  body:not(.is-admin) #nav .nav-item .ico { display: none; }
+  body:not(.is-admin) #nav.more-open::before { content: ""; flex-basis: 100%; order: 1; }
+  body:not(.is-admin) #nav .nav-secondary { flex-basis: calc(50% - 2px); order: 2; }
   .main { max-height: none; padding: 20px 18px; }
   .form-row { grid-template-columns: 1fr; }
 }

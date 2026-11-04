@@ -343,12 +343,23 @@
 
   // ---------- navigation ----------
   let employeeSection = 'employeePerformance';
+  const staffMore = $('#staffMore');
+  function showStaffMore(open) {
+    $('#nav').classList.toggle('more-open', open);
+    staffMore.setAttribute('aria-expanded', String(open));
+  }
+  staffMore?.addEventListener('click', () => showStaffMore(staffMore.getAttribute('aria-expanded') === 'false'));
+  staffMore?.parentElement.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || staffMore.getAttribute('aria-expanded') !== 'true') return;
+    showStaffMore(false);
+    staffMore.focus();
+  });
   function viewFromAddress() {
     return window.location.hash.replace(/^#\//, '') || 'dashboard';
   }
 
   $('#nav').addEventListener('click', (e) => {
-    const link = e.target.closest('.nav-item');
+    const link = e.target.closest('a.nav-item');
     // Let the browser handle Command/Ctrl-click, Shift-click and middle-click.
     if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
@@ -360,6 +371,10 @@
 
   function navigate(view, fromAddress = false) {
     if (!ME) return;
+    if (staffMore?.getAttribute('aria-expanded') === 'true') {
+      if (document.activeElement?.matches('#nav .nav-secondary')) staffMore.focus();
+      showStaffMore(false);
+    }
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
     const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'late-requests'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
@@ -442,28 +457,22 @@
   };
 
   // ---------- Dashboard ----------
-  VIEWS.dashboard = async () => {
+  VIEWS.dashboard = () => {
     setMain(`Hi ${ME.name.split(' ')[0]} 👋`, new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      `<div class="cards" id="dashCards"></div><div id="dashLeaveBalances"></div><div id="dashAdmin"></div>`);
-    try {
-      const [status, mine, tasks] = await Promise.all([
-        api.get('/attendance/status'),
-        isAdmin() ? null : api.get('/leaves/mine'),
-        api.get('/tasks/mine'),
-      ]);
-      const pending = mine?.leaves.filter((l) => l.status === 'PENDING').length || 0;
-      const openTasks = tasks.tasks.filter((t) => t.status !== 'DONE').length;
-      $('#dashCards').innerHTML = `
-        ${statCard('Current session', `${badge(status.state)}`, 'value small')}
-        ${statCard('Worked this session day', fmtMins(status.workedMinutes), 'value small')}
-        ${statCard('Break this session day', fmtMins(status.breakMinutes), 'value small')}
-        ${mine ? statCard('Regular paid leave this month', `${mine.balances.monthly_regular.available} / 1.5 days`, 'value small') : ''}
-        ${statCard('Open tasks', openTasks, 'value')}
-        ${mine ? statCard('Pending leave requests', pending, 'value') : ''}`;
-      $('#dashLeaveBalances').innerHTML = mine ? leaveBalanceMarkup(mine.balances) : '';
-    } catch (e) { toast(e.message, true); }
-
-    if (isAdmin()) startLiveAttendance('dashAdmin', true);
+      '<div id="dashControlCenter" aria-busy="true"><p>Loading dashboard…</p></div><div id="dashLeaveBalances"></div><div id="dashAdmin"></div>');
+    const leaveHost = $('#dashLeaveBalances');
+    // Share the initial reads between the summary and live admin panel.
+    // The live panel's later refreshes read fresh data.
+    const requests = new Map();
+    const read = (path) => {
+      if (!requests.has(path)) requests.set(path, api.get(path));
+      return requests.get(path);
+    };
+    window.Dashboard.render($('#dashControlCenter'), {
+      read, admin: isAdmin(), adminHost: $('#dashAdmin'),
+      showLeaveBalances: (balances) => { leaveHost.innerHTML = leaveBalanceMarkup(balances); },
+    });
+    if (isAdmin()) startLiveAttendance('dashAdmin', true, read);
   };
 
   // h m s from milliseconds, e.g. "2h 14m 06s".
@@ -485,12 +494,13 @@
 
   // Live team-attendance panel, reused by the Dashboard and the Clock page.
   // hostId: element to render into. withApprovals: also show pending leaves.
-  async function renderLiveAttendance(hostId, withApprovals) {
+  async function renderLiveAttendance(hostId, withApprovals, read = (path) => api.get(path)) {
     const host = $('#' + hostId); if (!host) return; // navigated away
     try {
-      const reqs = [api.get('/attendance/today')];
-      if (withApprovals) { reqs.push(api.get('/leaves/pending')); reqs.push(api.get('/punch-requests/pending')); reqs.push(api.get('/reports/missing-clockouts?days=7')); }
+      const reqs = [read('/attendance/today')];
+      if (withApprovals) reqs.push(read('/leaves/pending'), read('/punch-requests/pending'), read('/reports/missing-clockouts?days=7'));
       const [today, pend, punchPend, missing] = await Promise.all(reqs);
+      if (!host.isConnected) return;
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
@@ -552,12 +562,12 @@
         }));
       }
       tickDashTimers(); // paint the first tick immediately
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { if (host.isConnected) toast(e.message, true); }
   }
 
   // Start the live panel in a host element with a 1s tick and a fast poll.
-  function startLiveAttendance(hostId, withApprovals) {
-    renderLiveAttendance(hostId, withApprovals);
+  function startLiveAttendance(hostId, withApprovals, read) {
+    renderLiveAttendance(hostId, withApprovals, read);
     dashTimers.push(setInterval(tickDashTimers, 1000));
     dashTimers.push(setInterval(() => renderLiveAttendance(hostId, withApprovals), 10000));
   }
