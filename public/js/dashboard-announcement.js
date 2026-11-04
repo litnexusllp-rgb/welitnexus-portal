@@ -5,16 +5,9 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = () => new Date().toLocaleDateString('en-CA');
   const month = () => today().slice(0, 7);
-  const isAdmin = () => document.body.classList.contains('is-admin');
-  const isDashboard = () => document.querySelector('#nav .nav-item.active')?.dataset.view === 'dashboard';
   const fmtMins = (m) => `${Math.floor((Number(m) || 0) / 60)}h ${(Number(m) || 0) % 60}m`;
   const fmtDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))
     ? new Date(`${s}T00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—';
-  const safe = async (path) => { try { return await api.get(path); } catch (_e) { return null; } };
-
-  function go(view) {
-    document.querySelector(`#nav [data-view="${view}"]`)?.click();
-  }
 
   function injectStyles() {
     if (document.getElementById('dashboardControlStyles')) return;
@@ -61,32 +54,20 @@
     }).join('');
   }
 
-  async function renderDashboard() {
-    if (!isDashboard()) return;
-    const main = document.getElementById('main');
-    const oldCards = main?.querySelector('#dashCards');
-    const adminHost = main?.querySelector('#dashAdmin');
-    if (!main || !oldCards || main.querySelector('#dashControlCenter')) return;
-
+  async function renderDashboard(root, { read, admin, adminHost, showLeaveBalances }) {
     injectStyles();
-    oldCards.style.display = 'none';
-
-    const root = document.createElement('div');
-    root.id = 'dashControlCenter';
-    root.innerHTML = '<div class="dc-empty">Loading dashboard…</div>';
-    oldCards.parentNode.insertBefore(root, oldCards.nextSibling);
-
-    const admin = isAdmin();
+    const safe = async (path) => { try { return await read(path); } catch (_e) { return null; } };
     const baseReqs = [
       safe('/attendance/status'), admin ? null : safe('/leaves/mine'), admin ? safe('/operations') : safe(`/kpi/me?month=${month()}`),
-      safe('/holidays'), safe('/announcements'), safe('/asana/status'), safe('/tasks/mine')
+      safe('/holidays'), safe('/announcements'), safe('/asana/status'), admin ? null : safe('/tasks/mine')
     ];
     const [status, leaves, kpiData, holidayData, announcementData, asanaStatus, portalTaskData] = await Promise.all(baseReqs);
-    if (!isDashboard()) return;
+    if (!root.isConnected) return;
+    if (leaves?.balances) showLeaveBalances(leaves.balances);
 
     let asanaTaskData = null;
     if (admin || asanaStatus?.enabled) asanaTaskData = await safe(admin ? '/asana/admin-work' : '/asana/my-tasks');
-    if (!isDashboard() || !root.isConnected) return;
+    if (!root.isConnected) return;
     const workUnavailable = (admin || asanaStatus?.enabled) ? !asanaTaskData : !portalTaskData;
     const tasks = normalizeTasks(portalTaskData?.tasks, asanaTaskData?.tasks, (admin || !!asanaStatus?.enabled));
     const k = kpiData?.rows?.[0] || {};
@@ -106,7 +87,7 @@
         ${admin ? '' : `<div class="dc-stat"><div class="k">Regular paid leave · month</div><div class="v">${esc(leaves?.balances?.monthly_regular?.available ?? '—')} / 1.5</div><div class="s">Days available · ${esc(leaves?.balance ?? '—')} annual paid days left${pendingLeave ? ` · ${pendingLeave} request pending` : ''}</div></div>`}
       </div>
 
-      ${a ? `<div class="dc-card" style="margin-bottom:18px"><div class="dc-head"><h2>${Number(a.pinned) === 1 ? '📌 Pinned announcement' : '📣 Latest announcement'}</h2><button class="dc-link" data-go="noticeboard">View all notices</button></div><div class="dc-ann"><div class="dc-ann-title">${esc(a.title)}</div>${a.body ? `<div class="dc-ann-body">${esc(a.body)}</div>` : ''}<div class="dc-small">${esc(a.author || 'LIT Nexus')}${a.created_ts ? ` · ${esc(new Date(a.created_ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}` : ''}</div></div></div>` : ''}
+      ${a ? `<div class="dc-card" style="margin-bottom:18px"><div class="dc-head"><h2>${Number(a.pinned) === 1 ? '📌 Pinned announcement' : '📣 Latest announcement'}</h2><a class="dc-link" href="#/noticeboard">View all notices</a></div><div class="dc-ann"><div class="dc-ann-title">${esc(a.title)}</div>${a.body ? `<div class="dc-ann-body">${esc(a.body)}</div>` : ''}<div class="dc-small">${esc(a.author || 'LIT Nexus')}${a.created_ts ? ` · ${esc(new Date(a.created_ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}` : ''}</div></div></div>` : ''}
 
       <div class="dc-grid">
         <div>
@@ -119,7 +100,7 @@
               <div><strong>${kpiData.asana.counts?.overdue ?? '—'}</strong><span>Overdue team tasks · LIT</span></div>
               <div><strong>${kpiData.asana.counts?.unassigned ?? '—'}</strong><span>Unassigned tasks · LIT</span></div>
             </div><p class="dc-small">Pending approvals from all months. <a href="#/kpi">View team performance</a></p>` : '<div class="dc-empty">Unable to load admin overview. Open Operations to retry.</div>'}
-          </div>` : `          <div class="dc-card dc-section-gap"><div class="dc-head"><h2>This Month</h2><button class="dc-link" data-go="myperf">My performance</button></div>
+          </div>` : `          <div class="dc-card dc-section-gap"><div class="dc-head"><h2>This Month</h2><a class="dc-link" href="#/myperf">My performance</a></div>
             <div class="dc-perf">
               <div><strong>${esc(k.daysPresent ?? 0)}</strong><span>Days present</span></div>
               <div><strong>${k.punctualPct == null ? 'N/A' : `${k.punctualPct}%`}</strong><span>Punctuality</span></div>
@@ -131,27 +112,27 @@
 
         </div>
         <div>
-          <div class="dc-card"><div class="dc-head"><h2>Upcoming</h2><button class="dc-link" data-go="calendar">Holidays</button></div>
+          <div class="dc-card"><div class="dc-head"><h2>Upcoming</h2><a class="dc-link" href="#/calendar">Holidays</a></div>
             <div class="dc-list">
               ${!admin && nextOwnLeave ? `<div class="dc-list-item"><span>My approved leave</span><strong>${esc(nextOwnLeave.start_date === nextOwnLeave.end_date ? fmtDate(nextOwnLeave.start_date) : `${fmtDate(nextOwnLeave.start_date)}–${fmtDate(nextOwnLeave.end_date)}`)}</strong></div>` : ''}
               ${holidays.length ? holidays.map((h) => `<div class="dc-list-item"><span>${esc(h.name)} · ${h.duration === 'HALF' ? 'Half day' : 'Full day'}</span><strong>${esc(fmtDate(h.date))}</strong></div>`).join('') : '<div class="dc-empty">No upcoming holidays published.</div>'}
             </div>
           </div>
           <div class="dc-card dc-section-gap"><div class="dc-head"><h2>Quick access</h2></div><div class="dc-list">
-            <button class="btn btn-ghost" data-go="clock">Attendance / Clock</button>
-            <button class="btn btn-ghost" data-go="leaves">${admin ? 'Manage employee leave' : 'Leave'}</button>
-            <button class="btn btn-ghost" data-go="achievements">Log achievement</button>
+            <a class="btn btn-ghost" href="#/clock">Attendance / Clock</a>
+            <a class="btn btn-ghost" href="#/leaves">${admin ? 'Manage employee leave' : 'Leave'}</a>
+            <a class="btn btn-ghost" href="#/achievements">Log achievement</a>
           </div></div>
         </div>
       </div>`;
 
-    root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
+    root.removeAttribute('aria-busy');
 
-    if (isAdmin() && adminHost) {
+    if (admin && adminHost) {
       const [teamToday, upcomingLeaves, pendingLeaves, punchPending, achMonth] = await Promise.all([
         safe('/attendance/today'), safe('/leaves/upcoming'), safe('/leaves/pending'), safe('/punch-requests/pending'), safe(`/achievements/month/${month()}?include_pending=1`)
       ]);
-      if (!isDashboard() || !root.isConnected || !adminHost.isConnected) return;
+      if (!adminHost.isConnected) return;
       let overdueTeam = 0;
       if (asanaStatus?.enabled) {
         const teamTasks = await safe('/asana/team-tasks');
@@ -160,7 +141,7 @@
         const allTasks = await safe('/tasks/all');
         overdueTeam = (allTasks?.tasks || []).filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today()).length;
       }
-      if (!isDashboard() || !root.isConnected || !adminHost.isConnected) return;
+      if (!adminHost.isConnected) return;
       const people = teamToday?.people || [];
       const working = people.filter((p) => p.state === 'IN' || p.state === 'BREAK').length;
       const todayLeaves = (upcomingLeaves?.leaves || []).filter((l) => l.start_date <= today() && l.end_date >= today()).length;
@@ -181,12 +162,5 @@
     }
   }
 
-  let queued = false;
-  const observer = new MutationObserver(() => {
-    if (!isDashboard() || queued) return;
-    queued = true;
-    setTimeout(() => { queued = false; renderDashboard(); }, 0);
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  setTimeout(renderDashboard, 0);
+  window.Dashboard = { render: renderDashboard };
 })();

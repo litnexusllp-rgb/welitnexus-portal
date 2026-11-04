@@ -2,9 +2,15 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const vm=require('node:vm');
 const dashboard=fs.readFileSync(path.join(__dirname,'../public/js/dashboard-announcement.js'),'utf8');
 async function render(admin,failWork=false,holidays=[]){
- const requests=[];let root;const old={style:{},parentNode:{insertBefore(r){root=r;}}};const main={querySelector:s=>s==='#dashCards'?old:null};
- const document={body:{classList:{contains:()=>admin}},documentElement:{},querySelector:()=>({dataset:{view:'dashboard'}}),getElementById:id=>id==='main'?main:id==='dashboardControlStyles'?{}:null,createElement:()=>({innerHTML:'',isConnected:true,querySelectorAll:()=>[]})};
- const context={document,MutationObserver:class{observe(){}},setTimeout(){},console,api:{get:async p=>{requests.push(p);if(p==='/leaves/mine')return {balance:18.5,balances:{monthly_regular:{available:0.5}},leaves:[]};if(p==='/holidays')return {holidays};if(p==='/asana/admin-work'&&failWork)throw Error('offline');if(p==='/asana/status')return {enabled:true};if(p==='/asana/admin-work'||p==='/asana/my-tasks')return {tasks:[{name:'Assigned work',assignee:'Saurav',projects:['Other project'],url:'https://app.asana.com/0/0/1'}]};if(p==='/operations')return {approvals:[{kind:'Achievement'},{kind:'Leave'}],asana:{counts:{overdue:3,unassigned:2}}};if(p.startsWith('/kpi/me'))return {rows:[{tasksDone:8}]};return {};}}};vm.createContext(context);vm.runInContext(dashboard.replace('  setTimeout(renderDashboard, 0);','  globalThis.renderTest = renderDashboard;'),context);await context.renderTest();return {html:root.innerHTML,requests};
+ const requests=[];
+ const root={innerHTML:'',isConnected:true,removeAttribute(){}};
+ const document={getElementById:id=>id==='dashboardControlStyles'?{}:null};
+ const read=async p=>{requests.push(p);if(p==='/leaves/mine')return {balance:18.5,balances:{monthly_regular:{available:0.5}},leaves:[]};if(p==='/holidays')return {holidays};if(p==='/asana/admin-work'&&failWork)throw Error('offline');if(p==='/asana/status')return {enabled:true};if(p==='/asana/admin-work'||p==='/asana/my-tasks')return {tasks:[{name:'Assigned work',assignee:'Saurav',projects:['Other project'],url:'https://app.asana.com/0/0/1'}]};if(p==='/operations')return {approvals:[{kind:'Achievement'},{kind:'Leave'}],asana:{counts:{overdue:3,unassigned:2}}};if(p.startsWith('/kpi/me'))return {rows:[{tasksDone:8}]};return {};};
+ const context={document,window:{}};
+ vm.createContext(context);vm.runInContext(dashboard,context);
+ let leaveBalances;
+ await context.window.Dashboard.render(root,{admin,read,showLeaveBalances:b=>{leaveBalances=b;}});
+ return {html:root.innerHTML,requests,leaveBalances};
 }
 test('admin replaces personal performance with review actions and shared owner work',async()=>{
  const r=await render(true);assert.ok(r.html.includes('Needs your attention'));assert.ok(!r.html.includes('My performance'));assert.ok(r.html.includes('Saurav'));assert.ok(r.html.includes('Other project'));assert.ok(r.requests.includes('/asana/admin-work'));assert.ok(!r.requests.some(p=>p.startsWith('/kpi/me')));
@@ -12,7 +18,11 @@ test('admin replaces personal performance with review actions and shared owner w
 });
 test('employee keeps own performance and own Asana endpoint',async()=>{
  const r=await render(false);assert.ok(r.html.includes('My performance'));assert.ok(!r.html.includes('Needs your attention'));assert.ok(r.requests.includes('/asana/my-tasks'));assert.ok(!r.requests.includes('/asana/admin-work'));assert.ok(!r.requests.includes('/operations'));
- assert.ok(r.requests.includes('/leaves/mine'));assert.ok(r.html.includes('Regular paid leave · month'));assert.ok(r.html.includes('0.5 / 1.5'));assert.ok(r.html.includes('18.5 annual paid days left'));assert.ok(!r.html.includes('Manage employee leave'));
+ for(const endpoint of ['/attendance/status','/leaves/mine','/tasks/mine']) {
+  assert.equal(r.requests.filter(path=>path===endpoint).length,1);
+ }
+ assert.equal(r.leaveBalances.monthly_regular.available,0.5);
+ assert.ok(r.html.includes('Regular paid leave · month'));assert.ok(r.html.includes('0.5 / 1.5'));assert.ok(r.html.includes('18.5 annual paid days left'));assert.ok(!r.html.includes('Manage employee leave'));
 });
 test('employee workspace loads secondary team leave views when opened', async () => {
  const source=fs.readFileSync(path.join(__dirname,'../public/js/app.js'),'utf8');
