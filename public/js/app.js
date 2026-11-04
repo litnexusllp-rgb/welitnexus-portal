@@ -870,17 +870,40 @@
   }
   function leaveBalanceMarkup(b, activity) {
     if (!b) return '';
+    const categories = [
+      ['Regular', b.buckets.regular],
+      ['Flexi', b.buckets.flexi],
+      ['Birthday / anniversary', b.buckets.special],
+    ];
+    const annualRow = (label, balance) => `<tr><th scope="row">${label}</th>${['entitlement', 'used', 'pending', 'available'].map(key => `<td class="leave-value">${balance[key]}</td>`).join('')}</tr>`;
+    const monthly = b.monthly_regular;
+    const monthLabel = new Date(monthly.month + '-01T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     return `<section class="leave-balance-panel" aria-label="Leave balances">
-      <div class="cards employee-leave-stats">
-        ${statCard('Regular leave available this month', b.monthly_regular.available + ' days', 'value small')}
-        ${statCard('Flexi leave available', b.buckets.flexi.available + ' days', 'value small')}
-        ${statCard('Birthday / anniversary available', b.buckets.special.available + ' days', 'value small')}
+      <div class="leave-annual-summary">
+        <h3>Annual paid leave balance</h3>
+        <p class="leave-annual-number"><strong>${b.balance}</strong> of ${b.entitlement} days remaining</p>
+        <p>${b.pending} days reserved for pending requests · Resets ${esc(fmtDate(b.period.nextReset))}</p>
       </div>
-      <p class="page-sub">${b.monthly_regular.used} regular days used · ${b.monthly_regular.pending} reserved · 1.5-day monthly limit</p>
+      <div class="leave-calculations">
+        <div class="leave-calculation leave-table-wrap"><table class="leave-annual-table">
+          <caption>Annual calculation · days</caption>
+          <thead><tr><th scope="col">Leave type</th><th scope="col">Granted</th><th scope="col">Approved</th><th scope="col">Pending</th><th scope="col">Available</th></tr></thead>
+          <tbody>${categories.map(([label, balance]) => annualRow(label, balance)).join('')}</tbody>
+          <tfoot>${annualRow('Total', { entitlement: b.entitlement, used: b.entitlement - b.balance, pending: b.pending, available: b.available })}</tfoot>
+        </table></div>
+        <div class="leave-calculation leave-table-wrap"><table>
+          <caption>Regular paid leave · ${esc(monthLabel)}</caption>
+          <thead><tr><th scope="col">Calculation</th><th scope="col" class="leave-value">Days</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Monthly limit</th><td class="leave-value">${monthly.limit}</td></tr>
+            <tr><th scope="row">Approved paid days</th><td class="leave-value">${monthly.used}</td></tr>
+            <tr><th scope="row">Reserved for pending requests</th><td class="leave-value">${monthly.pending}</td></tr>
+          </tbody>
+          <tfoot><tr><th scope="row">Available this month</th><td class="leave-value">${monthly.available}</td></tr></tfoot>
+        </table></div>
+      </div>
+      <p class="page-sub">Available = allowance minus approved days and pending reservations. Regular paid leave also has a monthly limit.${b.short_day?.paid_days ? ' Approved regular days include paid Short Day charges.' : ''}</p>
       ${activity ? `<p class="page-sub">This leave year · ${activity.taken_days} days taken · ${activity.upcoming_days} upcoming · ${activity.pending_requests} requests pending</p>` : ''}
-      <details><summary>Annual balances</summary>
-        <p>Regular leave: ${b.buckets.regular.remaining} of 18 annual days remaining. The monthly limit still applies. Annual balances reset ${esc(fmtDate(b.period.nextReset))}.</p>
-      </details>
       ${leavePolicyMarkup()}
     </section>`;
   }
@@ -1027,10 +1050,12 @@
       const leaveUrl = isAdmin() ? `/leaves/for/${user.id}` : '/leaves/mine';
       const { balances, activity, leaves } = await api.get(leaveUrl + '?month=' + myPerfMonth);
       if (current !== employeeLeaveVersion || !host.isConnected || selectedEmployee()?.id !== user.id) return;
-      host.innerHTML = leaveBalanceMarkup(balances, activity) + `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` + (leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
+      host.innerHTML = leaveBalanceMarkup(balances, activity) + `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` + (leaves.length ? `<table aria-label="Leave history"><thead><tr><th>Dates</th><th>Type</th><th>Paid days</th><th>Unpaid days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
         ${leaves.map(l => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.non_working_days ? ` · ${l.non_working_days} non-working` : ''}${l.policy_notes?.map(note => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
-          <td>${l.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>`) : esc(l.admin_note || '—')}</td></tr>`).join('')}
+          <td>${esc(leaveTypeLabel(l))}${l.non_working_days ? `<div class="leave-balance-note">${l.non_working_days} non-working days</div>` : ''}</td>
+          ${l.pay_status === 'REVIEW' ? '<td colspan="2">Needs review</td>' : `<td>${l.paid_days ?? '—'}</td><td>${l.unpaid_days ?? '—'}</td>`}
+          <td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
+          <td>${l.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>`) : esc(l.admin_note || '—')}${l.deduction_estimate || l.policy_notes?.length ? `<details class="leave-balance-note"><summary>Details</summary>${l.deduction_estimate ? `<div>${esc(leavePaymentLabel(l))}</div>` : ''}${l.policy_notes?.map(note => `<div>${esc(note)}</div>`).join('') || ''}</details>` : ''}</td></tr>`).join('')}
         </tbody></table>` : '<div class="empty">No leave requests yet.</div>') + '</div>';
       host.insertAdjacentHTML('beforeend', '<div class="section" id="employeeShortDays"></div>');
       await loadEmployeeShortDays(user, current);
@@ -3006,6 +3031,19 @@
       else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
       if (['PRESENT', 'FUTURE'].includes(r.status) && r.leaveKind === 'FULL') { cls = 'pcal-leave'; tag = 'Leave'; }
       if (r.status === 'FUTURE' && r.leaveKind === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
+      if (r.leavePay && !['NOT_EMPLOYED', 'EMPLOYMENT_UNKNOWN', 'INVALID'].includes(r.status)) {
+        const { paid_days: paid, unpaid_days: unpaid, scheduled_days: scheduled } = r.leavePay;
+        if (scheduled > 0) {
+          cls = unpaid ? 'pcal-unpaid' : 'pcal-leave';
+          const label = r.leaveKind === 'HALF' ? 'half-day leave' : 'leave';
+          tag = paid && unpaid ? `${paid} paid · ${unpaid} unpaid` : `${unpaid ? 'Unpaid' : 'Paid'} ${label}`;
+          if (r.holidayDuration === 'HALF') tag += ' · ½ holiday';
+        } else if (r.holidayDuration === 'FULL') {
+          cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday';
+        } else {
+          cls = 'pcal-weekend'; tag = 'Weekend';
+        }
+      }
       if (r.approvedShortDay) {
         if (['PRESENT', 'ABSENT', 'FUTURE'].includes(r.status) && !r.late && !r.noClockOut) cls = 'pcal-short';
         const approved = r.approvedShortMinutes ? `Approved Short Day · ${r.approvedShortMinutes}m` : 'Approved Short Day';
@@ -3018,7 +3056,7 @@
       }) : '';
       const can = clickable(r);
       const action = canRecord ? 'click to manage attendance or leave' : isAdmin() ? 'click to fix punches' : 'click to request a correction';
-      const title = [`${iso}`, r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
+      const title = [`${iso}`, tag || r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
       return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}${can ? ' pcal-clickable' : ''}" title="${esc(title)}"${can ? ` data-fixday="${iso}" role="button" tabindex="0"` : ''}>
         <span class="dn">${dayNum}</span>
         ${clockLabel && r.status !== 'WEEKEND' ? `<span class="mins">${esc(clockLabel)}</span>` : ''}
@@ -3034,6 +3072,7 @@
       cells += cellFor(byDay[iso], d, iso);
     }
     const t = att.totals;
+    const scheduledLeave = att.rows.reduce((days, row) => days + (row.leavePay?.scheduled_days || 0), 0);
     el.innerHTML = `
       <div class="pcal-head">
         <h3>${esc(monthLabel)}${isAdmin() && myPerfUserId ? ` — ${esc(att.user.name)}` : ''}</h3>
@@ -3051,13 +3090,14 @@
         <span><i style="background:#fff3b0;border-color:#e1b600;"></i>Late clock-in</span>
         <span><i style="background:#f1ecfb;border-color:#cdbdf0;"></i>No clock-out</span>
         <span><i style="background:#fdf1d8;border-color:#f0dcae;"></i>Short day</span>
-        <span><i style="background:#dbeafe;border-color:#93c5fd;"></i>Half day</span>
-        <span><i style="background:#7f1d1d;border-color:#651414;"></i>On leave</span>
+        <span><i style="background:#dbeafe;border-color:#93c5fd;"></i>Half day / half holiday</span>
+        <span><i class="pcal-leave"></i>Paid leave</span>
+        <span><i class="pcal-unpaid"></i>Unpaid or mixed leave</span>
         <span><i style="background:#f7e9e7;border-color:#e8c6c1;"></i>Absent</span>
         <span><i style="background:#f1ecfb;border-color:#ddd2f3;"></i>Holiday</span>
         <span><i style="background:var(--mist);"></i>Weekend</span>
       </div>
-      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Open a date to manage attendance or record leave.' : 'Open a late date to submit an explanation.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${t.leave}</strong> leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
+      <p class="page-sub" style="margin-top:12px;">${isAdmin() && myPerfUserId ? `${esc(att.user.name)}'s shift starts` : 'Your shift starts'} at <strong>${esc(att.shiftStart)} ${esc(att.timezone || '')}</strong> (+${att.graceMin} min grace) — a clock-in after that shows yellow. A finished day under ${fmtMins(att.fullDayMinutes)} shows amber. <strong>${isAdmin() ? 'Open a date to manage attendance or record leave.' : 'Open a late date to submit an explanation.'}</strong> This month: <strong>${t.present}</strong> present · <strong>${scheduledLeave}</strong> scheduled leave · <strong>${t.absent}</strong> absent · <strong>${fmtMins(t.workedMinutes)}</strong> worked.</p>`;
     const shiftMonth = (delta) => {
       const d = new Date(y, m - 1 + delta, 1);
       myPerfMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

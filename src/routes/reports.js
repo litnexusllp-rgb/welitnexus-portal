@@ -16,6 +16,7 @@ const { day: validDay } = require('../requestValidation');
 const { notifyAdmins } = require('../notify');
 const { approveLateExplanation } = require('../lateExplanations');
 const { employmentStatus, overlapsEmployment } = require('../employment');
+const { calculationFor } = require('../leavePolicy');
 
 const { settings, daySettings, liveForDay, shiftInstant } = require('../attendanceSession');
 const router = express.Router();
@@ -97,10 +98,15 @@ function buildAttendanceReport(user, req) {
   const workingSet = {};
   for (const w of workingDaysBetween.all(start, end)) workingSet[w.date] = true;
   const leaveByDay = {};
-  for (const l of approvedLeavesOverlapping.all(end, start)) {
-    if (l.user_id !== user.id) continue;
+  const leavePayByDay = new Map();
+  const { leaves, ledger } = calculationFor(user.id);
+  for (const l of leaves) {
+    if (l.status !== 'APPROVED' || l.source === 'SHORT_DAY' || l.start_date > end || l.end_date < start) continue;
     for (const d of eachDay(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date)) {
       leaveByDay[d] = l;
+    }
+    for (const line of ledger.get(l).date_lines) {
+      if (line.date >= start && line.date <= end) leavePayByDay.set(line.date, line);
     }
   }
   const lateNormalDays = new Map(lateNormalOverridesBetween.all(user.id, start, end).map(row => [row.day, row]));
@@ -142,6 +148,7 @@ function buildAttendanceReport(user, req) {
       weekday: DateTime.fromISO(day, { zone: ZONE }).toFormat('ccc'),
       status,
       leaveKind: leave?.kind || null,
+      leavePay: leavePayByDay.get(day) || null,
       ...(req.user.role === 'ADMIN' && leave ? { approvedLeave: { id: leave.id, start: leave.start_date, end: leave.end_date } } : {}),
       approvedShortDay,
       approvedShortMinutes: shortMinutesByDay.get(day) || 0,

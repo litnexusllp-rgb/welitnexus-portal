@@ -53,23 +53,21 @@ function employeeLeaveHistory(userId, month) {
   const current = syncBalance(userId);
   const balances = require('../requestValidation').month(month) && month !== current.monthly_regular.month
     ? leaveBalances(userId, month + '-01') : current;
-  const leaves = leavesForUser.all(userId), today = todayStr();
+  const leaves = present(leavesForUser.all(userId)), today = todayStr();
   const activity = { taken_days: 0, upcoming_days: 0, pending_days: 0, pending_requests: 0 };
   for (const leave of leaves) {
     const start = leave.start_date > balances.period.start ? leave.start_date : balances.period.start;
     const last = leave.kind === 'HALF' ? leave.start_date : leave.end_date;
     const end = last < balances.period.end ? last : balances.period.end;
     if (start > end) continue;
-    const count = (from, to) => from > to ? 0 : leave.kind === 'HALF' ? 0.5 : inclusiveDays(from, to);
-    if (leave.status === 'PENDING') {
-      activity.pending_days += count(start, end); activity.pending_requests++;
-    } else if (leave.status === 'APPROVED') {
-      activity.taken_days += count(start, end < today ? end : today);
-      // Exclude today from future days without assuming a browser timezone.
-      activity.upcoming_days += count(start, end) - count(start, end < today ? end : today);
+    if (leave.status === 'PENDING') activity.pending_requests++;
+    for (const line of leave.date_lines) {
+      if (line.date < start || line.date > end) continue;
+      if (leave.status === 'PENDING') activity.pending_days += line.scheduled_days;
+      else if (leave.status === 'APPROVED') activity[line.date <= today ? 'taken_days' : 'upcoming_days'] += line.scheduled_days;
     }
   }
-  return { balance: balances.balance, balances, activity, leaves: present(leaves) };
+  return { balance: balances.balance, balances, activity, leaves };
 }
 
 // Server-authoritative payment preview; employees can preview only themselves.
