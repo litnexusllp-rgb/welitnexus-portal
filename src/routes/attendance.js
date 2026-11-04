@@ -9,6 +9,7 @@ const { calendarFrom, scheduledDays } = require('../leaveCalculation');
 const { employmentStatus } = require('../employment');
 const { summarize } = require('../compute');
 const { changeAttendance, attendanceError } = require('../attendanceValidation');
+const { queueAttendanceAlert } = require('../attendanceSlack');
 
 const { settings, daySettings, snapshot, currentSession, liveForDay, wallTime, withTimes } = require('../attendanceSession');
 const router = express.Router();
@@ -56,7 +57,8 @@ router.post('/punch', requireAuth, (req, res) => {
       if (session.lastPunchTs != null && ts <= session.lastPunchTs) throw Object.assign(new Error('Punch time must follow the last recorded punch.'), { status: 409, attendanceValidation: true });
       const day = type === 'IN' ? attendanceToday(settings(req.user)) : session.day;
       snapshot(req.user, day);
-      changeAttendance(req.user.id, [day], () => insertEvent.run(req.user.id, type, ts, day, note, deviceFrom(req)));
+      const event = changeAttendance(req.user.id, [day], () => insertEvent.run(req.user.id, type, ts, day, note, deviceFrom(req)));
+      queueAttendanceAlert(db, event.lastInsertRowid, req.user.name, type, ts);
       return currentSession(req.user, ts);
     }).immediate();
     res.json(result);

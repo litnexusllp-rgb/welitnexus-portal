@@ -1,165 +1,101 @@
-/* Dashboard control center: daily status, work, performance, company updates and admin team summary. */
+/* Role-specific Dashboard. Full records remain in their own sections. */
 (function () {
   'use strict';
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const today = () => new Date().toLocaleDateString('en-CA');
-  const month = () => today().slice(0, 7);
-  const fmtMins = (m) => `${Math.floor((Number(m) || 0) / 60)}h ${(Number(m) || 0) % 60}m`;
-  const fmtDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))
-    ? new Date(`${s}T00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—';
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const dateLabel = (date) => new Date(date + 'T00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const clockState = { OFF: 'Ready to clock in', IN: 'Clocked in', BREAK: 'On break', OUT: 'Clocked out' };
+  const minutes = (value) => `${Math.floor(value / 60)}h ${value % 60}m`;
 
-  function injectStyles() {
-    if (document.getElementById('dashboardControlStyles')) return;
-    const s = document.createElement('style');
-    s.id = 'dashboardControlStyles';
-    s.textContent = `
-      .dc-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,.8fr);gap:18px;margin:18px 0 26px}
-      .dc-card{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 1px 2px rgba(15,32,52,.04)}
-      .dc-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.dc-head h2{margin:0;color:var(--navy);font-size:1rem}.dc-link{border:0;background:none;color:var(--teal-dark);font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;padding:0}
-      .dc-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 18px}.dc-stat{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:16px}.dc-stat .k{color:var(--slate);font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.35px}.dc-stat .v{color:var(--navy);font-weight:800;font-size:1.22rem;margin-top:7px}.dc-stat .s{color:var(--slate);font-size:.76rem;margin-top:4px}
-      .dc-stats-admin{grid-template-columns:repeat(3,minmax(0,1fr))}
-      .dc-work-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.dc-work-row:last-child{border-bottom:0}.dc-work-title{font-weight:700;color:var(--navy);font-size:.88rem}.dc-work-meta{color:var(--slate);font-size:.76rem;margin-top:3px}.dc-due{font-size:.76rem;font-weight:700;white-space:nowrap}.dc-overdue{color:var(--danger)}.dc-today{color:#9a6b00}.dc-upcoming{color:var(--slate)}
-      .dc-perf{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.dc-perf>div{background:var(--mist);border-radius:10px;padding:12px;text-align:center}.dc-perf strong{display:block;color:var(--navy);font-size:1.08rem}.dc-perf span{display:block;color:var(--slate);font-size:.72rem;margin-top:3px}
-      .dc-ann{border-left:4px solid var(--teal);padding-left:14px}.dc-ann-title{font-weight:800;color:var(--navy);margin:3px 0 7px}.dc-ann-body{white-space:pre-wrap;color:var(--text);font-size:.86rem;line-height:1.5}.dc-small{color:var(--slate);font-size:.76rem;margin-top:8px}
-      .dc-list{display:grid;gap:10px}.dc-list-item{display:flex;justify-content:space-between;gap:12px;font-size:.85rem}.dc-list-item strong{color:var(--navy)}
-      .dc-team{margin:4px 0 24px}.dc-team-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.dc-team-cell{background:var(--mist);border-radius:10px;padding:12px}.dc-team-cell .n{font-size:1.25rem;font-weight:800;color:var(--navy)}.dc-team-cell .l{font-size:.72rem;color:var(--slate);margin-top:3px}
-      .dc-empty{color:var(--slate);font-size:.86rem;padding:10px 0}.dc-section-gap{margin-top:18px}
-      @media(max-width:980px){.dc-grid{grid-template-columns:1fr}.dc-stats{grid-template-columns:repeat(2,1fr)}.dc-team-grid{grid-template-columns:repeat(3,1fr)}.dc-perf{grid-template-columns:repeat(3,1fr)}}
-      @media(max-width:620px){.dc-stats,.dc-team-grid,.dc-perf{grid-template-columns:repeat(2,1fr)}}`;
-    document.head.appendChild(s);
+  function taskList(data, fromAsana) {
+    if (!data) return '<p class="dash-muted" role="status">Tasks are unavailable. Open Tasks to retry.</p>';
+    const today = new Date().toLocaleDateString('en-CA');
+    const tasks = data.tasks.filter(t => t.status !== 'DONE').map(t => ({
+      title: fromAsana ? t.name : t.title,
+      due: fromAsana ? t.due_on : t.due_date,
+    })).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999')).slice(0, 3);
+    if (!tasks.length) return '<p class="dash-muted">You have no open tasks.</p>';
+    return `<ul class="dash-task-list">${tasks.map(t => {
+      const overdue = t.due && t.due < today;
+      const due = !t.due ? 'No due date' : t.due === today ? 'Due today' : `${overdue ? 'Overdue' : 'Due'} ${dateLabel(t.due)}`;
+      return `<li><span>${esc(t.title)}</span><span class="dash-due${overdue ? ' dash-overdue' : ''}">${esc(due)}</span></li>`;
+    }).join('')}</ul>`;
   }
 
-  function normalizeTasks(portalTasks, asanaTasks, asanaOn) {
-    const src = asanaOn ? (asanaTasks || []) : (portalTasks || []);
-    return src.map((t) => ({
-      title: asanaOn ? t.name : t.title,
-      url: asanaOn ? t.url : '',
-      owner: asanaOn ? (t.assignee || '') : '',
-      projects: asanaOn ? (t.projects || []).join(', ') : '',
-      due: asanaOn ? (t.due_on || '') : (t.due_date || ''),
-      overdue: asanaOn ? !!t.overdue : (!!t.due_date && t.due_date < today() && t.status !== 'DONE'),
-      client: asanaOn ? '' : (t.client_parent_name ? `${t.client_parent_name} › ${t.client_name}` : (t.client_name || '')),
-      status: asanaOn ? 'OPEN' : t.status,
-    })).filter((t) => t.status !== 'DONE')
-      .sort((a, b) => (a.overdue === b.overdue ? String(a.due || '9999').localeCompare(String(b.due || '9999')) : (a.overdue ? -1 : 1)));
-  }
-
-  function workHtml(tasks, all = false) {
-    if (!tasks.length) return '<div class="dc-empty">No open work. 🎉</div>';
-    return (all ? tasks : tasks.slice(0, 6)).map((t) => {
-      const dueClass = t.overdue ? 'dc-overdue' : (t.due === today() ? 'dc-today' : 'dc-upcoming');
-      const dueText = t.overdue ? `Overdue · ${fmtDate(t.due)}` : (t.due === today() ? 'Due today' : (t.due ? `Due ${fmtDate(t.due)}` : 'No due date'));
-      return `<div class="dc-work-row"><div><div class="dc-work-title">${t.url ? `<a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.title)}</a>` : esc(t.title)}</div>${t.owner ? `<div class="dc-work-meta">${esc(t.owner)} · ${esc(t.projects || 'No project')}</div>` : ''}${t.client ? `<div class="dc-work-meta">${esc(t.client)}</div>` : ''}</div><div class="dc-due ${dueClass}">${esc(dueText)}</div></div>`;
-    }).join('');
-  }
-
-  async function renderDashboard(root, { read, admin, adminHost, showLeaveBalances }) {
-    injectStyles();
-    const safe = async (path) => { try { return await read(path); } catch (_e) { return null; } };
-    const baseReqs = [
-      safe('/attendance/status'), admin ? null : safe('/leaves/mine'), admin ? safe('/operations') : safe(`/kpi/me?month=${month()}`),
-      safe('/holidays'), safe('/announcements'), safe('/asana/status'), admin ? null : safe('/tasks/mine')
-    ];
-    const [status, leaves, kpiData, holidayData, announcementData, asanaStatus, portalTaskData] = await Promise.all(baseReqs);
-    if (!root.isConnected) return;
-    if (leaves?.balances) showLeaveBalances(leaves.balances);
-
-    let asanaTaskData = null;
-    if (admin || asanaStatus?.enabled) asanaTaskData = await safe(admin ? '/asana/admin-work' : '/asana/my-tasks');
-    if (!root.isConnected) return;
-    const workUnavailable = (admin || asanaStatus?.enabled) ? !asanaTaskData : !portalTaskData;
-    const tasks = normalizeTasks(portalTaskData?.tasks, asanaTaskData?.tasks, (admin || !!asanaStatus?.enabled));
-    const k = kpiData?.rows?.[0] || {};
-    const pendingLeave = (leaves?.leaves || []).filter((l) => l.status === 'PENDING').length;
-    const nextOwnLeave = (leaves?.leaves || []).filter((l) => l.status === 'APPROVED' && l.end_date >= today()).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
-    const holidays = (holidayData?.holidays || []).filter((h) => h.date >= today()).slice(0, 3);
-    const announcements = announcementData?.announcements || [];
-    const a = announcements.find((x) => Number(x.pinned) === 1) || announcements[0];
-    const openCount = workUnavailable ? '—' : tasks.length;
-    const overdueCount = tasks.filter((t) => t.overdue).length;
-
-    root.innerHTML = `
-      <div class="dc-stats${admin ? ' dc-stats-admin' : ''}">
-        <div class="dc-stat"><div class="k">Today</div><div class="v">${esc(status?.state || '—')}</div><div class="s">Attendance status</div></div>
-        <div class="dc-stat"><div class="k">Worked today</div><div class="v">${fmtMins(status?.workedMinutes)}</div><div class="s">Break ${fmtMins(status?.breakMinutes)}</div></div>
-        <div class="dc-stat"><div class="k">My work</div><div class="v">${openCount}</div><div class="s">${workUnavailable ? 'Unable to load work' : overdueCount ? `${overdueCount} overdue` : 'Nothing overdue'}</div></div>
-        ${admin ? '' : `<div class="dc-stat"><div class="k">Regular paid leave · month</div><div class="v">${esc(leaves?.balances?.monthly_regular?.available ?? '—')} / 1.5</div><div class="s">Days available · ${esc(leaves?.balance ?? '—')} annual paid days left${pendingLeave ? ` · ${pendingLeave} request pending` : ''}</div></div>`}
-      </div>
-
-      ${a ? `<div class="dc-card" style="margin-bottom:18px"><div class="dc-head"><h2>${Number(a.pinned) === 1 ? '📌 Pinned announcement' : '📣 Latest announcement'}</h2><a class="dc-link" href="#/noticeboard">View all notices</a></div><div class="dc-ann"><div class="dc-ann-title">${esc(a.title)}</div>${a.body ? `<div class="dc-ann-body">${esc(a.body)}</div>` : ''}<div class="dc-small">${esc(a.author || 'LIT Nexus')}${a.created_ts ? ` · ${esc(new Date(a.created_ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))}` : ''}</div></div></div>` : ''}
-
-      <div class="dc-grid">
-        <div>
-          <div class="dc-card"><div class="dc-head"><h2>My Work</h2><a class="dc-link" href="#/tasks">Open tasks</a></div>${admin ? '<p class="dc-small">Abhey and Saurav · all accessible Asana projects · open work only</p>' : ''}${workUnavailable ? '<div class="dc-empty" role="alert">Unable to load work. Please refresh to retry.</div>' : workHtml(tasks, admin)}</div>
-          ${admin ? `<div class="dc-card dc-section-gap"><div class="dc-head"><h2>Needs your attention</h2><a class="dc-link" href="#/operations">Open Operations</a></div>
-            ${kpiData ? `<div class="dc-perf">
-              <div><strong>${kpiData.approvals.filter(a=>a.kind==='Achievement').length}</strong><span><a href="#/achievements">Achievements pending</a></span></div>
-              <div><strong>${kpiData.approvals.filter(a=>a.kind==='Leave').length}</strong><span><a href="#/leaves">Leave requests</a></span></div>
-              <div><strong>${kpiData.approvals.filter(a=>a.kind==='Punch correction').length}</strong><span><a href="#/clock">Punch corrections</a></span></div>
-              <div><strong>${kpiData.asana.counts?.overdue ?? '—'}</strong><span>Overdue team tasks · LIT</span></div>
-              <div><strong>${kpiData.asana.counts?.unassigned ?? '—'}</strong><span>Unassigned tasks · LIT</span></div>
-            </div><p class="dc-small">Pending approvals from all months. <a href="#/kpi">View team performance</a></p>` : '<div class="dc-empty">Unable to load admin overview. Open Operations to retry.</div>'}
-          </div>` : `          <div class="dc-card dc-section-gap"><div class="dc-head"><h2>This Month</h2><a class="dc-link" href="#/myperf">My performance</a></div>
-            <div class="dc-perf">
-              <div><strong>${esc(k.daysPresent ?? 0)}</strong><span>Days present</span></div>
-              <div><strong>${k.punctualPct == null ? 'N/A' : `${k.punctualPct}%`}</strong><span>Punctuality</span></div>
-              <div><strong>${esc(k.tasksDone ?? 0)}</strong><span>Tasks completed</span></div>
-              <div><strong>${esc(k.achievementsAcknowledged ?? 0)}</strong><span>Achievements</span></div>
-              <div><strong>${esc(k.leaveDays ?? 0)}</strong><span>Leave used</span></div>
-            </div>
-          </div>`}
-
-        </div>
-        <div>
-          <div class="dc-card"><div class="dc-head"><h2>Upcoming</h2><a class="dc-link" href="#/calendar">Holidays</a></div>
-            <div class="dc-list">
-              ${!admin && nextOwnLeave ? `<div class="dc-list-item"><span>My approved leave</span><strong>${esc(nextOwnLeave.start_date === nextOwnLeave.end_date ? fmtDate(nextOwnLeave.start_date) : `${fmtDate(nextOwnLeave.start_date)}–${fmtDate(nextOwnLeave.end_date)}`)}</strong></div>` : ''}
-              ${holidays.length ? holidays.map((h) => `<div class="dc-list-item"><span>${esc(h.name)} · ${h.duration === 'HALF' ? 'Half day' : 'Full day'}</span><strong>${esc(fmtDate(h.date))}</strong></div>`).join('') : '<div class="dc-empty">No upcoming holidays published.</div>'}
-            </div>
+  function staffMarkup(status, tasks, fromAsana, announcements) {
+    const notice = announcements?.announcements.find(a => Number(a.pinned) === 1) || announcements?.announcements[0];
+    const state = status?.state === 'OUT' && status.firstIn == null ? 'OFF' : status?.state;
+    return `
+      <div class="dash-overview-grid">
+        <section class="dash-card dash-today">
+          <div><h2>Today</h2><p class="dash-clock-state">${esc(clockState[state] || 'Clock status unavailable')}</p>
+            ${status ? `<p class="dash-muted">Worked ${minutes(status.workedMinutes)} · Break ${minutes(status.breakMinutes)}</p>` : ''}
           </div>
-          <div class="dc-card dc-section-gap"><div class="dc-head"><h2>Quick access</h2></div><div class="dc-list">
-            <a class="btn btn-ghost" href="#/clock">Attendance / Clock</a>
-            <a class="btn btn-ghost" href="#/leaves">${admin ? 'Manage employee leave' : 'Leave'}</a>
-            <a class="btn btn-ghost" href="#/achievements">Log achievement</a>
-          </div></div>
-        </div>
-      </div>`;
+          <a class="btn btn-primary" href="#/clock">Open Clock</a>
+        </section>
+        <section class="dash-card">
+          <div class="dash-card-heading"><h2>Tasks due next</h2><a href="#/tasks">View tasks</a></div>
+          ${taskList(tasks, fromAsana)}
+        </section>
+      </div>
+      ${notice ? `<section class="dash-card dash-notice">
+        <div class="dash-card-heading"><h2>${Number(notice.pinned) === 1 ? 'Pinned notice' : 'Latest notice'}</h2><a href="#/noticeboard">Notice board</a></div>
+        <p>${esc(notice.title)}</p>
+      </section>` : ''}`;
+  }
 
-    root.removeAttribute('aria-busy');
+  function adminMarkup(approvals, today) {
+    const approvalsMarkup = [
+      ['Late explanations', approvals?.late, '#/late-requests'],
+      ['Leave requests', approvals?.leave, '#/late-requests'],
+      ['Punch corrections', approvals?.punch, '#/clock'],
+    ].map(([label, count, url]) =>
+      `<a class="dash-metric" href="${url}"><strong>${count ?? '—'}</strong><span>${label}</span></a>`).join('');
+    const states = [['Working', 'IN'], ['On break', 'BREAK'], ['Clocked out', 'OUT'], ['Not clocked in', 'OFF']];
+    return `
+      <section class="dash-card">
+        <div class="dash-card-heading"><h2>Needs attention</h2><a href="#/operations">Open Operations</a></div>
+        <div class="dash-metrics dash-approval-counts">${approvalsMarkup}</div>
+        ${approvals ? '' : '<p class="dash-muted" role="status">Approval counts are unavailable.</p>'}
+      </section>
+      <section class="dash-card">
+        <div class="dash-card-heading"><h2>Team today</h2><a href="#/clock">Open Clock</a></div>
+        <div class="dash-metrics">${states.map(([label, state]) =>
+          `<div class="dash-metric"><strong data-team-count="${state}">${today?.people ? today.people.filter(p => p.state === state).length : '—'}</strong><span>${label}</span></div>`).join('')}</div>
+        <details class="dash-team-details" id="dashTeamDetails">
+          <summary>Live attendance and corrections</summary>
+          <div id="dashAdmin"></div>
+        </details>
+      </section>`;
+  }
 
-    if (admin && adminHost) {
-      const [teamToday, upcomingLeaves, pendingLeaves, punchPending, achMonth] = await Promise.all([
-        safe('/attendance/today'), safe('/leaves/upcoming'), safe('/leaves/pending'), safe('/punch-requests/pending'), safe(`/achievements/month/${month()}?include_pending=1`)
+  async function renderDashboard(root, { read, admin, openTeam }) {
+    const safe = async (path) => { try { return await read(path); } catch (_e) { return null; } };
+    if (admin) {
+      const [approvals, today] = await Promise.all([safe('/operations/dashboard-approvals'), safe('/attendance/today')]);
+      if (!root.isConnected) return;
+      root.innerHTML = adminMarkup(approvals, today);
+      const details = root.querySelector('#dashTeamDetails');
+      const load = () => {
+        if (!details.isConnected || !details.open) return;
+        details.removeEventListener('toggle', load);
+        openTeam();
+      };
+      details.addEventListener('toggle', load);
+    } else {
+      const work = (async () => {
+        const asana = await safe('/asana/status');
+        return asana?.enabled
+          ? { fromAsana: true, tasks: await safe('/asana/my-tasks') }
+          : { fromAsana: false, tasks: await safe('/tasks/mine') };
+      })();
+      const [status, announcements, { tasks, fromAsana }] = await Promise.all([
+        safe('/attendance/status'), safe('/announcements'), work,
       ]);
-      if (!adminHost.isConnected) return;
-      let overdueTeam = 0;
-      if (asanaStatus?.enabled) {
-        const teamTasks = await safe('/asana/team-tasks');
-        overdueTeam = teamTasks?.totalOverdue || 0;
-      } else {
-        const allTasks = await safe('/tasks/all');
-        overdueTeam = (allTasks?.tasks || []).filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today()).length;
-      }
-      if (!adminHost.isConnected) return;
-      const people = teamToday?.people || [];
-      const working = people.filter((p) => p.state === 'IN' || p.state === 'BREAK').length;
-      const todayLeaves = (upcomingLeaves?.leaves || []).filter((l) => l.start_date <= today() && l.end_date >= today()).length;
-      const notClocked = Math.max(0, people.filter((p) => p.state === 'OFF').length - todayLeaves);
-      const achPending = (achMonth?.achievements || []).filter((x) => x.status === 'PENDING').length;
-
-      const summary = document.createElement('div');
-      summary.className = 'dc-card dc-team';
-      summary.innerHTML = `<div class="dc-head"><h2>Team Today</h2><span class="dc-small">Operational snapshot</span></div><div class="dc-team-grid">
-        <div class="dc-team-cell"><div class="n">${working}</div><div class="l">Working / on break</div></div>
-        <div class="dc-team-cell"><div class="n">${todayLeaves}</div><div class="l">On leave</div></div>
-        <div class="dc-team-cell"><div class="n">${notClocked}</div><div class="l">Not clocked in</div></div>
-        <div class="dc-team-cell"><div class="n">${overdueTeam}</div><div class="l">Overdue tasks</div></div>
-        <div class="dc-team-cell"><div class="n">${punchPending?.requests?.length || 0}</div><div class="l">Attendance corrections</div></div>
-        <div class="dc-team-cell"><div class="n">${achPending}</div><div class="l">Achievements pending</div></div>
-      </div>${pendingLeaves?.leaves?.length ? `<div class="dc-small" style="margin-top:12px"><strong>${pendingLeaves.leaves.length}</strong> leave request(s) awaiting approval.</div>` : ''}`;
-      adminHost.parentNode.insertBefore(summary, adminHost);
+      if (!root.isConnected) return;
+      root.innerHTML = staffMarkup(status, tasks, fromAsana, announcements);
     }
+    root.removeAttribute('aria-busy');
   }
 
   window.Dashboard = { render: renderDashboard };

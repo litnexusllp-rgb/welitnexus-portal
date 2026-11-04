@@ -11,7 +11,7 @@ function harness(hash='#/myperf',admin=false){
   const listeners={},renders=[],history=[];
   const links=[...html.matchAll(/<a class="nav-item[^>]*data-view="([a-z]+)" href="([^\"]+)"/g)].map(m=>({dataset:{view:m[1]},textContent:m[1],attrs:{},classList:{toggle(){}},setAttribute(k,v){this.attrs[k]=v;},removeAttribute(k){delete this.attrs[k];}}));
   const window={location:{hash},history:Object.fromEntries(['pushState','replaceState'].map(type=>[type,(_a,_b,url)=>{history.push(type);window.location.hash=url;}])),addEventListener:(k,v)=>listeners[k]=v};
-  const c={window,document:{querySelectorAll:()=>links,querySelector:()=>links.find(l=>l.attrs['aria-current']),title:''},$ :s=>s === "#staffMore" ? null : {addEventListener:(k,v)=>listeners[k]=v},ME:{role:admin?'ADMIN':'EMPLOYEE'},isAdmin:()=>admin,VIEWS:{...Object.fromEntries(links.map(l=>[l.dataset.view,()=>renders.push(l.dataset.view)])),myperf(){},leaves(){},salaries(){}},clockTimer:null,dashTimers:[],DASH_LIVE:null,clearInterval(){},closeModal(){}};
+  const c={window,document:{querySelectorAll:()=>links,querySelector:()=>links.find(l=>l.attrs['aria-current']),title:''},$ :s=>s === "#nav" ? {addEventListener:(k,v)=>listeners[k]=v,querySelectorAll:()=>[]} : null,ME:{role:admin?'ADMIN':'EMPLOYEE'},isAdmin:()=>admin,VIEWS:{...Object.fromEntries(links.map(l=>[l.dataset.view,()=>renders.push(l.dataset.view)])),myperf(){},leaves(){},salaries(){}},clockTimer:null,dashTimers:[],DASH_LIVE:null,clearInterval(){},closeModal(){}};
   vm.createContext(c);vm.runInContext(nav,c);
   return {c,links,listeners,renders,history};
 }

@@ -37,6 +37,7 @@ if (!isMainThread) {
       const cancel = require('./' + file)[method](); if (cancel) stops.push(cancel);
     }
     const eod = require('./eodScheduler').getScheduler(); eod.start(); stops.push(() => eod.stop());
+    stops.push(require('./attendanceSlack').startAttendanceAlerts(db));
     console.log('Background scheduler ownership acquired');
   }
   try { start(); } catch (error) { console.error('Background startup failed:', error); stop().finally(() => process.exit(1)); }

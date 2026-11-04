@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_user_day ON events(user_id, day);
 CREATE INDEX IF NOT EXISTS idx_events_day      ON events(day);
 
+CREATE TABLE IF NOT EXISTS attendance_slack_alerts (
+  event_id INTEGER PRIMARY KEY,
+  employee_name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  event_ts INTEGER NOT NULL,
+  next_ts INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','SENDING','SENT','REVIEW')),
+  slack_ts TEXT,
+  last_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_attendance_slack_ready ON attendance_slack_alerts(status,next_ts,event_id);
+
 -- Admin punctuality exceptions. Punches remain unchanged for auditability; this
 -- only allows an admin to treat a late clock-in as a normal/on-time day.
 CREATE TABLE IF NOT EXISTS attendance_day_overrides (
