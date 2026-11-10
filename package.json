@@ -1,6 +1,6 @@
 {
   "name": "welitnexus-portal",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "WeLitNexus employee portal — clock in/out, leaves, holidays, directory, tasks.",
   "main": "src/server.js",
   "scripts": {

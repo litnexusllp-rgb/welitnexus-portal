@@ -26,6 +26,7 @@ app.use(helmet({
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
+      frameSrc: ["'self'"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
     },
@@ -33,9 +34,12 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use(loadUser);
+// Raw-body endpoints (signed Slack/Asana webhooks, file uploads) come before
+// the JSON parser so signatures can be verified on the exact bytes received.
+app.use('/api', require('./routes/hooks'));
+app.use(express.json({ limit: '100kb' }));
 
 // Generous throttle on mutating API calls (reads are unrestricted). Blunts
 // abuse/runaway scripts without getting in the way of normal use. Login has
@@ -80,6 +84,16 @@ app.use('/api/asana', require('./routes/asana'));
 app.use('/api/asana-review', require('./routes/asanaReview'));
 app.use('/api/operations', require('./routes/operations'));
 app.use('/api/eod', require('./routes/eod'));
+
+// Portal v2: admin console, billing, messaging, tasks, AI, calendar.
+app.use('/api/admin/auth', require('./routes/adminAuth'));
+app.use('/api/admin/people', require('./routes/adminPeople'));
+app.use('/api/admin/billing', require('./routes/billing'));
+app.use('/api/admin', require('./routes/adminSettings'));
+app.use('/api/messages', require('./routes/messages'));
+app.use('/api/asana-tasks', require('./routes/workspace').tasks);
+app.use('/api/ai', require('./routes/workspace').ai);
+app.use('/api/calendar', require('./routes/calendar'));
 
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.

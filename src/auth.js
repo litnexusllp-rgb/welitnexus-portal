@@ -43,7 +43,38 @@ function setAuthCookie(res, token) {
 
 function clearAuthCookie(res) {
   res.clearCookie(COOKIE);
+  res.clearCookie(ADMIN_COOKIE);
 }
+
+// ---------- Admin console (second login) ----------
+// A separate, short-lived cookie issued only after password + 2-step code at
+// /admin. It is checked IN ADDITION to the normal session cookie.
+const ADMIN_COOKIE = 'wln_admin';
+const ADMIN_TTL_SECONDS = 8 * 60 * 60;
+
+function issueAdminToken(user, mfa) {
+  const current = db.prepare('SELECT session_version FROM users WHERE id = ?').get(user.id);
+  if (!current) throw new Error('Cannot issue a session for a missing user');
+  return jwt.sign({ uid: user.id, sv: current.session_version, kind: 'admin-console', mfa: Boolean(mfa) }, JWT_SECRET, { expiresIn: ADMIN_TTL_SECONDS });
+}
+
+function setAdminCookie(res, token) {
+  res.cookie(ADMIN_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: ADMIN_TTL_SECONDS * 1000,
+  });
+}
+
+function clearAdminCookie(res) {
+  res.clearCookie(ADMIN_COOKIE);
+}
+
+// When ADMIN_CONSOLE_REQUIRED=on, the existing admin-only API routes also
+// require the admin console cookie. Off by default so current admin sessions
+// keep working until both partners have enrolled their 2-step codes.
+const consoleRequired = () => String(process.env.ADMIN_CONSOLE_REQUIRED || 'off').toLowerCase() === 'on';
 
 const getUserById = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1');
 
@@ -66,6 +97,16 @@ function loadUser(req, _res, next) {
       /* invalid/expired token — treat as logged out */
     }
   }
+  req.adminConsole = null;
+  const consoleToken = req.user && req.cookies && req.cookies[ADMIN_COOKIE];
+  if (consoleToken) {
+    try {
+      const payload = jwt.verify(consoleToken, JWT_SECRET);
+      if (payload.kind === 'admin-console' && payload.uid === req.user.id && payload.sv === req.user.session_version) {
+        req.adminConsole = { mfa: Boolean(payload.mfa), exp: payload.exp };
+      }
+    } catch (_e) { /* expired admin console session */ }
+  }
   next();
 }
 
@@ -77,11 +118,17 @@ function requireAuth(req, res, next) {
 function requireAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admins only' });
+  if (consoleRequired() && !req.adminConsole) return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
   next();
 }
 
 module.exports = {
   COOKIE,
+  ADMIN_COOKIE,
+  issueAdminToken,
+  setAdminCookie,
+  clearAdminCookie,
+  consoleRequired,
   hashPassword,
   verifyPassword,
   issueToken,

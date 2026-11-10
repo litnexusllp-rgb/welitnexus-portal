@@ -481,4 +481,6 @@ db.exec('COMMIT');
   try { if (db.inTransaction) db.exec('ROLLBACK'); } finally { db.close(); }
   throw error;
 }
+// Portal v2: new, additive tables only (see src/v2/schema.js).
+try { require('./v2/schema').ensure(db); } catch (error) { db.close(); throw error; }
 module.exports = { db, DB_PATH };

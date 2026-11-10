@@ -9,7 +9,7 @@ function inputError(value, key = '', depth = 0) {
   if (depth > 8) return 'Input nesting exceeds the limit';
   if (value === null) return booleans.has(key) ? `${key} must be a boolean` : null;
   if (typeof value === 'object') {
-    if (key && !['salary', 'items', 'checklist', 'user_ids', 'ids', 'days', 'events', 'punches'].includes(key)) return `${key} must be a scalar value`;
+    if (key && !['salary', 'items', 'checklist', 'user_ids', 'ids', 'days', 'events', 'punches', 'lines', 'attendees', 'context'].includes(key)) return `${key} must be a scalar value`;
     if (Array.isArray(value) && value.length > 500) return 'Too many items';
     for (const [k, v] of Object.entries(value)) {
       if (['__proto__', 'prototype', 'constructor'].includes(k)) return 'Invalid field';

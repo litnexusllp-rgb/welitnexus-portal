@@ -55,7 +55,11 @@ router.post('/logout', (req, res) => {
 });
 
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: { ...req.user, leave_balance: syncBalance(req.user.id).balance } });
+  const { adminLevel } = require('../v2/roles');
+  res.json({
+    user: { ...req.user, leave_balance: syncBalance(req.user.id).balance },
+    access: { adminLevel: adminLevel(req.user), console: Boolean(req.adminConsole), consoleRequired: require('../auth').consoleRequired() },
+  });
 });
 
 // Self-service: change your own password (must confirm the current one).

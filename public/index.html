@@ -3,25 +3,66 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LIT Nexus Portal</title>
+  <title>LIT Nexus Workforce Portal</title>
   <link rel="icon" type="image/svg+xml" href="/img/lit-mark.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/portal.css" />
+  <link rel="stylesheet" href="/css/theme-v2.css" />
 </head>
 <body>
   <!-- ================= LOGIN ================= -->
   <div class="login-wrap" id="loginWrap">
-    <form class="login-card" id="loginForm">
-      <img src="/img/lit-logo-color.png" alt="LIT Nexus — Loyalty Integrity Talent" class="login-logo" />
-      <div class="sub">Employee Portal — sign in to continue</div>
-      <label for="email">Email</label>
-      <input type="email" id="email" autocomplete="username" required />
-      <label for="password">Password</label>
-      <input type="password" id="password" autocomplete="current-password" required />
-      <div class="err" id="loginErr"></div>
-      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px;">Sign in</button>
-    </form>
+    <section class="login-brand" aria-hidden="true">
+      <img src="/img/lit-logo-white.png" alt="" class="login-brand-logo" />
+      <div>
+        <h1 class="login-brand-title">Your workday, all in one place.</h1>
+        <p class="login-brand-sub">Clock in, request time off, track tasks and download pay stubs.</p>
+      </div>
+      <div class="login-brand-foot">Loyalty · Integrity · Talent</div>
+    </section>
+    <section class="login-panel">
+      <form class="login-card" id="loginForm">
+        <img src="/img/lit-logo-color.png" alt="LIT Nexus — Loyalty Integrity Talent" class="login-logo" />
+        <h2 class="login-title">Sign in</h2>
+        <div class="sub">Employee Portal — use your work email to continue.</div>
+        <label for="email">Work email</label>
+        <input type="email" id="email" autocomplete="username" required />
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required />
+        <div class="err" id="loginErr" role="alert"></div>
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+        <p class="login-alt">Partner or billing admin? <a href="/admin" id="toAdminLogin">Sign in to the admin console</a></p>
+      </form>
+
+      <form class="login-card admin-login" id="adminLoginForm" hidden>
+        <div class="login-kicker">ADMIN CONSOLE</div>
+        <h2 class="login-title" id="adminLoginTitle">Partner sign in</h2>
+        <div class="sub" id="adminLoginSub">Restricted to portal administrators. Step 1 of 2.</div>
+        <div id="adminStep1">
+          <label for="adminEmail">Admin email</label>
+          <input type="email" id="adminEmail" autocomplete="username" />
+          <label for="adminPassword">Password</label>
+          <input type="password" id="adminPassword" autocomplete="current-password" />
+        </div>
+        <div id="adminStep2" hidden>
+          <div id="adminEnroll" hidden>
+            <p class="login-help">Open your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy), add an account, and enter this setup key:</p>
+            <code class="setup-key" id="adminSecret"></code>
+            <p class="login-help"><a href="#" id="adminOtpLink">Open in authenticator app</a> (on this phone)</p>
+          </div>
+          <label for="adminCode">6-digit code</label>
+          <input type="text" id="adminCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9 ]*" />
+          <details class="login-backup" id="adminBackupWrap"><summary>Use a backup code instead</summary>
+            <label for="adminBackup">Backup code</label>
+            <input type="text" id="adminBackup" autocomplete="off" />
+          </details>
+        </div>
+        <div class="err" id="adminLoginErr" role="alert"></div>
+        <button type="submit" class="btn btn-navy btn-block" id="adminLoginBtn">Continue</button>
+        <p class="login-alt">Employee? <a href="/" id="toEmployeeLogin">Go to the employee portal</a> · Every admin sign-in is recorded.</p>
+      </form>
+    </section>
   </div>
 
   <!-- ================= APP SHELL ================= -->
@@ -37,6 +78,8 @@
         <a class="nav-item active" data-view="dashboard" href="#/dashboard"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 9.6V20h12V9.6"/></svg></span> Dashboard</a>
         <a class="nav-item" data-view="clock" href="#/clock"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span> Clock</a>
         <a class="nav-item" data-view="employees" href="#/employees"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M20.5 19a5.5 5.5 0 0 0-3.5-5.1"/></svg></span> Employees</a>
+        <a class="nav-item" data-view="messages" href="#/messages"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg></span> Messages</a>
+        <a class="nav-item" data-view="schedule" href="#/schedule"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="15" rx="2.5"/><path d="M4 10h16M8.5 3v4.5M15.5 3v4.5"/><path d="M8 14h3v3H8z"/></svg></span> Calendar</a>
         <div class="nav-group">
           <a class="nav-item" data-view="tasks" href="#/tasks"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span> Tasks</a>
           <button class="nav-group-toggle admin-only" type="button" aria-expanded="false" aria-controls="nav-tasks-pages" aria-label="Task pages">⌄</button>
@@ -54,6 +97,10 @@
             <a class="nav-item" data-view="bonuses" href="#/bonuses"><span class="ico" aria-hidden="true">🎁</span> Bonus history</a>
           </div>
         </div>
+        <div class="nav-label console-only">ADMIN CONSOLE</div>
+        <a class="nav-item console-only" data-view="billing" href="#/billing"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6M9 14h6M9 18h3"/></svg></span> Billing &amp; Invoices</a>
+        <a class="nav-item console-only owner-only" data-view="access" href="#/access"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg></span> People &amp; Access</a>
+        <a class="nav-item console-only owner-only" data-view="integrations" href="#/integrations"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg></span> Integrations</a>
         <button type="button" class="nav-item staff-more" id="staffMore" aria-expanded="false" aria-controls="nav-achievements nav-noticeboard nav-calendar nav-directory">
           <span class="ico" aria-hidden="true">•••</span> More
         </button>
@@ -78,7 +125,16 @@
       </details>
     </aside>
 
-    <main class="main" id="main"><!-- views injected by app.js --></main>
+    <div class="content">
+      <header class="topbar">
+        <div class="topbar-title" id="topTitle">Home</div>
+        <div class="topbar-spacer"></div>
+        <a class="console-pill" id="consolePill" href="/admin" hidden>Enter admin console</a>
+        <span class="console-pill on" id="consoleOn" hidden>Admin console</span>
+        <span class="topbar-user"><span class="avatar avatar-sm" id="topAvatar">—</span><span><span class="topbar-name" id="topName">—</span><span class="topbar-role" id="topRole">—</span></span></span>
+      </header>
+      <main class="main" id="main"><!-- views injected by app.js --></main>
+    </div>
   </div>
 
   <!-- Modal + toast containers -->
@@ -89,6 +145,7 @@
   <script src="/js/asana-review.js"></script>
   <script src="/js/salaries.js"></script>
   <script src="/js/dashboard-announcement.js"></script>
+  <script src="/js/portal-v2.js"></script>
   <script src="/js/app.js"></script>
   <script src="/js/achievements-enhance.js"></script>
 </body>

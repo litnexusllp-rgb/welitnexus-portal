@@ -33,7 +33,7 @@ if (!isMainThread) {
     db = require('./db').db;
     // Startup-wide recalculation runs here, off the HTTP event loop.
     require('./leavePolicy').syncAllBalances();
-    for (const [file, method] of [['recurring', 'startRecurringScheduler'], ['autoAbsence', 'startAbsenceScheduler'], ['backupMailer', 'startBackupScheduler'], ['birthdays', 'startBirthdayScheduler']]) {
+    for (const [file, method] of [['recurring', 'startRecurringScheduler'], ['autoAbsence', 'startAbsenceScheduler'], ['backupMailer', 'startBackupScheduler'], ['birthdays', 'startBirthdayScheduler'], ['v2/scheduler', 'startV2Scheduler']]) {
       const cancel = require('./' + file)[method](); if (cancel) stops.push(cancel);
     }
     const eod = require('./eodScheduler').getScheduler(); eod.start(); stops.push(() => eod.stop());

@@ -3,6 +3,7 @@
   'use strict';
 
   let ME = null;
+  let ACCESS = { adminLevel: null, console: false };
   let clockTimer = null;
   let dashTimers = [];          // ticking + polling intervals for the admin dashboard
   let DASH_LIVE = null;         // snapshot used to advance the live worked timers
@@ -11,6 +12,8 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isAdmin = () => ME && ME.role === 'ADMIN';
+  const inConsole = () => Boolean(ACCESS && ACCESS.console && ACCESS.adminLevel);
+  const isAdminPath = () => /^\/admin\/?$/.test(window.location.pathname);
   const fmtMins = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
   const attendanceTime = (ts, timezone) => ts ? new Date(ts).toLocaleString([], { timeZone: timezone || 'Asia/Kolkata', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
   // Friendly date: '2026-06-22' -> '22 Jun 2026'. Passes through anything else.
@@ -214,8 +217,11 @@
   // ---------- auth bootstrap ----------
   async function boot() {
     try {
-      const { user } = await api.get('/auth/me');
-      ME = user; showApp();
+      const { user, access } = await api.get('/auth/me');
+      ME = user; ACCESS = access || ACCESS;
+      // Visiting /admin without an admin console session asks for the second login.
+      if (isAdminPath() && !inConsole() && ACCESS.adminLevel) return showLogin();
+      showApp();
     } catch (_e) {
       showLogin();
     }
@@ -224,12 +230,93 @@
   function showLogin() {
     $('#loginWrap').style.display = 'grid';
     $('#app').classList.remove('show');
+    const admin = isAdminPath();
+    document.body.classList.remove('in-console', 'console-owner');
+    $('#loginForm').hidden = admin;
+    $('#adminLoginForm').hidden = !admin;
+    document.body.classList.toggle('admin-login-mode', admin);
+    $('.login-brand-title').textContent = admin ? 'Admin console for partners and billing.' : 'Your workday, all in one place.';
+    $('.login-brand-sub').textContent = admin ? 'People, payroll, billing and integrations — protected by 2-step verification.' : 'Clock in, request time off, track tasks and download pay stubs.';
+    document.title = admin ? 'Admin console sign in · LIT Nexus' : 'Sign in · LIT Nexus Workforce Portal';
+    if (admin) resetAdminLogin();
   }
+
+  // ---------- Admin console sign-in (password, then 6-digit code) ----------
+  let adminChallenge = null;
+  function resetAdminLogin() {
+    adminChallenge = null;
+    $('#adminStep1').hidden = false; $('#adminStep2').hidden = true; $('#adminEnroll').hidden = true;
+    $('#adminLoginTitle').textContent = 'Partner sign in';
+    $('#adminLoginSub').textContent = 'Restricted to portal administrators. Step 1 of 2.';
+    $('#adminLoginBtn').textContent = 'Continue';
+    $('#adminLoginErr').textContent = '';
+    if (ME && ME.email) $('#adminEmail').value = ME.email;
+  }
+  $('#adminLoginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('#adminLoginErr').textContent = '';
+    const btn = $('#adminLoginBtn'); btn.disabled = true;
+    try {
+      if (!adminChallenge) {
+        const r = await api.post('/admin/auth/login', { email: $('#adminEmail').value, password: $('#adminPassword').value });
+        if (r.ok) return finishAdminLogin(r);
+        adminChallenge = r.challengeId;
+        $('#adminStep1').hidden = true; $('#adminStep2').hidden = false;
+        $('#adminEnroll').hidden = r.step !== 'enroll';
+        $('#adminBackupWrap').hidden = r.step === 'enroll';
+        if (r.step === 'enroll') {
+          $('#adminSecret').textContent = r.secret.replace(/(.{4})/g, '$1 ').trim();
+          $('#adminOtpLink').href = r.otpauth;
+          $('#adminLoginTitle').textContent = 'Set up 2-step verification';
+          $('#adminLoginSub').textContent = 'One-time setup. Step 2 of 2.';
+        } else {
+          $('#adminLoginTitle').textContent = 'Verify it\u2019s you';
+          $('#adminLoginSub').textContent = 'Enter the 6-digit code from your authenticator app. Step 2 of 2.';
+        }
+        btn.textContent = 'Verify & open console';
+        $('#adminCode').value = ''; $('#adminCode').focus();
+      } else {
+        const backup = $('#adminBackup').value.trim();
+        const r = await api.post('/admin/auth/verify', backup ? { challengeId: adminChallenge, backupCode: backup } : { challengeId: adminChallenge, code: $('#adminCode').value.replace(/\s+/g, '') });
+        finishAdminLogin(r);
+      }
+    } catch (err) {
+      $('#adminLoginErr').textContent = err.message;
+      if (/expired|start again/i.test(err.message)) resetAdminLogin();
+    } finally { btn.disabled = false; }
+  });
+  function finishAdminLogin(r) {
+    ME = r.user; ACCESS = r.access;
+    $('#adminPassword').value = ''; $('#adminCode').value = ''; $('#adminBackup').value = '';
+    window.history.replaceState(null, '', '/#/' + (ACCESS.adminLevel === 'BILLING' ? 'billing' : 'dashboard'));
+    showApp();
+    if (r.backupCodes) {
+      modal(`<h3>Save your backup codes</h3>
+        <p class="page-sub">Each code works once if you lose your phone. Store them somewhere safe — they will not be shown again.</p>
+        <div class="backup-codes">${r.backupCodes.map((c) => `<code>${esc(c)}</code>`).join('')}</div>
+        <div class="modal-actions"><button class="btn btn-primary" id="mDone">I saved them</button></div>`);
+      $('#mDone').addEventListener('click', closeModal);
+    }
+  }
+  $('#toAdminLogin').addEventListener('click', (e) => { e.preventDefault(); window.history.pushState(null, '', '/admin'); showLogin(); });
+  $('#toEmployeeLogin').addEventListener('click', (e) => {
+    e.preventDefault(); window.history.pushState(null, '', '/');
+    if (ME) { showApp(); } else showLogin();
+  });
+  window.addEventListener('popstate', () => { if (!ME || (isAdminPath() && !inConsole())) showLogin(); });
 
   function showApp() {
     $('#loginWrap').style.display = 'none';
     $('#app').classList.add('show');
     document.body.classList.toggle('is-admin', isAdmin());
+    document.body.classList.toggle('in-console', inConsole());
+    document.body.classList.toggle('console-owner', inConsole() && ACCESS.adminLevel === 'OWNER');
+    if (isAdminPath()) window.history.replaceState(null, '', '/' + (window.location.hash || '#/dashboard'));
+    $('#topName').textContent = ME.name;
+    $('#topRole').textContent = ACCESS.adminLevel === 'OWNER' ? 'Partner · Admin' : ACCESS.adminLevel === 'BILLING' ? 'Billing admin' : (ME.title || 'Employee');
+    $('#topAvatar').textContent = initials(ME.name || '?');
+    $('#consolePill').hidden = !ACCESS.adminLevel || inConsole();
+    $('#consoleOn').hidden = !inConsole();
     $('#meName').textContent = ME.name;
     $('#meRole').textContent = `${ME.title || ME.role} · ${ME.department || '—'}`;
     startNotifications();
@@ -243,7 +330,9 @@
     $('#loginErr').textContent = '';
     try {
       const { user } = await api.post('/auth/login', { email: $('#email').value, password: $('#password').value });
-      ME = user; showApp();
+      ME = user;
+      try { ACCESS = (await api.get('/auth/me')).access || ACCESS; } catch (_e) { /* keep defaults */ }
+      showApp();
     } catch (err) { $('#loginErr').textContent = err.message; }
   });
 
@@ -277,7 +366,7 @@
       try {
         await api.post('/auth/logout');
         closeModal();
-        ME = null; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
+        ME = null; ACCESS = { adminLevel: null, console: false }; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
       } catch (e) {
         toast(e.message || 'Unable to sign out. Please try again.', true);
         proceed.disabled = false; cancel.disabled = false; check.disabled = false;
@@ -402,6 +491,9 @@
     if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) view = 'dashboard';
     const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'late-requests'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
+    // Admin console pages need the second (admin console) sign-in.
+    if (['billing', 'access', 'integrations'].includes(view) && !(typeof inConsole === 'function' && inConsole())) view = 'dashboard';
+    if (['access', 'integrations'].includes(view) && ACCESS.adminLevel !== 'OWNER') view = 'dashboard';
     const employeeAliases = { myperf: 'employeePerformance', leaves: 'employeeLeaves', salaries: 'employeeSalary', 'late-requests': 'employeeRequests' };
     const legacyEmployeeView = Object.hasOwn(employeeAliases, view);
     employeeSection = legacyEmployeeView ? employeeAliases[view] : 'employeePerformance';
@@ -419,6 +511,7 @@
     const selected = document.querySelector('.nav-item.active');
     navGroups.forEach(button => showNavGroup(button, isAdmin() && button.parentElement.contains(selected)));
     document.title = (selected ? selected.textContent.trim() + ' · ' : '') + 'WeLitNexus Portal';
+    const topTitle = $('#topTitle'); if (topTitle) topTitle.textContent = selected ? selected.textContent.trim() : 'Home';
     closeModal();
     clearInterval(clockTimer);
     dashTimers.forEach(clearInterval); dashTimers = []; DASH_LIVE = null;
@@ -436,6 +529,17 @@
 
   // Preserve bookmarks and notification destinations after consolidation.
   for (const legacy of ['myperf', 'leaves', 'salaries', 'late-requests']) VIEWS[legacy] = () => navigate(legacy);
+
+  // ---------- Portal v2 views (public/js/portal-v2.js) ----------
+  const v2 = (name) => () => window.PortalV2[name]({
+    api, $, esc, toast, modal, closeModal, setMain, navigate, fmtDate, initials,
+    me: () => ME, access: () => ACCESS, isAdmin, onInterval: (timer) => dashTimers.push(timer),
+  });
+  VIEWS.messages = v2('messages');
+  VIEWS.schedule = v2('schedule');
+  VIEWS.billing = v2('billing');
+  VIEWS.access = v2('access');
+  VIEWS.integrations = v2('integrations');
 
   VIEWS.taskreview = async () => {
     if (!isAdmin()) return;
