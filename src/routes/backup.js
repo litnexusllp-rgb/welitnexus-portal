@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { db } = require('../db');
 const { now } = require('../time');
-const { requireAdmin } = require('../auth');
+const { requireAdmin, hasAdminAccess } = require('../auth');
 const { sendBackup } = require('../backupMailer');
 
 const router = express.Router();
@@ -33,8 +33,11 @@ function allow(req, res, next) {
     typeof presented === 'string' &&
     Buffer.byteLength(expected) === Buffer.byteLength(presented) &&
     require('node:crypto').timingSafeEqual(Buffer.from(expected), Buffer.from(presented));
-  const adminOk = req.user && req.user.role === 'ADMIN';
-  if (tokenOk || adminOk) return next();
+  // Same rule as every other admin route: with ADMIN_CONSOLE_REQUIRED=on a
+  // password-only admin session is not enough to download the database.
+  if (tokenOk || hasAdminAccess(req)) return next();
+  if (req.user && req.user.role === 'ADMIN')
+    return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
   return res.status(403).json({ error: 'Admins only (or a valid backup token)' });
 }
 

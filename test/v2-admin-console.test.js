@@ -298,6 +298,12 @@ test('admin console: two-step sign-in, roles, people and billing', async (t) => 
   try {
     assert.equal((await call(base, plain, 'GET', '/api/users/manage')).status, 403);
     assert.equal((await call(base, owner, 'GET', '/api/users/manage')).status, 200);
+    // The full database backup follows the same rule: password alone is not enough.
+    const refused = await call(base, plain, 'GET', '/api/backup');
+    assert.equal(refused.status, 403);
+    assert.equal(refused.body.code, 'ADMIN_CONSOLE');
+    assert.equal((await call(base, plain, 'POST', '/api/backup/email')).status, 403);
+    assert.equal((await call(base, owner, 'GET', '/api/backup')).status, 200);
   } finally {
     delete process.env.ADMIN_CONSOLE_REQUIRED;
   }

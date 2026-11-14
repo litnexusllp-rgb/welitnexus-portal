@@ -119,10 +119,18 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// True only for a session allowed to use admin-only features: an ADMIN user
+// who, when ADMIN_CONSOLE_REQUIRED=on, has also passed the admin console
+// sign-in. Every admin check must go through this so a password-only session
+// can never reach admin data once enforcement is on.
+function hasAdminAccess(req) {
+  return Boolean(req.user && req.user.role === 'ADMIN' && (!consoleRequired() || req.adminConsole));
+}
+
 function requireAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admins only' });
-  if (consoleRequired() && !req.adminConsole)
+  if (!hasAdminAccess(req))
     return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
   next();
 }
@@ -134,6 +142,7 @@ module.exports = {
   setAdminCookie,
   clearAdminCookie,
   consoleRequired,
+  hasAdminAccess,
   hashPassword,
   verifyPassword,
   issueToken,
