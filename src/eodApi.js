@@ -59,7 +59,7 @@ function createApi(config, fetchImpl = fetch, wait = sleep) {
     return out;
   }
 
-  async function collect(window) {
+  async function collect(_window) {
     const tasks = new Map(); const projects = [];
     for (const project of config.projects) {
       const meta = await asana(`/projects/${encodeURIComponent(project)}?opt_fields=name`);

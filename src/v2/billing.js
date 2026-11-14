@@ -117,6 +117,7 @@ function summary(fy, currency = 'USD') {
 // ---------- PDF ----------
 const fontDir = path.join(__dirname, '..', '..', 'assets', 'fonts');
 const logo = path.join(__dirname, '..', '..', 'public', 'img', 'Color Logo.jpg');
+// eslint-disable-next-line no-control-regex -- strips control characters PDFKit cannot render
 const safe = (v) => String(v ?? '').replace(/[\x00-\x09\x0b-\x1f\x7f]/g, ' ').slice(0, 1000);
 const niceDate = (iso) => iso ? DateTime.fromISO(iso, { zone: ZONE }).toFormat('LLL d, yyyy') : '';
 const TERM_LABEL = { DUE_ON_RECEIPT: 'Due on receipt', NET_7: 'Net 7', NET_15: 'Net 15', NET_30: 'Net 30', NET_45: 'Net 45', NET_60: 'Net 60' };

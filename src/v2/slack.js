@@ -156,6 +156,7 @@ async function post(portalUser, channelId, text, threadTs) {
 
 async function upload(portalUser, channelId, { filename, buffer, comment, threadTs }) {
   await assertMember(portalUser, channelId);
+  // eslint-disable-next-line no-control-regex -- filenames must not carry control characters
   const name = String(filename || 'file').replace(/[\\/\x00-\x1f]/g, '_').slice(0, 200);
   const start = await call('files.getUploadURLExternal', { filename: name, length: buffer.length }, { json: false });
   const put = await fetch(start.upload_url, { method: 'POST', body: buffer, headers: { 'Content-Type': 'application/octet-stream' }, signal: AbortSignal.timeout(120000) });

@@ -103,7 +103,7 @@ app.get('/api/health', (_req, res) => {
     db.prepare('SELECT 1').get();
     if (!backgroundHealth()) return res.status(503).json({ ok: false, error: 'background worker unavailable', ts: Date.now() });
     res.json({ ok: true, ts: Date.now(), revision: process.env.RAILWAY_GIT_COMMIT_SHA || null });
-  } catch (e) {
+  } catch (_e) {
     res.status(503).json({ ok: false, error: 'database unavailable', ts: Date.now() });
   }
 });
@@ -118,7 +118,6 @@ app.get('*', (req, res, next) => {
 });
 
 // Global error handler — keep API responses JSON and never leak stack traces.
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
   if (res.headersSent) return _next(err);
   const status = Number.isInteger(err.status) && err.status >= 400 && err.status <= 599 ? err.status : 500;

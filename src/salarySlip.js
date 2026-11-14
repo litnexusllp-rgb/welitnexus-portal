@@ -14,6 +14,7 @@ const company = {
   city: 'Sector-75, Industrial Area, Mohali, Punjab - 160071',
 };
 const money = value => Number.isSafeInteger(value) ? 'INR ' + (value / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Not recorded';
+// eslint-disable-next-line no-control-regex -- strips control characters PDFKit cannot render
 const safeText = value => String(value ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').replace(/[\u2010-\u2015]/g, '-').slice(0, 240) || 'Not recorded';
 const dayCount = value => `${value} ${value === 1 ? 'day' : 'days'}`;
 const date = iso => DateTime.fromISO(iso, { zone: ZONE }).toFormat('d LLL yyyy');

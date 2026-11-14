@@ -11,7 +11,7 @@
 //   BACKUP_EMAIL_HOUR (office-zone hour, default 6), BACKUP_WEEKLY_DOW (1=Mon).
 
 const nodemailer = require('nodemailer');
-const { db, DB_PATH } = require('./db');
+const { db } = require('./db');
 const { now, DateTime, ZONE } = require('./time');
 
 const cfg = () => ({

@@ -1196,8 +1196,6 @@
     } catch (e) { toast(e.message, true); }
   }
 
-  async function loadMyLeaves() { return loadEmployeeLeaveDetails(); }
-
   async function loadEmployeeLeaveDetails() {
     const host = $('#employeeLeaveDetails'), user = selectedEmployee();
     if (!host || !user) return;
@@ -2461,7 +2459,7 @@
   async function loadKpi() {
     try {
       const m = $('#kpiMonth').value || thisMonthISO();
-      const { rows, shiftStart, graceMin } = await api.get(`/kpi?month=${m}`);
+      const { rows, graceMin } = await api.get(`/kpi?month=${m}`);
       KPI_ROWS = rows;
       renderKpiTable();
       const note = $('#kpiNote');

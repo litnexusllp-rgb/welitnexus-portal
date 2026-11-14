@@ -17,7 +17,6 @@ test('half-day holidays persist, can be edited and feed attendance and absence f
   legacy.close();
   const express = require('express');
   const listen = express.application.listen;
-  const originalListen = listen;
   const { app } = require('../src/server');
   await require('../src/bootstrap').bootstrapAdmin();
   const { db } = require('../src/db'); const { COOKIE, issueToken } = require('../src/auth');

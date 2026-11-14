@@ -15,7 +15,7 @@ test('attendance sessions survive local midnight, office cutover and timezone di
   const { DateTime, Settings } = require('luxon');
   const { attendanceDayFromTs } = require('../src/time');
   const { summarize } = require('../src/compute');
-  const { settings, daySettings } = require('../src/attendanceSession');
+  const { daySettings } = require('../src/attendanceSession');
   const auth = require('../src/auth');
   const express = require('express');
   const app = express(); app.use(express.json(), require('cookie-parser')(), auth.loadUser);

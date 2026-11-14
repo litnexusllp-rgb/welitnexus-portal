@@ -198,7 +198,7 @@
     const root = $('#calRoot');
     let view = 'week';
     let anchor = new Date(); anchor.setHours(0, 0, 0, 0);
-    let sources = [], status = {}, events = [], conflicts = new Set();
+    let sources = [], events = [], conflicts = new Set();
 
     root.innerHTML = `
       <aside class="cal2-side card">
@@ -233,7 +233,7 @@
     }
 
     async function loadSources() {
-      try { [{ sources }, status] = await Promise.all([api.get('/calendar/sources'), api.get('/calendar/status')]); } catch (e) { toast(e.message, true); }
+      try { ({ sources } = await api.get('/calendar/sources')); } catch (e) { toast(e.message, true); }
       const groups = [['Your accounts', sources.filter((s) => s.kind !== 'ICS')], ['Client & shared calendars', sources.filter((s) => s.kind === 'ICS')]];
       $('#calSources').innerHTML = groups.map(([title, list]) => `<div class="cal2-group"><div class="nav-label dark">${esc(title.toUpperCase())}</div>
         ${list.length ? list.map((s) => `<div class="cal2-src"><label><input type="checkbox" data-vis="${s.id}" ${s.visible ? 'checked' : ''}><span class="swatch" style="background:${esc(s.color)}"></span><span><span class="cal2-src-name">${esc(s.label)}</span>${s.last_error ? `<span class="err-inline small">${esc(s.last_error)}</span>` : ''}${s.read_only ? '<span class="msg-sub small">Read-only</span>' : ''}</span></label>
