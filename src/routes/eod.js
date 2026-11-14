@@ -1,4 +1,5 @@
 'use strict';
+const asyncRoute = require('../asyncRoute');
 const router = require('express').Router();
 const { requireAdmin } = require('../auth');
 const { getScheduler } = require('../eodScheduler');
@@ -6,7 +7,7 @@ router.use(requireAdmin);
 router.get('/status', (_req, res) => res.json(getScheduler().status()));
 router.get(
   '/check',
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     try {
       res.json(await getScheduler().check());
     } catch (e) {
@@ -16,7 +17,7 @@ router.get(
 );
 router.get(
   '/preview',
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     try {
       res.json(await getScheduler().preview());
     } catch (e) {

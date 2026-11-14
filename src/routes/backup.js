@@ -4,6 +4,7 @@
 // Access: an admin session, OR ?token=<BACKUP_TOKEN> for unattended/cron backups.
 
 const express = require('express');
+const asyncRoute = require('../asyncRoute');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +12,7 @@ const { db } = require('../db');
 const { now } = require('../time');
 const { requireAdmin, hasAdminAccess } = require('../auth');
 const { sendBackup } = require('../backupMailer');
+const { safeEqual } = require('../v2/crypto');
 
 const router = express.Router();
 
@@ -18,7 +20,7 @@ const router = express.Router();
 router.post(
   '/email',
   requireAdmin,
-  require('../asyncRoute')(async (req, res) => {
+  asyncRoute(async (req, res) => {
     const result = await sendBackup('Test');
     res.json(result);
   }),
@@ -27,12 +29,7 @@ router.post(
 function allow(req, res, next) {
   const expected = process.env.BACKUP_TOKEN;
   const presented = req.get('authorization')?.replace(/^Bearer /i, '') || req.query.token;
-  const tokenOk =
-    typeof expected === 'string' &&
-    expected.length > 0 &&
-    typeof presented === 'string' &&
-    Buffer.byteLength(expected) === Buffer.byteLength(presented) &&
-    require('node:crypto').timingSafeEqual(Buffer.from(expected), Buffer.from(presented));
+  const tokenOk = Boolean(expected) && safeEqual(expected, presented);
   // Same rule as every other admin route: with ADMIN_CONSOLE_REQUIRED=on a
   // password-only admin session is not enough to download the database.
   if (tokenOk || hasAdminAccess(req)) return next();
@@ -44,7 +41,7 @@ function allow(req, res, next) {
 router.get(
   '/',
   allow,
-  require('../asyncRoute')(async (req, res) => {
+  asyncRoute(async (req, res) => {
     // db.backup() takes a consistent snapshot even while the app is running (WAL-safe).
     const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wln-backup-'));
     const tmp = path.join(dir, 'portal.db');

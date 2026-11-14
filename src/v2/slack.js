@@ -290,7 +290,7 @@ function verifySignature(rawBody, timestamp, signature, now = Date.now()) {
   if (!secret || !timestamp || !signature) return false;
   if (Math.abs(now / 1000 - Number(timestamp)) > 300) return false;
   const expected = 'v0=' + crypto.createHmac('sha256', secret).update(`v0:${timestamp}:${rawBody}`).digest('hex');
-  return expected.length === signature.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  return require('./crypto').safeEqual(expected, signature);
 }
 
 async function handleEvent(payload) {

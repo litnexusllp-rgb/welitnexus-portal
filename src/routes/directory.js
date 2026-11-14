@@ -51,7 +51,7 @@ router.get('/', requireAuth, (_req, res) => res.json({ users: listAll.all() }));
 router.get(
   '/manage',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     await syncAllBalancesAsync();
     res.json({ users: listAllIncInactive.all() });
   }),

@@ -4,6 +4,7 @@
 // decide bonuses: attendance, hours, task throughput & punctuality, leave
 // taken, and acknowledged achievement points.
 
+const asyncRoute = require('../asyncRoute');
 const express = require('express');
 const { db } = require('../db');
 const { requireAdmin, requireAuth } = require('../auth');
@@ -214,7 +215,7 @@ async function buildKpi(req) {
 router.get(
   '/',
   requireAdmin,
-  require('../asyncRoute')(async (req, res) => res.json(await buildKpi(req))),
+  asyncRoute(async (req, res) => res.json(await buildKpi(req))),
 );
 
 // One person's KPI row. Employees always get their own; admins may pass
@@ -222,7 +223,7 @@ router.get(
 router.get(
   '/me',
   requireAuth,
-  require('../asyncRoute')(async (req, res) => {
+  asyncRoute(async (req, res) => {
     const asked = Number(req.query.user_id);
     const targetId = req.user.role === 'ADMIN' && asked ? asked : req.user.id;
     const data = await buildKpi(req);

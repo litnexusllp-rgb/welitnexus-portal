@@ -4,6 +4,7 @@
 // people their own tasks and lets an admin check the connection.
 
 const express = require('express');
+const asyncRoute = require('../asyncRoute');
 const { requireAuth, requireAdmin } = require('../auth');
 const { enabled, myTasks, teamTasks, diagnose, adminWork } = require('../asana');
 
@@ -17,7 +18,7 @@ router.get('/status', requireAuth, (_req, res) => res.json({ enabled: enabled() 
 router.get(
   '/admin-work',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
       res.json(await adminWork());
@@ -31,7 +32,7 @@ router.get(
 router.get(
   '/my-tasks',
   requireAuth,
-  require('../asyncRoute')(async (req, res) => {
+  asyncRoute(async (req, res) => {
     if (!enabled()) return res.json({ enabled: false, tasks: [] });
     try {
       res.json({ enabled: true, tasks: await myTasks(req.user.id) });
@@ -45,7 +46,7 @@ router.get(
 router.get(
   '/team-tasks',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     if (!enabled()) return res.json({ enabled: false, groups: [], totalPending: 0, totalOverdue: 0 });
     try {
       res.json({ enabled: true, ...(await teamTasks()) });
@@ -60,7 +61,7 @@ router.get(
 router.post(
   '/test',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => res.json(await diagnose())),
+  asyncRoute(async (_req, res) => res.json(await diagnose())),
 );
 
 module.exports = router;

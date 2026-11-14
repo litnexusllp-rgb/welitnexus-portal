@@ -7,14 +7,9 @@
 const crypto = require('node:crypto');
 const { db } = require('../db');
 
-const API = process.env.ASANA_API_BASE || 'https://app.asana.com/api/1.0';
-const cfg = () => ({ token: process.env.ASANA_TOKEN || '', project: process.env.ASANA_PROJECT_GID || '' });
-const enabled = () => {
-  const c = cfg();
-  return Boolean(c.token && c.project);
-};
+const { API, cfg, enabled } = require('../asana');
 
-async function request(method, path, data) {
+async function request(method, path, data, timeoutMs = 15000) {
   if (!enabled())
     throw Object.assign(new Error('Asana is not connected. Add ASANA_TOKEN and ASANA_PROJECT_GID in Railway.'), {
       status: 503,
@@ -23,7 +18,7 @@ async function request(method, path, data) {
     method,
     headers: { Authorization: `Bearer ${cfg().token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: data ? JSON.stringify({ data }) : undefined,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok)
@@ -93,6 +88,9 @@ async function comment(gid, text, author) {
   return { gid: story.gid };
 }
 
+// Ask Asana to call the portal whenever the project changes.
+const createWebhook = (target) => request('POST', '/webhooks', { resource: cfg().project, target }, 30000);
+
 function projectForChannel(channelId) {
   const row = db.prepare('SELECT asana_project_gid FROM int_channel_links WHERE channel_id=?').get(channelId);
   return (row && row.asana_project_gid) || cfg().project;
@@ -112,7 +110,16 @@ function verifyWebhook(rawBody, signature) {
   const secret = webhookSecret();
   if (!secret || !signature) return false;
   const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  return expected.length === signature.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  return require('./crypto').safeEqual(expected, signature);
 }
 
-module.exports = { enabled, createTask, updateTask, comment, projectForChannel, verifyWebhook, saveWebhookSecret };
+module.exports = {
+  enabled,
+  createTask,
+  updateTask,
+  comment,
+  createWebhook,
+  projectForChannel,
+  verifyWebhook,
+  saveWebhookSecret,
+};

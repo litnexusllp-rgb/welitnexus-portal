@@ -131,16 +131,9 @@ tasks.post(
     db.prepare(
       "INSERT INTO int_settings(key,value,updated_ts) VALUES ('asana_webhook_pending','1',?) ON CONFLICT(key) DO UPDATE SET updated_ts=excluded.updated_ts",
     ).run(Date.now());
-    const r = await fetch(`${process.env.ASANA_API_BASE || 'https://app.asana.com/api/1.0'}/webhooks`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.ASANA_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: { resource: process.env.ASANA_PROJECT_GID, target: `${base}/api/hooks/asana` } }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) return res.status(502).json({ error: 'Asana: ' + (body.errors?.[0]?.message || r.status) });
-    audit(req, 'asana.webhook_created', `asana:${body.data?.gid}`);
-    res.json({ ok: true, gid: body.data?.gid });
+    const hook = await asanaWrite.createWebhook(`${base}/api/hooks/asana`);
+    audit(req, 'asana.webhook_created', `asana:${hook?.gid}`);
+    res.json({ ok: true, gid: hook?.gid });
   }),
 );
 

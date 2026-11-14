@@ -1,4 +1,5 @@
 'use strict';
+const asyncRoute = require('../asyncRoute');
 const router = require('express').Router();
 const { requireAuth, requireAdmin } = require('../auth');
 const { db } = require('../db');
@@ -60,7 +61,7 @@ router.get(
   requireAuth,
   requireEmployee,
   slipLimiter,
-  require('../asyncRoute')((req, res) => sendSlip(req, res, req.user.id)),
+  asyncRoute((req, res) => sendSlip(req, res, req.user.id)),
 );
 
 router.use(requireAdmin);
@@ -77,7 +78,7 @@ router.get(
   '/:id/slip',
   require('../requestValidation').validateParams,
   slipLimiter,
-  require('../asyncRoute')((req, res) => sendSlip(req, res, Number(req.params.id))),
+  asyncRoute((req, res) => sendSlip(req, res, Number(req.params.id))),
 );
 
 function fail(message, status = 400) {

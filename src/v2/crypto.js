@@ -105,6 +105,15 @@ function otpauthUri(secret, accountName, issuer = 'LIT Nexus Portal') {
   return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=${STEP}`;
 }
 
+// Constant-time comparison of two secrets. False for anything that is not a
+// pair of equal-length strings, so callers never need their own length check.
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const randomId = (bytes = 24) => crypto.randomBytes(bytes).toString('base64url');
 
@@ -121,5 +130,6 @@ module.exports = {
   base32Encode,
   base32Decode,
   sha256,
+  safeEqual,
   randomId,
 };

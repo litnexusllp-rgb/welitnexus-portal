@@ -1,5 +1,6 @@
 'use strict';
 
+const asyncRoute = require('../asyncRoute');
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
@@ -326,7 +327,7 @@ router.post('/:id/half-day', requireAdmin, require('../requestValidation').valid
 router.post(
   '/flag-absences',
   requireAdmin,
-  require('../asyncRoute')(async (req, res) => {
+  asyncRoute(async (req, res) => {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day))
       ? String(req.query.day)
       : lastCompletedAttendanceDay();
@@ -340,7 +341,7 @@ router.post(
 router.get(
   '/pending',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     await syncAllBalancesAsync();
     res.json({ leaves: present(allPending.all()) });
   }),
@@ -348,7 +349,7 @@ router.get(
 router.get(
   '/all',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     await syncAllBalancesAsync();
     res.json({ leaves: present(allLeaves.all()) });
   }),
@@ -383,7 +384,7 @@ function takenInWindow(winStart, winEnd) {
 router.get(
   '/summary',
   requireAdmin,
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     await syncAllBalancesAsync();
     const today = todayStr();
     const win0 = now().minus({ days: 29 }).toFormat('yyyy-LL-dd');

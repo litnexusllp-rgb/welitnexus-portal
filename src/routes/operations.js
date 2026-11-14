@@ -1,4 +1,5 @@
 'use strict';
+const asyncRoute = require('../asyncRoute');
 const router = require('express').Router();
 const { db } = require('../db');
 const { requireAdmin } = require('../auth');
@@ -26,7 +27,7 @@ router.get('/dashboard-approvals', (_req, res) => {
 });
 router.get(
   '/attendance-slack/check',
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     const settings = attendanceSlackConfig();
     if (!settings)
       return res.status(503).json({
@@ -42,7 +43,7 @@ router.get(
 );
 router.get(
   '/',
-  require('../asyncRoute')(async (_req, res) => {
+  asyncRoute(async (_req, res) => {
     const observedAt = now();
     const today = observedAt.toISODate();
     // Deliberately read only: decisions continue through their existing validated routes.

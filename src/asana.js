@@ -98,33 +98,38 @@ function syncStatus() {
   return { project: cfg().project, lastSuccessAt: cache.at || null, lastError, retryAt: retryAt || null };
 }
 
-// portal user id -> [asana task], using the matching rules described above.
-function indexByPortalUser(tasks) {
-  const users = activeUsers.all();
+// Returns a lookup from an Asana assignee to the matching portal employee
+// (or undefined), using the matching rules described at the top of this file.
+function portalUserMatcher() {
   const byEmail = new Map();
   const byName = new Map();
-  for (const u of users) {
-    if (u.asana_email) byEmail.set(String(u.asana_email).toLowerCase(), u.id);
-    if (u.email) byEmail.set(String(u.email).toLowerCase(), u.id);
-    if (u.name) byName.set(String(u.name).trim().toLowerCase(), u.id);
+  const key = (v) =>
+    String(v || '')
+      .trim()
+      .toLowerCase();
+  for (const u of activeUsers.all()) {
+    if (u.asana_email) byEmail.set(key(u.asana_email), u);
+    if (u.email) byEmail.set(key(u.email), u);
+    if (u.name) byName.set(key(u.name), u);
   }
+  return (assignee) => byEmail.get(String(assignee.email || '').toLowerCase()) || byName.get(key(assignee.name));
+}
+
+// portal user id -> [asana task].
+function indexByPortalUser(tasks) {
+  const match = portalUserMatcher();
   const out = {};
   const unmatched = new Map(); // asana name -> count, so admins can spot gaps
   for (const t of tasks) {
     const a = t.assignee;
     if (!a) continue;
-    const uid =
-      byEmail.get(String(a.email || '').toLowerCase()) ||
-      byName.get(
-        String(a.name || '')
-          .trim()
-          .toLowerCase(),
-      );
-    if (!uid) {
-      unmatched.set(a.name || '(unnamed)', (unmatched.get(a.name || '(unnamed)') || 0) + 1);
+    const user = match(a);
+    if (!user) {
+      const name = a.name || '(unnamed)';
+      unmatched.set(name, (unmatched.get(name) || 0) + 1);
       continue;
     }
-    (out[uid] = out[uid] || []).push(t);
+    (out[user.id] ||= []).push(t);
   }
   return { byUser: out, unmatched: [...unmatched.entries()].map(([name, count]) => ({ name, count })) };
 }
@@ -159,14 +164,7 @@ async function myTasks(userId) {
 // "Unassigned" group, which is usually what needs attention first.
 async function teamTasks() {
   const tasks = await allTasks();
-  const users = activeUsers.all();
-  const byEmail = new Map();
-  const byName = new Map();
-  for (const u of users) {
-    if (u.asana_email) byEmail.set(String(u.asana_email).toLowerCase(), u);
-    if (u.email) byEmail.set(String(u.email).toLowerCase(), u);
-    if (u.name) byName.set(String(u.name).trim().toLowerCase(), u);
-  }
+  const match = portalUserMatcher();
   const today = todayStr();
   const groups = new Map(); // key -> { name, matched, tasks[] }
   for (const t of tasks) {
@@ -179,13 +177,7 @@ async function teamTasks() {
       key = '__unassigned';
       name = 'Unassigned';
     } else {
-      const u =
-        byEmail.get(String(a.email || '').toLowerCase()) ||
-        byName.get(
-          String(a.name || '')
-            .trim()
-            .toLowerCase(),
-        );
+      const u = match(a);
       if (u) {
         key = `u${u.id}`;
         name = u.name;
@@ -345,4 +337,16 @@ async function diagnose() {
   }
 }
 
-module.exports = { enabled, isAssignedTo, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus, adminWork };
+module.exports = {
+  API,
+  cfg,
+  enabled,
+  isAssignedTo,
+  myTasks,
+  teamTasks,
+  kpiTaskStats,
+  diagnose,
+  allTasks,
+  syncStatus,
+  adminWork,
+};
