@@ -145,3 +145,13 @@ test('legacy employee links select their new section and canonicalize the addres
   assert.equal((html.match(/data-view="employees"/g) || []).length, 1);
   for (const old of ['myperf', 'leaves', 'salaries']) assert.ok(!html.includes(`data-view="${old}"`));
 });
+
+test('phone layout never reveals admin-only menu groups to staff', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../public/css/portal.css'), 'utf8');
+  // Reports sits in an admin-only group. A staff-only display rule for menu
+  // groups must exclude admin-only groups, or it overrides their hidden state.
+  assert.match(html, /<div class="nav-group admin-only">\s*<a class="nav-item" data-view="reports"/);
+  const staffGroupRules = css.match(/body:not\(\.is-admin\) #nav \.nav-group[^{]*\{/g) || [];
+  assert.ok(staffGroupRules.length > 0);
+  for (const rule of staffGroupRules) assert.match(rule, /\.nav-group:not\(\.admin-only\)/);
+});

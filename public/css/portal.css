@@ -2425,24 +2425,34 @@ tr.drag-over td {
   .nav-settings {
     grid-column: 1 / -1;
   }
+  /* Staff navigation on phones: one row of equal-width tabs (icon over a
+     short label) so it never wraps to a second row. "More" opens the extra
+     pages underneath. Admin-only groups stay hidden for staff. */
   body:not(.is-admin) #nav {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 2px;
   }
-  body:not(.is-admin) #nav .nav-group {
+  body:not(.is-admin) #nav .nav-group:not(.admin-only) {
     display: flex;
-    flex: 1 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
   }
   body:not(.is-admin) #nav .nav-item {
-    flex: 1 0 auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
     justify-content: center;
-    padding: 8px 4px;
-    min-height: 44px;
-    font-size: 0.78rem;
+    gap: 3px;
+    padding: 6px 2px;
+    min-height: 48px;
+    font-size: 10.5px;
+    letter-spacing: -0.01em;
+    overflow: hidden;
   }
   body:not(.is-admin) #nav .nav-item .ico {
-    display: none;
+    width: 18px;
+    height: 18px;
   }
   body:not(.is-admin) #nav.more-open::before {
     content: '';
@@ -2450,7 +2460,13 @@ tr.drag-over td {
     order: 1;
   }
   body:not(.is-admin) #nav .nav-secondary {
-    flex-basis: calc(50% - 2px);
+    flex: 0 0 calc(50% - 1px);
+    flex-direction: row;
+    gap: 8px;
+    padding: 8px 10px;
+    min-height: 44px;
+    font-size: 13px;
+    letter-spacing: 0;
     order: 2;
   }
   .main {

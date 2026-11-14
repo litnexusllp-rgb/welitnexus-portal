@@ -1131,6 +1131,16 @@ table.data tr.clickable:focus {
 .cal2-connect .btn-block {
   height: 38px;
 }
+.cal2-setup > summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+.cal2-setup > summary:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
 .cal2-src {
   display: flex;
   align-items: flex-start;
@@ -1410,8 +1420,26 @@ table.data tr.clickable:focus {
   .msg-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* Stacked layout: the schedule comes first, calendar setup after it. */
+  .cal2-layout .cal2-main {
+    order: -1;
+  }
 }
 @media (max-width: 760px) {
+  /* Compact phone header: the navigation takes only the height it needs
+     instead of sharing the screen height with the page below it. */
+  .app.show {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .sidebar {
+    padding: 8px 10px;
+    gap: 4px 6px;
+  }
+  .sidebar-logo {
+    width: auto;
+    height: 26px;
+    margin: 0 6px 0 2px;
+  }
   .content {
     max-height: none;
   }

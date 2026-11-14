@@ -365,12 +365,15 @@
       <aside class="cal2-side card">
         <button class="btn btn-navy btn-block" id="calNew">+ New event</button>
         <div id="calSources"></div>
-        <div class="cal2-connect">
-          <button class="btn btn-ghost btn-sm btn-block" id="calGoogle">Connect Google / Gmail</button>
-          <button class="btn btn-ghost btn-sm btn-block" id="calMs">Connect Outlook / Microsoft 365</button>
-          <button class="btn btn-ghost btn-sm btn-block" id="calIcs">Add calendar link (ICS)</button>
-        </div>
-        <p class="msg-sub">You don't need to be an admin of an account to connect it. If an organization blocks outside apps, share that calendar to an account you own, or paste its ICS link.</p>
+        <details class="cal2-setup" id="calSetup">
+          <summary>Add a calendar</summary>
+          <div class="cal2-connect">
+            <button class="btn btn-ghost btn-sm btn-block" id="calGoogle">Connect Google / Gmail</button>
+            <button class="btn btn-ghost btn-sm btn-block" id="calMs">Connect Outlook / Microsoft 365</button>
+            <button class="btn btn-ghost btn-sm btn-block" id="calIcs">Add calendar link (ICS)</button>
+          </div>
+          <p class="msg-sub">You don't need to be an admin of an account to connect it. If an organization blocks outside apps, share that calendar to an account you own, or paste its ICS link.</p>
+        </details>
       </aside>
       <section class="cal2-main card">
         <header class="cal2-toolbar">
@@ -385,6 +388,10 @@
         <div id="calBody"></div>
         <div id="calErrors"></div>
       </section>`;
+
+    // Account setup stays open beside the schedule on wide screens and folds
+    // away on phones and tablets, where the schedule is shown first.
+    $('#calSetup').open = window.matchMedia('(min-width: 861px)').matches;
 
     const startOfWeek = (d) => {
       const x = new Date(d);
