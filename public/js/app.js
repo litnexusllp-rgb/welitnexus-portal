@@ -592,7 +592,7 @@
   function openChangePassword() {
     modal(`<h3>Change your password</h3>
       <div class="form-row one"><div class="field"><label>Current password</label><input type="password" id="cpCur" autocomplete="current-password"></div></div>
-      <div class="form-row one"><div class="field"><label>New password</label><input type="password" id="cpNew" autocomplete="new-password" placeholder="min 6 chars"></div></div>
+      <div class="form-row one"><div class="field"><label>New password</label><input type="password" id="cpNew" autocomplete="new-password" placeholder="min 10 characters"></div></div>
       <div class="form-row one"><div class="field"><label>Confirm new password</label><input type="password" id="cpConf" autocomplete="new-password"></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Update password</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
@@ -600,7 +600,7 @@
       const cur = $('#cpCur').value,
         next = $('#cpNew').value,
         conf = $('#cpConf').value;
-      if (next.length < 6) return toast('New password must be at least 6 characters', true);
+      if (next.length < 10) return toast('New password must be at least 10 characters', true);
       if (next !== conf) return toast('New passwords do not match', true);
       try {
         await api.post('/auth/change-password', { current_password: cur, new_password: next });
@@ -5129,7 +5129,8 @@
   // Birthday shown as day + month only — the birth year stays private.
   // Highlights when it's today.
   function birthdayLine(u) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(u.birthday || ''));
+    // The directory sends "MM-DD"; admin lists still carry the full date.
+    const m = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/.exec(String(u.birthday || ''));
     if (!m) return '';
     const label = new Date(2000, Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, {
       day: 'numeric',
@@ -5401,7 +5402,7 @@
         ${salary.rates.length ? `<details><summary>Recorded salary history</summary><div class="leave-table-wrap"><table><thead><tr><th>Effective from</th><th>Monthly gross</th></tr></thead><tbody>${salary.rates.map((rate) => `<tr><td>${fmtDate(rate.effective_from)}</td><td>${salaryMoney(rate.monthly_gross_paise)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       </div>
       <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">Annual ceilings: 18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid time. Resets each 1 October. Regular paid leave has a strict 1.5-day monthly limit; unused monthly credit does not accumulate.</div></div>
-        ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
+        ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 10 characters"></div>'}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
@@ -5450,7 +5451,7 @@
 
   function openPasswordModal(u) {
     modal(`<h3>Reset password — ${esc(u.name)}</h3>
-      <div class="form-row one"><div class="field"><label>New password</label><input id="npw" placeholder="min 6 chars"></div></div>
+      <div class="form-row one"><div class="field"><label>New password</label><input id="npw" placeholder="min 10 characters"></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Set password</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {

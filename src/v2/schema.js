@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS int_admin_challenges (
   attempts    INTEGER NOT NULL DEFAULT 0
 );
 
+-- Wrong 2-step codes per account, so starting a new sign-in does not reset
+-- the count. Rows older than the lockout window are ignored and cleared.
+CREATE TABLE IF NOT EXISTS int_admin_code_failures (
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  ts          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_int_admin_code_failures ON int_admin_code_failures(user_id, ts);
+
 -- Everything sensitive an admin or an integration does.
 CREATE TABLE IF NOT EXISTS int_audit_log (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

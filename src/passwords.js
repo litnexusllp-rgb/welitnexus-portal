@@ -55,6 +55,9 @@ if (!isMainThread) {
     });
   }
   module.exports = {
+    // Applies to every password someone sets from now on. Existing passwords
+    // keep working; people are asked for a longer one only when they change it.
+    MIN_PASSWORD_LENGTH: 10,
     hashPasswordAsync: (plain) => run('hash', plain),
     verifyPasswordAsync: (plain, hash) => run('verify', plain, hash),
   };

@@ -14,6 +14,31 @@ const asanaWrite = require('../v2/asanaWrite');
 const router = express.Router();
 const raw = (limit) => express.raw({ type: () => true, limit });
 
+// Uploads are mounted ahead of the app-wide write limiter (they need the raw
+// body), so they get their own: each one can be 50 MB held in memory.
+const uploadLimiter = require('express-rate-limit')({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `u:${req.user.id}`,
+  message: { error: 'Too many files shared in a short time. Please wait a few minutes and try again.' },
+});
+
+// Header values arrive URI-encoded; a malformed one is the sender's mistake, not a server error.
+function headerText(req, name, fallback = '') {
+  try {
+    return decodeURIComponent(String(req.get(name) || fallback));
+  } catch (_e) {
+    throw Object.assign(
+      new Error('The file name or comment could not be read. Please rename the file and try again.'),
+      {
+        status: 400,
+      },
+    );
+  }
+}
+
 router.post(
   '/hooks/slack/events',
   raw('1mb'),
@@ -60,13 +85,14 @@ router.post('/hooks/asana', raw('1mb'), (req, res) => {
 router.post(
   '/messages/channels/:id/files',
   requireAuth,
+  uploadLimiter,
   raw('50mb'),
   asyncRoute(async (req, res) => {
     if (!/^[CG][A-Z0-9]{6,}$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid channel' });
     if (!Buffer.isBuffer(req.body) || !req.body.length)
       return res.status(400).json({ error: 'Choose a file to share' });
-    const filename = decodeURIComponent(String(req.get('x-filename') || 'file')).slice(0, 200);
-    const comment = decodeURIComponent(String(req.get('x-comment') || '')).slice(0, 2000);
+    const filename = headerText(req, 'x-filename', 'file').slice(0, 200);
+    const comment = headerText(req, 'x-comment').slice(0, 2000);
     const threadTs = String(req.get('x-thread-ts') || '') || undefined;
     const out = await slack.upload(req.user, req.params.id, { filename, buffer: req.body, comment, threadTs });
     require('../v2/roles').audit(req, 'slack.file_shared', `channel:${req.params.id}`, {

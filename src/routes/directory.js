@@ -10,7 +10,7 @@ const { employmentError } = require('../employment');
 const { syncBalance, syncAllBalancesAsync } = require('../leavePolicy');
 const { validateSalary, saveSalary, salaryHistory } = require('../salaryDeduction');
 
-const { hashPasswordAsync } = require('../passwords');
+const { hashPasswordAsync, MIN_PASSWORD_LENGTH } = require('../passwords');
 const asyncRoute = require('../asyncRoute');
 function adminStillAuthorized(req, res) {
   const actor = db.prepare('SELECT role,active,session_version FROM users WHERE id=?').get(req.user.id);
@@ -21,7 +21,13 @@ function adminStillAuthorized(req, res) {
 const router = express.Router();
 
 const PUBLIC_COLS = `id, name, email, emp_code, role, department, title, phone, shift_start, attendance_timezone, attendance_cutover, join_date, exit_date, birthday, asana_email, created_ts, active`;
-const listAll = db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE active = 1 ORDER BY name`);
+// The shared directory shows a birthday as "MM-DD" only. The year stays
+// private: it is visible to the person themselves and to admins.
+const DIRECTORY_COLS = PUBLIC_COLS.replace(
+  'birthday',
+  "CASE WHEN birthday GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(birthday, 6) ELSE '' END AS birthday",
+);
+const listAll = db.prepare(`SELECT ${DIRECTORY_COLS} FROM users WHERE active = 1 ORDER BY name`);
 const listAllIncInactive = db.prepare(`SELECT ${PUBLIC_COLS}, leave_balance FROM users ORDER BY active DESC, name`);
 const getOne = db.prepare(`SELECT ${PUBLIC_COLS}, leave_balance FROM users WHERE id = ?`);
 const findByEmail = db.prepare(`SELECT id FROM users WHERE email = ?`);
@@ -111,8 +117,10 @@ router.post(
       .trim()
       .toLowerCase();
     const password = String(req.body.password || '');
-    if (!name || !email || password.length < 6) {
-      return res.status(400).json({ error: 'Name, email, and a 6+ char password are required' });
+    if (!name || !email || password.length < MIN_PASSWORD_LENGTH) {
+      return res
+        .status(400)
+        .json({ error: `Name, email, and a password of at least ${MIN_PASSWORD_LENGTH} characters are required` });
     }
     if (findByEmail.get(email)) return res.status(409).json({ error: 'Email already in use' });
     const datesError = employmentError(req.body.join_date, req.body.exit_date);
@@ -258,7 +266,8 @@ router.post(
   requireAdmin,
   asyncRoute(async (req, res) => {
     const pw = String(req.body.password || '');
-    if (pw.length < 6) return res.status(400).json({ error: 'Password must be 6+ chars' });
+    if (pw.length < MIN_PASSWORD_LENGTH)
+      return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
     const hashed = await hashPasswordAsync(pw);
     if (!adminStillAuthorized(req, res)) return;
     if (!setPassword.run(hashed, Number(req.params.id)).changes) return res.status(404).json({ error: 'Not found' });

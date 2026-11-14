@@ -33,7 +33,12 @@ const limiter = rateLimit({
 });
 
 const CHALLENGE_TTL = 10 * 60 * 1000;
-const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = 5; // wrong codes per sign-in attempt
+// Wrong codes per account across all sign-in attempts. A correct password
+// starts a new attempt, so without this someone who knows the password could
+// keep guessing codes five at a time.
+const ACCOUNT_MAX_FAILURES = 10;
+const ACCOUNT_LOCK_MS = 15 * 60 * 1000;
 const mfaMode = () => (String(process.env.ADMIN_2FA || 'required').toLowerCase() === 'off' ? 'off' : 'required');
 
 const findByEmail = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1');
@@ -46,6 +51,14 @@ const getChallenge = db.prepare('SELECT * FROM int_admin_challenges WHERE id = ?
 const bumpChallenge = db.prepare('UPDATE int_admin_challenges SET attempts = attempts + 1 WHERE id = ?');
 const dropChallenge = db.prepare('DELETE FROM int_admin_challenges WHERE id = ?');
 const purgeChallenges = db.prepare('DELETE FROM int_admin_challenges WHERE expires_ts < ?');
+const recentFailures = db.prepare('SELECT COUNT(*) AS n FROM int_admin_code_failures WHERE user_id = ? AND ts > ?');
+const addFailure = db.prepare('INSERT INTO int_admin_code_failures(user_id, ts) VALUES (?, ?)');
+const clearFailures = db.prepare('DELETE FROM int_admin_code_failures WHERE user_id = ? OR ts <= ?');
+
+function wrongCode(challenge, userId) {
+  bumpChallenge.run(challenge.id);
+  addFailure.run(userId, Date.now());
+}
 
 function publicUser(user) {
   const { password_hash: _ignored, ...rest } = user;
@@ -53,6 +66,7 @@ function publicUser(user) {
 }
 
 function finish(req, res, user, mfa, extra = {}) {
+  clearFailures.run(user.id, Date.now() - ACCOUNT_LOCK_MS);
   setAuthCookie(res, issueToken(user));
   setAdminCookie(res, issueAdminToken(user, mfa));
   req.user = user;
@@ -111,6 +125,14 @@ router.post(
       dropChallenge.run(challenge.id);
       return res.status(401).json({ error: 'Sign-in expired. Please start again.' });
     }
+    if (recentFailures.get(user.id, Date.now() - ACCOUNT_LOCK_MS).n >= ACCOUNT_MAX_FAILURES) {
+      dropChallenge.run(challenge.id);
+      req.user = user;
+      audit(req, 'admin.2fa_locked', `user:${user.id}`);
+      return res
+        .status(429)
+        .json({ error: 'Too many wrong codes for this account. Wait 15 minutes, then sign in again.' });
+    }
 
     const secret = c.decrypt(totp.secret_enc);
     const backupCode = String(req.body.backupCode || '')
@@ -121,7 +143,7 @@ router.post(
       const hashed = c.sha256(backupCode.replace(/[^A-Z0-9]/g, ''));
       const idx = codes.indexOf(hashed);
       if (idx === -1) {
-        bumpChallenge.run(challenge.id);
+        wrongCode(challenge, user.id);
         return res.status(401).json({ error: 'That backup code is not valid.' });
       }
       codes.splice(idx, 1);
@@ -132,7 +154,7 @@ router.post(
 
     const step = c.verifyTotp(secret, req.body.code, { afterStep: totp.last_step });
     if (step === null) {
-      bumpChallenge.run(challenge.id);
+      wrongCode(challenge, user.id);
       return res.status(401).json({ error: 'That code is not right. Check the time on your phone and try again.' });
     }
     dropChallenge.run(challenge.id);

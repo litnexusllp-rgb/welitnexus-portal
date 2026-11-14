@@ -1211,7 +1211,7 @@
       ctx.modal(`<h3>Add employee</h3>
         <div class="form-row"><div class="field"><label>Full name</label><input id="apName"></div><div class="field"><label>Work email</label><input id="apEmail" type="email" placeholder="name@welitnexus.com"></div></div>
         <div class="form-row"><div class="field"><label>Job title</label><input id="apTitle"></div><div class="field"><label>Department</label><input id="apDept"></div></div>
-        <div class="form-row"><div class="field"><label>Start date</label><input id="apStart" type="date"></div><div class="field"><label>Temporary password</label><input id="apPw" placeholder="min 6 characters"></div></div>
+        <div class="form-row"><div class="field"><label>Start date</label><input id="apStart" type="date"></div><div class="field"><label>Temporary password</label><input id="apPw" placeholder="min 10 characters"></div></div>
         <div class="form-row one"><div class="field"><label>Portal access</label><select id="apAccess"><option value="EMPLOYEE">Employee portal</option><option value="BILLING">Admin — billing &amp; invoices only</option><option value="OWNER">Admin — full (partners)</option></select></div></div>
         <p class="page-sub">Share the temporary password privately; they can change it from Account › Change password. Salary and shift details can be added in Employees › Personal information.</p>
         <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Add employee</button></div>`);

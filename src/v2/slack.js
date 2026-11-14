@@ -265,12 +265,17 @@ async function upload(portalUser, channelId, { filename, buffer, comment, thread
   return { file: fileSummary(done.files)[0] || { id: start.file_id, name } };
 }
 
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
 async function downloadFile(portalUser, fileId) {
   const info = await call('files.info', { file: fileId }, { json: false });
   const channels = [...(info.file.channels || []), ...(info.file.groups || [])];
   const mine = await channelsFor(portalUser);
   if (!channels.some((id) => mine.some((c) => c.id === id)))
     throw Object.assign(new Error('You do not have access to this file.'), { status: 403 });
+  const tooLarge = () =>
+    Object.assign(new Error('This file is larger than 50 MB. Open it in Slack instead.'), { status: 413 });
+  if (Number(info.file.size) > MAX_FILE_BYTES) throw tooLarge();
   const url = info.file.url_private_download || info.file.url_private;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token()}` },
@@ -280,7 +285,7 @@ async function downloadFile(portalUser, fileId) {
   return {
     name: info.file.name || 'file',
     mimetype: info.file.mimetype || 'application/octet-stream',
-    body: Buffer.from(await res.arrayBuffer()),
+    body: await require('./crypto').readCapped(res, MAX_FILE_BYTES, tooLarge),
   };
 }
 

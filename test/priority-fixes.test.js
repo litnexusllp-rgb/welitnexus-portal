@@ -59,10 +59,15 @@ test('session revocation, transactional corrections and employment-aware reports
     const legacy =
       auth.COOKIE + '=' + require('jsonwebtoken').sign({ uid: employee, role: 'EMPLOYEE' }, process.env.JWT_SECRET);
     assert.equal((await request('auth/me', 'GET', null, legacy)).status, 200);
-    assert.equal((await request(`users/${employee}/password`, 'POST', { password: 'after123' })).status, 200);
+    assert.equal((await request(`users/${employee}/password`, 'POST', { password: 'after-reset-123' })).status, 200);
     assert.equal((await request('auth/me', 'GET', null, empCookie)).status, 401);
     assert.equal((await request('auth/me', 'GET', null, legacy)).status, 401);
-    const login = await request('auth/login', 'POST', { email: 'employee@example.test', password: 'after123' }, '');
+    const login = await request(
+      'auth/login',
+      'POST',
+      { email: 'employee@example.test', password: 'after-reset-123' },
+      '',
+    );
     assert.equal(login.status, 200);
     empCookie = login.cookie;
     assert.equal((await request('auth/me', 'GET', null, empCookie)).status, 200);
@@ -72,7 +77,7 @@ test('session revocation, transactional corrections and employment-aware reports
     const result = await request(
       'auth/change-password',
       'POST',
-      { current_password: 'after123', new_password: 'latest123' },
+      { current_password: 'after-reset-123', new_password: 'latest-change-123' },
       old,
     );
     assert.equal(result.status, 200);

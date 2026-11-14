@@ -6,7 +6,7 @@ const { db } = require('../db');
 const { syncBalance } = require('../leavePolicy');
 const { issueToken, setAuthCookie, clearAuthCookie, requireAuth } = require('../auth');
 
-const { hashPasswordAsync, verifyPasswordAsync } = require('../passwords');
+const { hashPasswordAsync, verifyPasswordAsync, MIN_PASSWORD_LENGTH } = require('../passwords');
 const asyncRoute = require('../asyncRoute');
 const router = express.Router();
 const findByEmail = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1');
@@ -78,7 +78,8 @@ router.post(
   asyncRoute(async (req, res) => {
     const current = String(req.body.current_password || '');
     const next = String(req.body.new_password || '');
-    if (next.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    if (next.length < MIN_PASSWORD_LENGTH)
+      return res.status(400).json({ error: `New password must be at least ${MIN_PASSWORD_LENGTH} characters` });
     const user = getUserFull.get(req.user.id);
     if (!user || !(await verifyPasswordAsync(current, user.password_hash))) {
       return res.status(401).json({ error: 'Current password is incorrect' });

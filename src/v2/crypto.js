@@ -105,6 +105,25 @@ function otpauthUri(secret, accountName, issuer = 'LIT Nexus Portal') {
   return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=${STEP}`;
 }
 
+// Read a fetch() response body, refusing anything larger than maxBytes instead
+// of loading it all into memory first.
+async function readCapped(res, maxBytes, tooLarge) {
+  const declared = Number(res.headers.get('content-length'));
+  if (declared > maxBytes) throw tooLarge();
+  if (!res.body) return Buffer.alloc(0);
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of res.body) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      await res.body.cancel().catch(() => {});
+      throw tooLarge();
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+}
+
 // Constant-time comparison of two secrets. False for anything that is not a
 // pair of equal-length strings, so callers never need their own length check.
 function safeEqual(a, b) {
@@ -131,5 +150,6 @@ module.exports = {
   base32Decode,
   sha256,
   safeEqual,
+  readCapped,
   randomId,
 };
