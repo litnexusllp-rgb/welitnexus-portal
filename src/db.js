@@ -18,8 +18,8 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON'); // enforce the FK constraints declared below
 
 try {
-db.exec('BEGIN IMMEDIATE');
-db.exec(`
+  db.exec('BEGIN IMMEDIATE');
+  db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT    NOT NULL,
@@ -284,50 +284,54 @@ CREATE TABLE IF NOT EXISTS reminder_acks (
 CREATE INDEX IF NOT EXISTS idx_reminder_acks_user ON reminder_acks(user_id, day);
 `);
 
-// --- Lightweight migrations for databases created before these columns existed.
-require('./schemaMigrations').applyColumnMigrations(db, [
-  `ALTER TABLE tasks ADD COLUMN client_id INTEGER`,
-  `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
-  `ALTER TABLE users ADD COLUMN emp_code TEXT DEFAULT ''`,
-  `ALTER TABLE recurring_tasks ADD COLUMN checklist_json TEXT DEFAULT ''`,
-  `ALTER TABLE clients ADD COLUMN business_type TEXT DEFAULT ''`,
-  `ALTER TABLE clients ADD COLUMN stage TEXT NOT NULL DEFAULT 'PROSPECT'`,
-  `ALTER TABLE clients ADD COLUMN approval TEXT NOT NULL DEFAULT 'APPROVED'`,
-  `ALTER TABLE clients ADD COLUMN created_by INTEGER`,
-  `ALTER TABLE clients ADD COLUMN parent_id INTEGER`,
-  `ALTER TABLE clients ADD COLUMN billing_address TEXT DEFAULT ''`,
-  `ALTER TABLE events ADD COLUMN device TEXT DEFAULT ''`,
-  `ALTER TABLE clients ADD COLUMN email TEXT DEFAULT ''`,
-  `ALTER TABLE tasks ADD COLUMN sort_order INTEGER`,
-  `ALTER TABLE users ADD COLUMN shift_start TEXT DEFAULT ''`, // HH:mm expected clock-in (per employee); blank = firm default
-  `ALTER TABLE users ADD COLUMN join_date TEXT DEFAULT ''`, // yyyy-mm-dd actual date of joining (for the seniority directory)
-  `ALTER TABLE users ADD COLUMN exit_date TEXT DEFAULT ''`, // yyyy-mm-dd last working day (blank = still employed)
-  `ALTER TABLE users ADD COLUMN birthday TEXT DEFAULT ''`, // yyyy-mm-dd; only day+month are ever shown
-  `ALTER TABLE users ADD COLUMN asana_email TEXT DEFAULT ''`, // override for matching this person in Asana
-  `ALTER TABLE holidays ADD COLUMN duration TEXT NOT NULL DEFAULT 'FULL' CHECK(duration IN ('FULL','HALF'))`,
-]);
-// Index on the (possibly just-added) client_id column.
-// Security migration: unexpected failures must stop startup, not silently skip revocation.
-if (!db.pragma('table_info(users)').some(c => c.name === 'session_version')) {
-  db.exec('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0');
-}
-db.exec(`CREATE TRIGGER IF NOT EXISTS revoke_user_sessions
+  // --- Lightweight migrations for databases created before these columns existed.
+  require('./schemaMigrations').applyColumnMigrations(db, [
+    `ALTER TABLE tasks ADD COLUMN client_id INTEGER`,
+    `ALTER TABLE tasks ADD COLUMN recurring_id INTEGER`,
+    `ALTER TABLE users ADD COLUMN emp_code TEXT DEFAULT ''`,
+    `ALTER TABLE recurring_tasks ADD COLUMN checklist_json TEXT DEFAULT ''`,
+    `ALTER TABLE clients ADD COLUMN business_type TEXT DEFAULT ''`,
+    `ALTER TABLE clients ADD COLUMN stage TEXT NOT NULL DEFAULT 'PROSPECT'`,
+    `ALTER TABLE clients ADD COLUMN approval TEXT NOT NULL DEFAULT 'APPROVED'`,
+    `ALTER TABLE clients ADD COLUMN created_by INTEGER`,
+    `ALTER TABLE clients ADD COLUMN parent_id INTEGER`,
+    `ALTER TABLE clients ADD COLUMN billing_address TEXT DEFAULT ''`,
+    `ALTER TABLE events ADD COLUMN device TEXT DEFAULT ''`,
+    `ALTER TABLE clients ADD COLUMN email TEXT DEFAULT ''`,
+    `ALTER TABLE tasks ADD COLUMN sort_order INTEGER`,
+    `ALTER TABLE users ADD COLUMN shift_start TEXT DEFAULT ''`, // HH:mm expected clock-in (per employee); blank = firm default
+    `ALTER TABLE users ADD COLUMN join_date TEXT DEFAULT ''`, // yyyy-mm-dd actual date of joining (for the seniority directory)
+    `ALTER TABLE users ADD COLUMN exit_date TEXT DEFAULT ''`, // yyyy-mm-dd last working day (blank = still employed)
+    `ALTER TABLE users ADD COLUMN birthday TEXT DEFAULT ''`, // yyyy-mm-dd; only day+month are ever shown
+    `ALTER TABLE users ADD COLUMN asana_email TEXT DEFAULT ''`, // override for matching this person in Asana
+    `ALTER TABLE holidays ADD COLUMN duration TEXT NOT NULL DEFAULT 'FULL' CHECK(duration IN ('FULL','HALF'))`,
+  ]);
+  // Index on the (possibly just-added) client_id column.
+  // Security migration: unexpected failures must stop startup, not silently skip revocation.
+  if (!db.pragma('table_info(users)').some((c) => c.name === 'session_version')) {
+    db.exec('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0');
+  }
+  db.exec(`CREATE TRIGGER IF NOT EXISTS revoke_user_sessions
 AFTER UPDATE OF password_hash, role, email, active ON users
 WHEN OLD.password_hash IS NOT NEW.password_hash OR OLD.role IS NOT NEW.role
   OR OLD.email IS NOT NEW.email OR OLD.active IS NOT NEW.active
 BEGIN
   UPDATE users SET session_version = session_version + 1 WHERE id = NEW.id;
 END;`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`);
 
-// Additive correction migration. NULL operation identifies older requests.
-// Retain event IDs in requests/audits if an admin later deletes the punch.
-db.transaction(() => {
-  const columns = new Set(db.pragma('table_info(punch_requests)').map(c => c.name));
-  for (const [name, type] of [['operation', 'TEXT'], ['target_event_id', 'INTEGER'], ['original_event', 'TEXT']]) {
-    if (!columns.has(name)) db.exec(`ALTER TABLE punch_requests ADD COLUMN ${name} ${type}`);
-  }
-  db.exec(`CREATE TABLE IF NOT EXISTS punch_request_changes (
+  // Additive correction migration. NULL operation identifies older requests.
+  // Retain event IDs in requests/audits if an admin later deletes the punch.
+  db.transaction(() => {
+    const columns = new Set(db.pragma('table_info(punch_requests)').map((c) => c.name));
+    for (const [name, type] of [
+      ['operation', 'TEXT'],
+      ['target_event_id', 'INTEGER'],
+      ['original_event', 'TEXT'],
+    ]) {
+      if (!columns.has(name)) db.exec(`ALTER TABLE punch_requests ADD COLUMN ${name} ${type}`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS punch_request_changes (
     request_id INTEGER PRIMARY KEY REFERENCES punch_requests(id),
     event_id INTEGER NOT NULL,
     before_json TEXT,
@@ -335,28 +339,29 @@ db.transaction(() => {
     changed_by INTEGER NOT NULL REFERENCES users(id),
     changed_ts INTEGER NOT NULL
   )`);
-})();
+  })();
 
-// Attendance days are persisted session ownership, not recomputed timestamp buckets.
-// Never re-bucket historical punches at boot (especially across cutover/zone changes).
-for (const [name, sql] of [
-  ['attendance_timezone', "TEXT NOT NULL DEFAULT ''"],
-  ['attendance_cutover', 'INTEGER DEFAULT NULL'],
-]) {
-  if (!db.pragma('table_info(users)').some(c => c.name === name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${sql}`);
-}
-if (!db.pragma('table_info(punch_requests)').some(c => c.name === 'requested_ts')) {
-  db.exec('ALTER TABLE punch_requests ADD COLUMN requested_ts INTEGER');
-}
-db.exec(`CREATE TABLE IF NOT EXISTS attendance_day_settings (
+  // Attendance days are persisted session ownership, not recomputed timestamp buckets.
+  // Never re-bucket historical punches at boot (especially across cutover/zone changes).
+  for (const [name, sql] of [
+    ['attendance_timezone', "TEXT NOT NULL DEFAULT ''"],
+    ['attendance_cutover', 'INTEGER DEFAULT NULL'],
+  ]) {
+    if (!db.pragma('table_info(users)').some((c) => c.name === name))
+      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${sql}`);
+  }
+  if (!db.pragma('table_info(punch_requests)').some((c) => c.name === 'requested_ts')) {
+    db.exec('ALTER TABLE punch_requests ADD COLUMN requested_ts INTEGER');
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS attendance_day_settings (
   user_id INTEGER NOT NULL REFERENCES users(id), day TEXT NOT NULL,
   timezone TEXT NOT NULL, cutover INTEGER NOT NULL, shift_start TEXT NOT NULL,
   PRIMARY KEY(user_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_events_user_latest ON events(user_id, ts DESC, id DESC);`);
 
-// Bonus payments are private admin records; voids retain the original audit trail.
-db.exec(`CREATE TABLE IF NOT EXISTS bonuses (
+  // Bonus payments are private admin records; voids retain the original audit trail.
+  db.exec(`CREATE TABLE IF NOT EXISTS bonuses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
   month TEXT NOT NULL,
@@ -371,21 +376,27 @@ db.exec(`CREATE TABLE IF NOT EXISTS bonuses (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_employee_month ON bonuses(user_id, month) WHERE voided_ts IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bonus_month ON bonuses(month);`);
 
-// Leave categories are separate from FULL/HALF duration. Legacy requests retain
-// their original dates/status/reason and use the regular pool unless reviewed.
-if (!db.pragma('table_info(attendance_day_overrides)').some(c => c.name === 'full_day')) {
-  db.exec('ALTER TABLE attendance_day_overrides ADD COLUMN full_day INTEGER NOT NULL DEFAULT 0 CHECK(full_day IN (0,1))');
-}
-if (!db.pragma('table_info(leaves)').some(c => c.name === 'category')) {
-  db.exec("ALTER TABLE leaves ADD COLUMN category TEXT NOT NULL DEFAULT 'REGULAR'");
-}
-if (!db.pragma('table_info(leaves)').some(c => c.name === 'emergency_type')) {
-  db.exec("ALTER TABLE leaves ADD COLUMN emergency_type TEXT NOT NULL DEFAULT 'NONE' CHECK(emergency_type IN ('NONE','HEALTH','OTHER'))");
-}
-const legacyShortDays = db.pragma('table_info(short_day_requests)').some(c => c.name === 'start_time' && c.notnull);
-const shortDaySequence = legacyShortDays ? db.prepare("SELECT seq FROM sqlite_sequence WHERE name='short_day_requests'").get()?.seq : null;
-if (legacyShortDays) db.exec('ALTER TABLE short_day_requests RENAME TO short_day_requests_legacy');
-db.exec(`CREATE TABLE IF NOT EXISTS short_day_requests (
+  // Leave categories are separate from FULL/HALF duration. Legacy requests retain
+  // their original dates/status/reason and use the regular pool unless reviewed.
+  if (!db.pragma('table_info(attendance_day_overrides)').some((c) => c.name === 'full_day')) {
+    db.exec(
+      'ALTER TABLE attendance_day_overrides ADD COLUMN full_day INTEGER NOT NULL DEFAULT 0 CHECK(full_day IN (0,1))',
+    );
+  }
+  if (!db.pragma('table_info(leaves)').some((c) => c.name === 'category')) {
+    db.exec("ALTER TABLE leaves ADD COLUMN category TEXT NOT NULL DEFAULT 'REGULAR'");
+  }
+  if (!db.pragma('table_info(leaves)').some((c) => c.name === 'emergency_type')) {
+    db.exec(
+      "ALTER TABLE leaves ADD COLUMN emergency_type TEXT NOT NULL DEFAULT 'NONE' CHECK(emergency_type IN ('NONE','HEALTH','OTHER'))",
+    );
+  }
+  const legacyShortDays = db.pragma('table_info(short_day_requests)').some((c) => c.name === 'start_time' && c.notnull);
+  const shortDaySequence = legacyShortDays
+    ? db.prepare("SELECT seq FROM sqlite_sequence WHERE name='short_day_requests'").get()?.seq
+    : null;
+  if (legacyShortDays) db.exec('ALTER TABLE short_day_requests RENAME TO short_day_requests_legacy');
+  db.exec(`CREATE TABLE IF NOT EXISTS short_day_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
   date TEXT NOT NULL,
@@ -404,17 +415,21 @@ db.exec(`CREATE TABLE IF NOT EXISTS short_day_requests (
     OR (start_time IS NULL AND start_ts IS NULL AND minutes IS NULL AND status='APPROVED' AND decided_by IS NOT NULL)
   )
 );`);
-if (legacyShortDays) {
-  const columns = 'id,user_id,date,start_time,timezone,start_ts,minutes,reason,status,created_ts,decided_by,decided_ts,admin_note';
-  db.exec(`INSERT INTO short_day_requests (${columns}) SELECT ${columns} FROM short_day_requests_legacy;
+  if (legacyShortDays) {
+    const columns =
+      'id,user_id,date,start_time,timezone,start_ts,minutes,reason,status,created_ts,decided_by,decided_ts,admin_note';
+    db.exec(`INSERT INTO short_day_requests (${columns}) SELECT ${columns} FROM short_day_requests_legacy;
     DROP TABLE short_day_requests_legacy;`);
-  if (shortDaySequence) {
-    const updated = db.prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='short_day_requests'").run(shortDaySequence);
-    if (!updated.changes) db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('short_day_requests',?)").run(shortDaySequence);
+    if (shortDaySequence) {
+      const updated = db
+        .prepare("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='short_day_requests'")
+        .run(shortDaySequence);
+      if (!updated.changes)
+        db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('short_day_requests',?)").run(shortDaySequence);
+    }
   }
-}
-db.exec('CREATE INDEX IF NOT EXISTS idx_short_day_employee_date ON short_day_requests(user_id,date)');
-db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
+  db.exec('CREATE INDEX IF NOT EXISTS idx_short_day_employee_date ON short_day_requests(user_id,date)');
+  db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
   user_id INTEGER NOT NULL REFERENCES users(id),
   period_start TEXT NOT NULL,
   previous_balance REAL NOT NULL,
@@ -423,9 +438,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS leave_balance_resets (
   PRIMARY KEY(user_id, period_start)
 );`);
 
-// Salary data is intentionally separate from users, whose rows are returned by
-// authentication, directory and attendance endpoints. Amounts are integer paise.
-db.exec(`CREATE TABLE IF NOT EXISTS employee_salary_rates (
+  // Salary data is intentionally separate from users, whose rows are returned by
+  // authentication, directory and attendance endpoints. Amounts are integer paise.
+  db.exec(`CREATE TABLE IF NOT EXISTS employee_salary_rates (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
   effective_from TEXT NOT NULL,
@@ -445,12 +460,12 @@ CREATE TABLE IF NOT EXISTS salary_rate_changes (
   changed_by INTEGER NOT NULL REFERENCES users(id),
   changed_ts INTEGER NOT NULL
 );`);
-if (!db.pragma('table_info(leaves)').some(c => c.name === 'deduction_quote_json')) {
-  db.exec('ALTER TABLE leaves ADD COLUMN deduction_quote_json TEXT');
-}
+  if (!db.pragma('table_info(leaves)').some((c) => c.name === 'deduction_quote_json')) {
+    db.exec('ALTER TABLE leaves ADD COLUMN deduction_quote_json TEXT');
+  }
 
-// Monthly review confirmations are separate from salary rates and payments.
-db.exec(`CREATE TABLE IF NOT EXISTS salary_month_reviews (
+  // Monthly review confirmations are separate from salary rates and payments.
+  db.exec(`CREATE TABLE IF NOT EXISTS salary_month_reviews (
   user_id INTEGER NOT NULL REFERENCES users(id),
   month TEXT NOT NULL,
   amount_paise INTEGER NOT NULL CHECK(amount_paise >= 0),
@@ -475,12 +490,22 @@ CREATE TABLE IF NOT EXISTS salary_month_review_events (
   changed_ts INTEGER NOT NULL
 );`);
 
-if (!db.pragma('table_info(achievements)').some(c => c.name === 'category')) db.exec("ALTER TABLE achievements ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'");
-db.exec('COMMIT');
+  if (!db.pragma('table_info(achievements)').some((c) => c.name === 'category'))
+    db.exec("ALTER TABLE achievements ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'");
+  db.exec('COMMIT');
 } catch (error) {
-  try { if (db.inTransaction) db.exec('ROLLBACK'); } finally { db.close(); }
+  try {
+    if (db.inTransaction) db.exec('ROLLBACK');
+  } finally {
+    db.close();
+  }
   throw error;
 }
 // Portal v2: new, additive tables only (see src/v2/schema.js).
-try { require('./v2/schema').ensure(db); } catch (error) { db.close(); throw error; }
+try {
+  require('./v2/schema').ensure(db);
+} catch (error) {
+  db.close();
+  throw error;
+}
 module.exports = { db, DB_PATH };

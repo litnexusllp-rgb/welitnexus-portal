@@ -55,7 +55,9 @@ const ADMIN_TTL_SECONDS = 8 * 60 * 60;
 function issueAdminToken(user, mfa) {
   const current = db.prepare('SELECT session_version FROM users WHERE id = ?').get(user.id);
   if (!current) throw new Error('Cannot issue a session for a missing user');
-  return jwt.sign({ uid: user.id, sv: current.session_version, kind: 'admin-console', mfa: Boolean(mfa) }, JWT_SECRET, { expiresIn: ADMIN_TTL_SECONDS });
+  return jwt.sign({ uid: user.id, sv: current.session_version, kind: 'admin-console', mfa: Boolean(mfa) }, JWT_SECRET, {
+    expiresIn: ADMIN_TTL_SECONDS,
+  });
 }
 
 function setAdminCookie(res, token) {
@@ -105,7 +107,9 @@ function loadUser(req, _res, next) {
       if (payload.kind === 'admin-console' && payload.uid === req.user.id && payload.sv === req.user.session_version) {
         req.adminConsole = { mfa: Boolean(payload.mfa), exp: payload.exp };
       }
-    } catch (_e) { /* expired admin console session */ }
+    } catch (_e) {
+      /* expired admin console session */
+    }
   }
   next();
 }
@@ -118,7 +122,8 @@ function requireAuth(req, res, next) {
 function requireAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admins only' });
-  if (consoleRequired() && !req.adminConsole) return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
+  if (consoleRequired() && !req.adminConsole)
+    return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
   next();
 }
 

@@ -14,7 +14,9 @@
 const { db } = require('../db');
 
 const getRole = db.prepare('SELECT level FROM int_user_roles WHERE user_id = ?');
-const insertAudit = db.prepare('INSERT INTO int_audit_log(actor_id, action, target, detail, ip, ts) VALUES (?,?,?,?,?,?)');
+const insertAudit = db.prepare(
+  'INSERT INTO int_audit_log(actor_id, action, target, detail, ip, ts) VALUES (?,?,?,?,?,?)',
+);
 
 function adminLevel(user) {
   if (!user) return null;
@@ -24,7 +26,14 @@ function adminLevel(user) {
 }
 
 function audit(req, action, target = '', detail = {}) {
-  insertAudit.run(req && req.user ? req.user.id : null, action, String(target), JSON.stringify(detail || {}), (req && req.ip) || '', Date.now());
+  insertAudit.run(
+    req && req.user ? req.user.id : null,
+    action,
+    String(target),
+    JSON.stringify(detail || {}),
+    (req && req.ip) || '',
+    Date.now(),
+  );
 }
 
 // The admin console requires its own cookie (password + 2-step code) in
@@ -33,8 +42,10 @@ function consoleGuard(levels) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
     const level = adminLevel(req.user);
-    if (!level || !levels.includes(level)) return res.status(403).json({ error: 'You do not have access to this part of the admin console' });
-    if (!req.adminConsole) return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
+    if (!level || !levels.includes(level))
+      return res.status(403).json({ error: 'You do not have access to this part of the admin console' });
+    if (!req.adminConsole)
+      return res.status(403).json({ error: 'Sign in to the admin console to continue', code: 'ADMIN_CONSOLE' });
     req.adminLevel = level;
     next();
   };

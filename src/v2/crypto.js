@@ -39,21 +39,35 @@ const decryptJson = (blob) => JSON.parse(decrypt(blob));
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 function base32Encode(buf) {
-  let bits = 0, value = 0, out = '';
+  let bits = 0,
+    value = 0,
+    out = '';
   for (const byte of buf) {
-    value = (value << 8) | byte; bits += 8;
-    while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += B32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
   }
   if (bits > 0) out += B32[(value << (5 - bits)) & 31];
   return out;
 }
 
 function base32Decode(str) {
-  const clean = String(str).toUpperCase().replace(/[^A-Z2-7]/g, '');
-  let bits = 0, value = 0; const out = [];
+  const clean = String(str)
+    .toUpperCase()
+    .replace(/[^A-Z2-7]/g, '');
+  let bits = 0,
+    value = 0;
+  const out = [];
   for (const ch of clean) {
-    value = (value << 5) | B32.indexOf(ch); bits += 5;
-    if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; }
+    value = (value << 5) | B32.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
   }
   return Buffer.from(out);
 }
@@ -95,7 +109,17 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
 const randomId = (bytes = 24) => crypto.randomBytes(bytes).toString('base64url');
 
 module.exports = {
-  encrypt, decrypt, encryptJson, decryptJson,
-  newTotpSecret, hotp, verifyTotp, currentStep, otpauthUri, base32Encode, base32Decode,
-  sha256, randomId,
+  encrypt,
+  decrypt,
+  encryptJson,
+  decryptJson,
+  newTotpSecret,
+  hotp,
+  verifyTotp,
+  currentStep,
+  otpauthUri,
+  base32Encode,
+  base32Decode,
+  sha256,
+  randomId,
 };

@@ -6,7 +6,10 @@ function trustProxy(env = process.env) {
   if (value === 'false' || value === '0') return false;
   if (value === 'true') throw new Error('TRUST_PROXY=true is unsafe; configure trusted CIDRs or an exact hop count');
   if (/^[1-9]\d*$/.test(value) && Number(value) <= 8) return Number(value);
-  const entries = value.split(',').map(v => v.trim()).filter(Boolean);
+  const entries = value
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
   if (!entries.length) throw new Error('TRUST_PROXY must not be empty');
   require('proxy-addr').compile(entries); // reject invalid network configuration at startup
   return entries;

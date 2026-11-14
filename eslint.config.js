@@ -4,7 +4,10 @@
 const js = require('@eslint/js');
 const globals = require('globals');
 
-const unused = ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true }];
+const unused = [
+  'warn',
+  { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true },
+];
 
 module.exports = [
   { ignores: ['node_modules/**', 'data/**'] },

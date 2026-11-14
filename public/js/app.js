@@ -5,26 +5,61 @@
   let ME = null;
   let ACCESS = { adminLevel: null, console: false };
   let clockTimer = null;
-  let dashTimers = [];          // ticking + polling intervals for the admin dashboard
-  let DASH_LIVE = null;         // snapshot used to advance the live worked timers
+  let dashTimers = []; // ticking + polling intervals for the admin dashboard
+  let DASH_LIVE = null; // snapshot used to advance the live worked timers
 
   // ---------- tiny helpers ----------
   const $ = (sel, root = document) => root.querySelector(sel);
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const esc = (s) =>
+    String(s ?? '').replace(
+      /[&<>"']/g,
+      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+    );
   const isAdmin = () => ME && ME.role === 'ADMIN';
   const inConsole = () => Boolean(ACCESS && ACCESS.console && ACCESS.adminLevel);
   const isAdminPath = () => /^\/admin\/?$/.test(window.location.pathname);
   const fmtMins = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
-  const attendanceTime = (ts, timezone) => ts ? new Date(ts).toLocaleString([], { timeZone: timezone || 'Asia/Kolkata', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
+  const attendanceTime = (ts, timezone) =>
+    ts
+      ? new Date(ts).toLocaleString([], {
+          timeZone: timezone || 'Asia/Kolkata',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        })
+      : '—';
   // Friendly date: '2026-06-22' -> '22 Jun 2026'. Passes through anything else.
-  const fmtDate = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? new Date(s + 'T00:00').toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : (s || '—'));
+  const fmtDate = (s) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(s || '')
+      ? new Date(s + 'T00:00').toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
+      : s || '—';
   const todayISO = () => new Date().toLocaleDateString('en-CA'); // yyyy-mm-dd local
-  const cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1).toLowerCase();
+  const cap = (s) =>
+    String(s || '')
+      .charAt(0)
+      .toUpperCase() +
+    String(s || '')
+      .slice(1)
+      .toLowerCase();
   const badge = (v) => {
-    const labels = { HALF_HOLIDAY_PRESENT: '½ holiday · ½ present', HALF_HOLIDAY_ABSENT: '½ holiday · ½ absent', HALF_HOLIDAY_LEAVE: '½ holiday · ½ leave', HALF_HOLIDAY_WEEKEND: '½ holiday · ½ weekend' };
+    const labels = {
+      HALF_HOLIDAY_PRESENT: '½ holiday · ½ present',
+      HALF_HOLIDAY_ABSENT: '½ holiday · ½ absent',
+      HALF_HOLIDAY_LEAVE: '½ holiday · ½ leave',
+      HALF_HOLIDAY_WEEKEND: '½ holiday · ½ weekend',
+    };
     return `<span class="badge b-${String(v).toLowerCase()}">${esc(labels[v] || cap(String(v).replace(/_/g, ' ')))}</span>`;
   };
-  const initials = (n) => String(n).trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const initials = (n) =>
+    String(n)
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join('')
+      .toUpperCase();
 
   function toast(msg, isErr) {
     const t = $('#toast');
@@ -32,8 +67,11 @@
     // announce the toast via aria-live on the element.
     t.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
     t.setAttribute('role', isErr ? 'alert' : 'status');
-    t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
-    setTimeout(() => { t.className = 'toast'; }, 2600);
+    t.textContent = msg;
+    t.className = 'toast show' + (isErr ? ' err' : '');
+    setTimeout(() => {
+      t.className = 'toast';
+    }, 2600);
   }
   let lastFocusBeforeModal = null;
   function modal(html) {
@@ -44,13 +82,18 @@
     m.setAttribute('aria-modal', 'true');
     // Label the dialog by its first heading for screen readers.
     const h = m.querySelector('h3, h2');
-    if (h) { if (!h.id) h.id = 'modalTitle'; m.setAttribute('aria-labelledby', h.id); }
-    else m.removeAttribute('aria-labelledby');
+    if (h) {
+      if (!h.id) h.id = 'modalTitle';
+      m.setAttribute('aria-labelledby', h.id);
+    } else m.removeAttribute('aria-labelledby');
     // Associate each field's <label> with its control so it's announced.
     m.querySelectorAll('.field').forEach((f, i) => {
       const label = f.querySelector('label');
       const ctrl = f.querySelector('input, select, textarea');
-      if (label && ctrl) { if (!ctrl.id) ctrl.id = `modalField${i}`; label.setAttribute('for', ctrl.id); }
+      if (label && ctrl) {
+        if (!ctrl.id) ctrl.id = `modalField${i}`;
+        label.setAttribute('for', ctrl.id);
+      }
     });
     lastFocusBeforeModal = document.activeElement;
     $('#modalBg').classList.add('show');
@@ -64,18 +107,33 @@
     if (lastFocusBeforeModal && document.contains(lastFocusBeforeModal)) lastFocusBeforeModal.focus();
     lastFocusBeforeModal = null;
   }
-  $('#modalBg').addEventListener('click', (e) => { if (e.target.id === 'modalBg') closeModal(); });
+  $('#modalBg').addEventListener('click', (e) => {
+    if (e.target.id === 'modalBg') closeModal();
+  });
   // Escape closes the modal; Tab is trapped inside it while open.
   document.addEventListener('keydown', (e) => {
     if (!$('#modalBg').classList.contains('show')) return;
-    if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
     if (e.key === 'Tab') {
-      const f = [...$('#modal').querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-        .filter((el) => el.offsetParent !== null);
+      const f = [
+        ...$('#modal').querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetParent !== null);
       if (!f.length) return;
-      const first = f[0]; const last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      const first = f[0];
+      const last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   });
 
@@ -95,12 +153,16 @@
           <button class="btn btn-primary" id="bdayThanks">Thank you 🙌</button>
         </div>`);
       $('#bdayThanks').addEventListener('click', async () => {
-        try { await api.post('/reminders/birthday/ack'); } catch (_e) {}
+        try {
+          await api.post('/reminders/birthday/ack');
+        } catch (_e) {}
         closeModal();
         checkFridayReminder(); // let any other popup take its turn
       });
       return true;
-    } catch (_e) { return false; }
+    } catch (_e) {
+      return false;
+    }
   }
 
   // ---------- Friday checklist popup ----------
@@ -118,9 +180,14 @@
       // gets it, and so it reappears if they dismissed without ticking.
       clearInterval(fridayTimer);
       fridayTimer = setInterval(checkFridayReminder, 15 * 60 * 1000);
-    } catch (_e) { /* not signed in / offline — ignore */ }
+    } catch (_e) {
+      /* not signed in / offline — ignore */
+    }
   }
-  function stopFridayReminder() { clearInterval(fridayTimer); fridayTimer = null; }
+  function stopFridayReminder() {
+    clearInterval(fridayTimer);
+    fridayTimer = null;
+  }
 
   function openFridayReminder(r) {
     fridayPopupOpen = true;
@@ -141,26 +208,36 @@
           <div class="fri-t">Update your achievements</div>
           <div class="fri-s">${done ? '<span style="color:var(--teal-dark);font-weight:600;">✓ You already logged one this week</span>' : 'Log what you got done — it feeds your KPIs.'}</div>
         </div>
-        ${done ? '<label class="fri-check"><input type="checkbox" id="friAch" checked> <span>Done</span></label>'
-    : '<button class="btn btn-ghost btn-sm" id="friLogAch">Log now</button>'}
+        ${
+          done
+            ? '<label class="fri-check"><input type="checkbox" id="friAch" checked> <span>Done</span></label>'
+            : '<button class="btn btn-ghost btn-sm" id="friLogAch">Log now</button>'
+        }
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="friLater">Remind me later</button>
         <button class="btn btn-primary" id="friDone">Mark done for today</button>
       </div>`);
-    const close = () => { fridayPopupOpen = false; closeModal(); };
+    const close = () => {
+      fridayPopupOpen = false;
+      closeModal();
+    };
     $('#friLater').addEventListener('click', close);
     // "Log now" opens the achievement form; the checklist reopens after.
     $('#friLogAch')?.addEventListener('click', () => {
-      fridayPopupOpen = false; closeModal();
+      fridayPopupOpen = false;
+      closeModal();
       openAchievementModal();
     });
     $('#friDone').addEventListener('click', async () => {
       try {
         await api.post('/reminders/friday/ack');
-        close(); stopFridayReminder();
+        close();
+        stopFridayReminder();
         toast('Friday checklist done ✓ — see you next week');
-      } catch (e) { toast(e.message, true); }
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -179,16 +256,32 @@
     try {
       const { unread } = await api.get('/notifications/count');
       const b = $('#bellBadge');
-      if (unread > 0) { b.hidden = false; b.textContent = unread > 99 ? '99+' : String(unread); }
-      else { b.hidden = true; }
-    } catch (_e) { /* offline / logged out — ignore */ }
+      if (unread > 0) {
+        b.hidden = false;
+        b.textContent = unread > 99 ? '99+' : String(unread);
+      } else {
+        b.hidden = true;
+      }
+    } catch (_e) {
+      /* offline / logged out — ignore */
+    }
   }
-  function startNotifications() { refreshNotifCount(); clearInterval(notifTimer); notifTimer = setInterval(refreshNotifCount, 30000); }
-  function stopNotifications() { clearInterval(notifTimer); }
+  function startNotifications() {
+    refreshNotifCount();
+    clearInterval(notifTimer);
+    notifTimer = setInterval(refreshNotifCount, 30000);
+  }
+  function stopNotifications() {
+    clearInterval(notifTimer);
+  }
 
   async function openNotifications() {
     let data;
-    try { data = await api.get('/notifications'); } catch (e) { return toast(e.message, true); }
+    try {
+      data = await api.get('/notifications');
+    } catch (e) {
+      return toast(e.message, true);
+    }
     const list = data.notifications;
     modal(`<h3>Notifications</h3>
       <div class="modal-actions" style="justify-content:space-between;margin-top:0;margin-bottom:12px;">
@@ -196,21 +289,42 @@
         <button class="btn btn-ghost btn-sm" id="nMarkAll" ${data.unread ? '' : 'disabled'}>Mark all read</button>
       </div>
       <div class="notif-list">
-        ${list.length ? list.map((n) => `<button class="notif ${n.read ? '' : 'unread'}" data-nid="${n.id}" data-link="${esc(n.link_view || '')}">
+        ${
+          list.length
+            ? list
+                .map(
+                  (
+                    n,
+                  ) => `<button class="notif ${n.read ? '' : 'unread'}" data-nid="${n.id}" data-link="${esc(n.link_view || '')}">
           <div class="nt">${esc(n.title)}</div>${n.body ? `<div class="nb">${esc(n.body)}</div>` : ''}
-          <div class="nw">${fmtWhen(n.created_ts)}</div></button>`).join('')
-        : `<div class="empty">No notifications yet.</div>`}
+          <div class="nw">${fmtWhen(n.created_ts)}</div></button>`,
+                )
+                .join('')
+            : `<div class="empty">No notifications yet.</div>`
+        }
       </div>`);
     $('#nMarkAll')?.addEventListener('click', async () => {
-      try { await api.post('/notifications/read-all'); refreshNotifCount(); closeModal(); } catch (e) { toast(e.message, true); }
+      try {
+        await api.post('/notifications/read-all');
+        refreshNotifCount();
+        closeModal();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
-    $('#modal').querySelectorAll('.notif').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.post(`/notifications/${b.dataset.nid}/read`); } catch (_e) {}
-      refreshNotifCount();
-      const link = b.dataset.link;
-      closeModal();
-      if (link && VIEWS[link]) navigate(link);
-    }));
+    $('#modal')
+      .querySelectorAll('.notif')
+      .forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.post(`/notifications/${b.dataset.nid}/read`);
+          } catch (_e) {}
+          refreshNotifCount();
+          const link = b.dataset.link;
+          closeModal();
+          if (link && VIEWS[link]) navigate(link);
+        }),
+      );
   }
   $('#bellBtn').addEventListener('click', openNotifications);
 
@@ -218,7 +332,8 @@
   async function boot() {
     try {
       const { user, access } = await api.get('/auth/me');
-      ME = user; ACCESS = access || ACCESS;
+      ME = user;
+      ACCESS = access || ACCESS;
       // Visiting /admin without an admin console session asks for the second login.
       if (isAdminPath() && !inConsole() && ACCESS.adminLevel) return showLogin();
       showApp();
@@ -235,8 +350,12 @@
     $('#loginForm').hidden = admin;
     $('#adminLoginForm').hidden = !admin;
     document.body.classList.toggle('admin-login-mode', admin);
-    $('.login-brand-title').textContent = admin ? 'Admin console for partners and billing.' : 'Your workday, all in one place.';
-    $('.login-brand-sub').textContent = admin ? 'People, payroll, billing and integrations — protected by 2-step verification.' : 'Clock in, request time off, track tasks and download pay stubs.';
+    $('.login-brand-title').textContent = admin
+      ? 'Admin console for partners and billing.'
+      : 'Your workday, all in one place.';
+    $('.login-brand-sub').textContent = admin
+      ? 'People, payroll, billing and integrations — protected by 2-step verification.'
+      : 'Clock in, request time off, track tasks and download pay stubs.';
     document.title = admin ? 'Admin console sign in · LIT Nexus' : 'Sign in · LIT Nexus Workforce Portal';
     if (admin) resetAdminLogin();
   }
@@ -245,7 +364,9 @@
   let adminChallenge = null;
   function resetAdminLogin() {
     adminChallenge = null;
-    $('#adminStep1').hidden = false; $('#adminStep2').hidden = true; $('#adminEnroll').hidden = true;
+    $('#adminStep1').hidden = false;
+    $('#adminStep2').hidden = true;
+    $('#adminEnroll').hidden = true;
     $('#adminLoginTitle').textContent = 'Partner sign in';
     $('#adminLoginSub').textContent = 'Restricted to portal administrators. Step 1 of 2.';
     $('#adminLoginBtn').textContent = 'Continue';
@@ -255,13 +376,18 @@
   $('#adminLoginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('#adminLoginErr').textContent = '';
-    const btn = $('#adminLoginBtn'); btn.disabled = true;
+    const btn = $('#adminLoginBtn');
+    btn.disabled = true;
     try {
       if (!adminChallenge) {
-        const r = await api.post('/admin/auth/login', { email: $('#adminEmail').value, password: $('#adminPassword').value });
+        const r = await api.post('/admin/auth/login', {
+          email: $('#adminEmail').value,
+          password: $('#adminPassword').value,
+        });
         if (r.ok) return finishAdminLogin(r);
         adminChallenge = r.challengeId;
-        $('#adminStep1').hidden = true; $('#adminStep2').hidden = false;
+        $('#adminStep1').hidden = true;
+        $('#adminStep2').hidden = false;
         $('#adminEnroll').hidden = r.step !== 'enroll';
         $('#adminBackupWrap').hidden = r.step === 'enroll';
         if (r.step === 'enroll') {
@@ -274,20 +400,31 @@
           $('#adminLoginSub').textContent = 'Enter the 6-digit code from your authenticator app. Step 2 of 2.';
         }
         btn.textContent = 'Verify & open console';
-        $('#adminCode').value = ''; $('#adminCode').focus();
+        $('#adminCode').value = '';
+        $('#adminCode').focus();
       } else {
         const backup = $('#adminBackup').value.trim();
-        const r = await api.post('/admin/auth/verify', backup ? { challengeId: adminChallenge, backupCode: backup } : { challengeId: adminChallenge, code: $('#adminCode').value.replace(/\s+/g, '') });
+        const r = await api.post(
+          '/admin/auth/verify',
+          backup
+            ? { challengeId: adminChallenge, backupCode: backup }
+            : { challengeId: adminChallenge, code: $('#adminCode').value.replace(/\s+/g, '') },
+        );
         finishAdminLogin(r);
       }
     } catch (err) {
       $('#adminLoginErr').textContent = err.message;
       if (/expired|start again/i.test(err.message)) resetAdminLogin();
-    } finally { btn.disabled = false; }
+    } finally {
+      btn.disabled = false;
+    }
   });
   function finishAdminLogin(r) {
-    ME = r.user; ACCESS = r.access;
-    $('#adminPassword').value = ''; $('#adminCode').value = ''; $('#adminBackup').value = '';
+    ME = r.user;
+    ACCESS = r.access;
+    $('#adminPassword').value = '';
+    $('#adminCode').value = '';
+    $('#adminBackup').value = '';
     window.history.replaceState(null, '', '/#/' + (ACCESS.adminLevel === 'BILLING' ? 'billing' : 'dashboard'));
     showApp();
     if (r.backupCodes) {
@@ -298,12 +435,21 @@
       $('#mDone').addEventListener('click', closeModal);
     }
   }
-  $('#toAdminLogin').addEventListener('click', (e) => { e.preventDefault(); window.history.pushState(null, '', '/admin'); showLogin(); });
-  $('#toEmployeeLogin').addEventListener('click', (e) => {
-    e.preventDefault(); window.history.pushState(null, '', '/');
-    if (ME) { showApp(); } else showLogin();
+  $('#toAdminLogin').addEventListener('click', (e) => {
+    e.preventDefault();
+    window.history.pushState(null, '', '/admin');
+    showLogin();
   });
-  window.addEventListener('popstate', () => { if (!ME || (isAdminPath() && !inConsole())) showLogin(); });
+  $('#toEmployeeLogin').addEventListener('click', (e) => {
+    e.preventDefault();
+    window.history.pushState(null, '', '/');
+    if (ME) {
+      showApp();
+    } else showLogin();
+  });
+  window.addEventListener('popstate', () => {
+    if (!ME || (isAdminPath() && !inConsole())) showLogin();
+  });
 
   function showApp() {
     $('#loginWrap').style.display = 'none';
@@ -313,7 +459,12 @@
     document.body.classList.toggle('console-owner', inConsole() && ACCESS.adminLevel === 'OWNER');
     if (isAdminPath()) window.history.replaceState(null, '', '/' + (window.location.hash || '#/dashboard'));
     $('#topName').textContent = ME.name;
-    $('#topRole').textContent = ACCESS.adminLevel === 'OWNER' ? 'Partner · Admin' : ACCESS.adminLevel === 'BILLING' ? 'Billing admin' : (ME.title || 'Employee');
+    $('#topRole').textContent =
+      ACCESS.adminLevel === 'OWNER'
+        ? 'Partner · Admin'
+        : ACCESS.adminLevel === 'BILLING'
+          ? 'Billing admin'
+          : ME.title || 'Employee';
     $('#topAvatar').textContent = initials(ME.name || '?');
     $('#consolePill').hidden = !ACCESS.adminLevel || inConsole();
     $('#consoleOn').hidden = !inConsole();
@@ -322,7 +473,9 @@
     startNotifications();
     navigate(viewFromAddress(), true);
     // Birthday first (it's a one-off moment); the Friday checklist follows.
-    checkBirthday().then((shown) => { if (!shown) checkFridayReminder(); });
+    checkBirthday().then((shown) => {
+      if (!shown) checkFridayReminder();
+    });
   }
 
   $('#loginForm').addEventListener('submit', async (e) => {
@@ -331,19 +484,22 @@
     try {
       const { user } = await api.post('/auth/login', { email: $('#email').value, password: $('#password').value });
       ME = user;
-      try { ACCESS = (await api.get('/auth/me')).access || ACCESS; } catch (_e) { /* keep defaults */ }
+      try {
+        ACCESS = (await api.get('/auth/me')).access || ACCESS;
+      } catch (_e) {
+        /* keep defaults */
+      }
       showApp();
-    } catch (err) { $('#loginErr').textContent = err.message; }
+    } catch (err) {
+      $('#loginErr').textContent = err.message;
+    }
   });
 
   // Confirm both end-of-day updates on every sign-out attempt, for every role.
   let signingOut = false;
   function confirmSignOut(step = 0) {
     if (signingOut) return;
-    const prompts = [
-      'I have updated management on all pending files.',
-      'I have updated my timesheet.'
-    ];
+    const prompts = ['I have updated management on all pending files.', 'I have updated my timesheet.'];
     modal(`<h3>Before you sign out — ${step + 1} of 2</h3>
       <p style="color:var(--slate);margin:0 0 18px;">Tick the confirmation to continue.</p>
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;line-height:1.5;">
@@ -356,21 +512,36 @@
     const check = $('#signOutCheck');
     const proceed = $('#signOutContinue');
     const cancel = $('#signOutCancel');
-    check.addEventListener('change', () => { proceed.disabled = !check.checked; });
+    check.addEventListener('change', () => {
+      proceed.disabled = !check.checked;
+    });
     cancel.addEventListener('click', closeModal);
     proceed.addEventListener('click', async () => {
       if (!check.checked || signingOut) return;
       if (step === 0) return confirmSignOut(1);
       signingOut = true;
-      proceed.disabled = true; cancel.disabled = true; check.disabled = true;
+      proceed.disabled = true;
+      cancel.disabled = true;
+      check.disabled = true;
       try {
         await api.post('/auth/logout');
         closeModal();
-        ME = null; ACCESS = { adminLevel: null, console: false }; clearInterval(clockTimer); dashTimers.forEach(clearInterval); dashTimers = []; stopNotifications(); stopFridayReminder(); showLogin();
+        ME = null;
+        ACCESS = { adminLevel: null, console: false };
+        clearInterval(clockTimer);
+        dashTimers.forEach(clearInterval);
+        dashTimers = [];
+        stopNotifications();
+        stopFridayReminder();
+        showLogin();
       } catch (e) {
         toast(e.message || 'Unable to sign out. Please try again.', true);
-        proceed.disabled = false; cancel.disabled = false; check.disabled = false;
-      } finally { signingOut = false; }
+        proceed.disabled = false;
+        cancel.disabled = false;
+        check.disabled = false;
+      } finally {
+        signingOut = false;
+      }
     });
   }
   $('#logoutBtn').addEventListener('click', () => confirmSignOut());
@@ -382,7 +553,10 @@
   // code, department, title, shift, dates, leave balance) are shown read-only
   // so they can see them and know to ask an admin.
   function openMyProfile() {
-    const ro = (label, value) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.85rem;">
+    const ro = (
+      label,
+      value,
+    ) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.85rem;">
       <span style="color:var(--slate);">${esc(label)}</span><span style="font-weight:600;">${esc(value || '—')}</span></div>`;
     modal(`<h3>My profile</h3>
       <div class="form-row one"><div class="field"><label>Full name</label><input id="myName" value="${esc(ME.name || '')}"></div></div>
@@ -406,9 +580,12 @@
         const r = await api.put('/users/me', { name, phone: $('#myPhone').value, birthday: $('#myBday').value });
         ME = { ...ME, ...r.user };
         $('#meName').textContent = ME.name; // reflect a rename in the sidebar
-        closeModal(); toast('Profile updated ✓');
+        closeModal();
+        toast('Profile updated ✓');
         if ($('#employeesRoot')) loadEmployeeProfile();
-      } catch (e) { toast(e.message, true); }
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -420,13 +597,18 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Update password</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const cur = $('#cpCur').value, next = $('#cpNew').value, conf = $('#cpConf').value;
+      const cur = $('#cpCur').value,
+        next = $('#cpNew').value,
+        conf = $('#cpConf').value;
       if (next.length < 6) return toast('New password must be at least 6 characters', true);
       if (next !== conf) return toast('New passwords do not match', true);
       try {
         await api.post('/auth/change-password', { current_password: cur, new_password: next });
-        closeModal(); toast('Password updated ✓');
-      } catch (e) { toast(e.message, true); }
+        closeModal();
+        toast('Password updated ✓');
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -441,11 +623,14 @@
     button.setAttribute('aria-expanded', String(open));
     button.nextElementSibling.hidden = !open;
   }
-  navGroups.forEach(button => button.addEventListener('click', () => showNavGroup(button, button.getAttribute('aria-expanded') === 'false')));
+  navGroups.forEach((button) =>
+    button.addEventListener('click', () => showNavGroup(button, button.getAttribute('aria-expanded') === 'false')),
+  );
 
   function closeAdminMenu() {
     if (adminMenuButton?.getAttribute('aria-expanded') !== 'true') return;
-    if (adminMenuButton.getClientRects().length && document.activeElement?.matches('#nav *, #navSettings')) adminMenuButton.focus();
+    if (adminMenuButton.getClientRects().length && document.activeElement?.matches('#nav *, #navSettings'))
+      adminMenuButton.focus();
     adminMenuButton.setAttribute('aria-expanded', 'false');
   }
   adminMenuButton?.addEventListener('click', () => {
@@ -492,9 +677,15 @@
     const restricted = ['clients', 'kpi', 'reports', 'admin', 'bonuses', 'operations', 'taskreview', 'late-requests'];
     if (restricted.includes(view) && !isAdmin()) view = 'dashboard';
     // Admin console pages need the second (admin console) sign-in.
-    if (['billing', 'access', 'integrations'].includes(view) && !(typeof inConsole === 'function' && inConsole())) view = 'dashboard';
+    if (['billing', 'access', 'integrations'].includes(view) && !(typeof inConsole === 'function' && inConsole()))
+      view = 'dashboard';
     if (['access', 'integrations'].includes(view) && ACCESS.adminLevel !== 'OWNER') view = 'dashboard';
-    const employeeAliases = { myperf: 'employeePerformance', leaves: 'employeeLeaves', salaries: 'employeeSalary', 'late-requests': 'employeeRequests' };
+    const employeeAliases = {
+      myperf: 'employeePerformance',
+      leaves: 'employeeLeaves',
+      salaries: 'employeeSalary',
+      'late-requests': 'employeeRequests',
+    };
     const legacyEmployeeView = Object.hasOwn(employeeAliases, view);
     employeeSection = legacyEmployeeView ? employeeAliases[view] : 'employeePerformance';
     if (legacyEmployeeView) view = 'employees';
@@ -509,12 +700,15 @@
       else b.removeAttribute('aria-current');
     });
     const selected = document.querySelector('.nav-item.active');
-    navGroups.forEach(button => showNavGroup(button, isAdmin() && button.parentElement.contains(selected)));
+    navGroups.forEach((button) => showNavGroup(button, isAdmin() && button.parentElement.contains(selected)));
     document.title = (selected ? selected.textContent.trim() + ' · ' : '') + 'WeLitNexus Portal';
-    const topTitle = $('#topTitle'); if (topTitle) topTitle.textContent = selected ? selected.textContent.trim() : 'Home';
+    const topTitle = $('#topTitle');
+    if (topTitle) topTitle.textContent = selected ? selected.textContent.trim() : 'Home';
     closeModal();
     clearInterval(clockTimer);
-    dashTimers.forEach(clearInterval); dashTimers = []; DASH_LIVE = null;
+    dashTimers.forEach(clearInterval);
+    dashTimers = [];
+    DASH_LIVE = null;
     VIEWS[view]();
   }
 
@@ -531,10 +725,23 @@
   for (const legacy of ['myperf', 'leaves', 'salaries', 'late-requests']) VIEWS[legacy] = () => navigate(legacy);
 
   // ---------- Portal v2 views (public/js/portal-v2.js) ----------
-  const v2 = (name) => () => window.PortalV2[name]({
-    api, $, esc, toast, modal, closeModal, setMain, navigate, fmtDate, initials,
-    me: () => ME, access: () => ACCESS, isAdmin, onInterval: (timer) => dashTimers.push(timer),
-  });
+  const v2 = (name) => () =>
+    window.PortalV2[name]({
+      api,
+      $,
+      esc,
+      toast,
+      modal,
+      closeModal,
+      setMain,
+      navigate,
+      fmtDate,
+      initials,
+      me: () => ME,
+      access: () => ACCESS,
+      isAdmin,
+      onInterval: (timer) => dashTimers.push(timer),
+    });
   VIEWS.messages = v2('messages');
   VIEWS.schedule = v2('schedule');
   VIEWS.billing = v2('billing');
@@ -543,15 +750,22 @@
 
   VIEWS.taskreview = async () => {
     if (!isAdmin()) return;
-    setMain('Task review', 'Staff-wise pending work and deadline changes from Asana.', '<div id="asanaReviewRoot"></div>');
-    await window.AsanaReview.mount($('#asanaReviewRoot'), { api, onInterval: timer => dashTimers.push(timer) });
+    setMain(
+      'Task review',
+      'Staff-wise pending work and deadline changes from Asana.',
+      '<div id="asanaReviewRoot"></div>',
+    );
+    await window.AsanaReview.mount($('#asanaReviewRoot'), { api, onInterval: (timer) => dashTimers.push(timer) });
   };
 
   // ---------- Admin operations: automatic read-only exception checks ----------
   VIEWS.operations = async () => {
     if (!isAdmin()) return;
-    setMain('Operations', 'Admin only · LIT Tasks and portal approvals in one place. Refreshes every minute while open; Asana reads are shared and cached for up to five minutes.',
-      '<div class="toolbar"><button class="btn btn-ghost" id="opsRefresh">Refresh</button><span id="opsTime" role="status">Loading…</span></div><div id="opsBody"></div>');
+    setMain(
+      'Operations',
+      'Admin only · LIT Tasks and portal approvals in one place. Refreshes every minute while open; Asana reads are shared and cached for up to five minutes.',
+      '<div class="toolbar"><button class="btn btn-ghost" id="opsRefresh">Refresh</button><span id="opsTime" role="status">Loading…</span></div><div id="opsBody"></div>',
+    );
     let loading = false;
     let taskFilter = 'overdue';
     const load = async () => {
@@ -562,33 +776,49 @@
         const d = await api.get('/operations');
         if ($('#opsBody') !== host) return;
         $('#opsTime').textContent = 'Checked ' + new Date(d.observedAt).toLocaleString() + ' · ' + d.timezone;
-        const a = d.asana, c = a.counts;
+        const a = d.asana,
+          c = a.counts;
         host.innerHTML = `<div class="cards">${statCard('Pending approvals', d.approvals.length, 'value')}${statCard('Overdue Asana tasks', c ? c.overdue : 'Unknown', 'value')}${statCard('No owner', c ? c.unassigned : 'Unknown', 'value')}${statCard('No due date', c ? c.missingDue : 'Unknown', 'value')}</div>
           <div class="section"><h2>Asana · LIT Tasks</h2><p class="page-sub">${esc(a.scope)}. ${a.lastSuccessAt ? 'Last complete read: ' + esc(new Date(a.lastSuccessAt).toLocaleString()) : 'No complete read yet.'}</p>
           ${a.state === 'ok' ? `<label for="opsFilter">Show</label> <select id="opsFilter"><option value="overdue">Overdue (${c.overdue})</option><option value="dueToday">Due today (${c.dueToday})</option><option value="unassigned">No owner (${c.unassigned})</option><option value="missingDue">No due date (${c.missingDue})</option><option value="all">All pending (${c.pending})</option></select><div id="opsTasks"></div>` : `<p role="alert">${esc(a.error || 'Asana is not configured. Add the existing Asana integration credentials in Railway.')}${a.retryAt ? ' Retry after ' + esc(new Date(a.retryAt).toLocaleTimeString()) : ''}</p>`}</div>
-          <div class="section"><h2>Waiting for admin review · all months</h2><p class="page-sub">Oldest requests first. Open the relevant section to review using its existing approval controls.</p>${d.approvals.length ? `<div class="table-wrap"><table><thead><tr><th>Waiting</th><th>Type</th><th>Employee</th><th>Request</th><th></th></tr></thead><tbody>${d.approvals.map(r=>`<tr><td>${r.waitingDays} days</td><td>${esc(r.kind)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td><a href="#/${esc(r.view)}">Review</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No pending approvals.</div>'}</div>
-          <div class="section"><h2>Bonus rotation</h2><p class="page-sub">Payment history helps you avoid repeating recipients. Final decisions remain with admins. <a href="#/bonuses">Open bonus history</a></p><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest recorded bonus month</th></tr></thead><tbody>${d.bonuses.map(b=>`<tr><td>${esc(b.name)}</td><td>${esc(b.lastMonth || 'No record')}</td></tr>`).join('')}</tbody></table></div></div>
+          <div class="section"><h2>Waiting for admin review · all months</h2><p class="page-sub">Oldest requests first. Open the relevant section to review using its existing approval controls.</p>${d.approvals.length ? `<div class="table-wrap"><table><thead><tr><th>Waiting</th><th>Type</th><th>Employee</th><th>Request</th><th></th></tr></thead><tbody>${d.approvals.map((r) => `<tr><td>${r.waitingDays} days</td><td>${esc(r.kind)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td><a href="#/${esc(r.view)}">Review</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No pending approvals.</div>'}</div>
+          <div class="section"><h2>Bonus rotation</h2><p class="page-sub">Payment history helps you avoid repeating recipients. Final decisions remain with admins. <a href="#/bonuses">Open bonus history</a></p><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest recorded bonus month</th></tr></thead><tbody>${d.bonuses.map((b) => `<tr><td>${esc(b.name)}</td><td>${esc(b.lastMonth || 'No record')}</td></tr>`).join('')}</tbody></table></div></div>
           <div class="section"><h2>Automation status</h2><p>Slack attendance alerts: <strong>${d.slack.attendanceConfigured ? 'configured' : 'off'}</strong> · ${d.slack.attendancePending} queued · ${d.slack.attendanceReview} need delivery review. <a href="/api/operations/attendance-slack/check" target="_blank" rel="noopener">Check bot connection</a></p><p>EOD reports: <strong>${d.slack.eodEnabled ? 'enabled' : 'off'}</strong>.</p><p class="page-sub">Operations is read-only. A task’s blocker must be recorded by its owner.</p></div>`;
         if (a.state === 'ok') {
           const render = () => {
-            const rows = a.tasks.filter(t=>taskFilter==='all'||t[taskFilter]);
-            $('#opsTasks').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Task</th><th>Owner</th><th>Due date</th><th>Flags</th></tr></thead><tbody>${rows.map(t=>`<tr><td><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.name)}</a></td><td>${esc(t.assignee)}</td><td>${esc(t.due || 'Not set')}</td><td>${[t.overdue?'Overdue':'',t.unassigned?'No owner':'',t.missingDue?'No due date':''].filter(Boolean).join(' · ')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No tasks in this category.</div>';
+            const rows = a.tasks.filter((t) => taskFilter === 'all' || t[taskFilter]);
+            $('#opsTasks').innerHTML = rows.length
+              ? `<div class="table-wrap"><table><thead><tr><th>Task</th><th>Owner</th><th>Due date</th><th>Flags</th></tr></thead><tbody>${rows.map((t) => `<tr><td><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.name)}</a></td><td>${esc(t.assignee)}</td><td>${esc(t.due || 'Not set')}</td><td>${[t.overdue ? 'Overdue' : '', t.unassigned ? 'No owner' : '', t.missingDue ? 'No due date' : ''].filter(Boolean).join(' · ')}</td></tr>`).join('')}</tbody></table></div>`
+              : '<div class="empty">No tasks in this category.</div>';
           };
           $('#opsFilter').value = taskFilter;
-          $('#opsFilter').onchange = e=>{taskFilter=e.target.value;render();};render();
+          $('#opsFilter').onchange = (e) => {
+            taskFilter = e.target.value;
+            render();
+          };
+          render();
         }
-      } catch (e) { if ($('#opsBody')===host) { $('#opsTime').textContent='Refresh failed — displayed information may be out of date.'; toast(e.message,true); } }
-      finally { loading=false; }
+      } catch (e) {
+        if ($('#opsBody') === host) {
+          $('#opsTime').textContent = 'Refresh failed — displayed information may be out of date.';
+          toast(e.message, true);
+        }
+      } finally {
+        loading = false;
+      }
     };
-    $('#opsRefresh').onclick=load;
+    $('#opsRefresh').onclick = load;
     await load();
-    if ($('#opsBody')) dashTimers.push(setInterval(load,60000));
+    if ($('#opsBody')) dashTimers.push(setInterval(load, 60000));
   };
 
   // ---------- Dashboard ----------
   VIEWS.dashboard = () => {
-    setMain(`Hi ${ME.name.split(' ')[0]} 👋`, new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      '<div id="dashControlCenter" class="dashboard" aria-busy="true"><p>Loading dashboard…</p></div>');
+    setMain(
+      `Hi ${ME.name.split(' ')[0]} 👋`,
+      new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+      '<div id="dashControlCenter" class="dashboard" aria-busy="true"><p>Loading dashboard…</p></div>',
+    );
     // The first expansion can reuse a recent team snapshot.
     let teamRead;
     const read = (path) => {
@@ -597,18 +827,22 @@
       return response;
     };
     window.Dashboard.render($('#dashControlCenter'), {
-      read, admin: isAdmin(),
-      openTeam: () => startLiveAttendance('dashAdmin', true, path => {
-        if (path === '/attendance/today' && teamRead && Date.now() - teamRead.ts < 10000) return teamRead.response;
-        return api.get(path);
-      }),
+      read,
+      admin: isAdmin(),
+      openTeam: () =>
+        startLiveAttendance('dashAdmin', true, (path) => {
+          if (path === '/attendance/today' && teamRead && Date.now() - teamRead.ts < 10000) return teamRead.response;
+          return api.get(path);
+        }),
     });
   };
 
   // h m s from milliseconds, e.g. "2h 14m 06s".
   const fmtHMS = (ms) => {
     const t = Math.max(0, Math.floor(ms / 1000));
-    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    const h = Math.floor(t / 3600),
+      m = Math.floor((t % 3600) / 60),
+      s = t % 60;
     return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
   };
 
@@ -616,31 +850,42 @@
   function tickDashTimers() {
     if (!DASH_LIVE) return;
     const elapsed = Date.now() - DASH_LIVE.receivedAt;
-    DASH_LIVE.working.filter(p => !p.needsReview).forEach((p) => {
-      const el = document.querySelector(`[data-livetimer="${p.id}"]`);
-      if (el) el.textContent = fmtHMS(p.workedMinutes * 60000 + elapsed);
-    });
+    DASH_LIVE.working
+      .filter((p) => !p.needsReview)
+      .forEach((p) => {
+        const el = document.querySelector(`[data-livetimer="${p.id}"]`);
+        if (el) el.textContent = fmtHMS(p.workedMinutes * 60000 + elapsed);
+      });
   }
 
   // Live team-attendance panel, reused by the Dashboard and the Clock page.
   // hostId: element to render into. withApprovals: also show pending leaves.
   async function renderLiveAttendance(hostId, withApprovals, read = (path) => api.get(path)) {
-    const host = $('#' + hostId); if (!host) return; // navigated away
+    const host = $('#' + hostId);
+    if (!host) return; // navigated away
     try {
       const reqs = [read('/attendance/today')];
-      if (withApprovals) reqs.push(read('/leaves/pending'), read('/punch-requests/pending'), read('/reports/missing-clockouts?days=7'));
+      if (withApprovals)
+        reqs.push(read('/leaves/pending'), read('/punch-requests/pending'), read('/reports/missing-clockouts?days=7'));
       const [today, pend, punchPend, missing] = await Promise.all(reqs);
       if (!host.isConnected) return;
-      host.closest('.dash-card')?.querySelectorAll('[data-team-count]').forEach(count => {
-        count.textContent = today.people.filter(person => person.state === count.dataset.teamCount).length;
-      });
+      host
+        .closest('.dash-card')
+        ?.querySelectorAll('[data-team-count]')
+        .forEach((count) => {
+          count.textContent = today.people.filter((person) => person.state === count.dataset.teamCount).length;
+        });
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
       DASH_LIVE = { receivedAt: Date.now(), working }; // anchor for the live tick
       // Small phone/PC indicator next to a name, from their latest punch's device.
-      const deviceTag = (d) => d === 'MOBILE' ? ' <span class="dev-tag" title="Clocked in from a phone">📱 Mobile</span>'
-        : d === 'PC' ? ' <span class="dev-tag" title="Clocked in from a computer">💻 PC</span>' : '';
+      const deviceTag = (d) =>
+        d === 'MOBILE'
+          ? ' <span class="dev-tag" title="Clocked in from a phone">📱 Mobile</span>'
+          : d === 'PC'
+            ? ' <span class="dev-tag" title="Clocked in from a computer">💻 PC</span>'
+            : '';
       // Active ratio for the "Team — live now" header (clock page).
       const activeToday = today.people.filter((p) => p.state !== 'OFF').length;
       const ratioEl = $('#teamRatio');
@@ -651,51 +896,86 @@
         <div style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));align-items:start;margin-bottom:28px;">
           <div class="section" style="margin-bottom:0;">
             <h2>🟢 Currently in (${working.length})${onBreak.length ? '' : ' <span class="ratio-ind">· no one on break</span>'}</h2>
-            ${working.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th><th>Break</th></tr></thead><tbody>
+            ${
+              working.length
+                ? `<table><thead><tr><th>Name</th><th>Dept</th><th>Worked (live)</th><th>Break</th></tr></thead><tbody>
               ${working.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td><td><strong style="font-variant-numeric:tabular-nums;color:var(--teal-dark);" data-livetimer="${p.id}">${fmtHMS(p.workedMinutes * 60000)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
-            </tbody></table>` : `<div class="empty">No one is clocked in right now.</div>`}
+            </tbody></table>`
+                : `<div class="empty">No one is clocked in right now.</div>`
+            }
           </div>
-          ${onBreak.length ? `<div class="section" style="margin-bottom:0;">
+          ${
+            onBreak.length
+              ? `<div class="section" style="margin-bottom:0;">
             <h2>☕ On break (${onBreak.length})</h2>
             <table><thead><tr><th>Name</th><th>Dept</th><th>Total break</th></tr></thead><tbody>
               ${onBreak.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td><td><strong style="color:#9a6b00;">${fmtMins(p.breakMinutes)}</strong></td></tr>`).join('')}
             </tbody></table>
-          </div>` : ''}
+          </div>`
+              : ''
+          }
         </div>
         <div class="section">
           <h2>✅ Clocked out today (${clockedOut.length})</h2>
-          ${clockedOut.length ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
-            ${clockedOut.map((p) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td>
+          ${
+            clockedOut.length
+              ? `<table><thead><tr><th>Name</th><th>Dept</th><th>First in</th><th>Last out</th><th>Net worked</th><th>Break</th></tr></thead><tbody>
+            ${clockedOut
+              .map(
+                (
+                  p,
+                ) => `<tr><td>${esc(p.name)}${deviceTag(p.device)}<div style="font-size:.75rem;color:var(--slate);">${esc(p.day)} · ${esc(p.timezone)}${p.needsReview ? ' · Review open session' : ''}</div></td><td>${esc(p.department || '—')}</td>
               <td>${attendanceTime(p.firstIn, p.timezone)}</td><td>${attendanceTime(p.lastOut, p.timezone)}</td>
-              <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`).join('')}
-          </tbody></table>` : `<div class="empty">No one has finished their shift yet.</div>`}
+              <td><strong>${fmtMins(p.workedMinutes)}</strong></td><td>${fmtMins(p.breakMinutes)}</td></tr>`,
+              )
+              .join('')}
+          </tbody></table>`
+              : `<div class="empty">No one has finished their shift yet.</div>`
+          }
         </div>
-        ${withApprovals && missing.rows.length ? `<div class="section">
+        ${
+          withApprovals && missing.rows.length
+            ? `<div class="section">
           <h2>⚠️ Missing clock-outs (${missing.rows.length})<span class="ratio-ind">· last 7 days — hours are understated until fixed</span></h2>
           <table><thead><tr><th>Employee</th><th>Day</th><th>Clocked in</th><th>Left as</th><th></th></tr></thead><tbody>
-            ${missing.rows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.day)}</td>
+            ${missing.rows
+              .map(
+                (m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.day)}</td>
               <td>${attendanceTime(m.firstIn, m.timezone)}</td><td><span class="badge b-pending">${cap(m.state)}</span></td>
-              <td style="text-align:right;"><button class="btn-fix" data-fixmiss="${m.user_id}:${m.day}">Fix</button></td></tr>`).join('')}
+              <td style="text-align:right;"><button class="btn-fix" data-fixmiss="${m.user_id}:${m.day}">Fix</button></td></tr>`,
+              )
+              .join('')}
           </tbody></table>
-        </div>` : ''}
-        ${withApprovals ? `<div class="section">
+        </div>`
+            : ''
+        }
+        ${
+          withApprovals
+            ? `<div class="section">
           <h2>Pending leave approvals (${pend.leaves.length})</h2>
           ${pend.leaves.length ? leaveApprovalTable(pend.leaves) : `<div class="empty">Nothing waiting for approval. 🎉</div>`}
         </div>
         <div class="section">
           <h2>Attendance correction requests (${punchPend.requests.length})</h2>
           ${punchPend.requests.length ? punchApprovalTable(punchPend.requests) : `<div class="empty">No correction requests. 🎉</div>`}
-        </div>` : ''}`;
+        </div>`
+            : ''
+        }`;
       if (withApprovals) {
-        wireLeaveApprovals(); wirePunchApprovals();
+        wireLeaveApprovals();
+        wirePunchApprovals();
         // Fix a missing clock-out right from the dashboard.
-        host.querySelectorAll('[data-fixmiss]').forEach((b) => b.addEventListener('click', () => {
-          const [uid, day] = b.dataset.fixmiss.split(':');
-          openAttendanceEditor(Number(uid), day, () => renderLiveAttendance(hostId, withApprovals));
-        }));
+        host.querySelectorAll('[data-fixmiss]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const [uid, day] = b.dataset.fixmiss.split(':');
+            openAttendanceEditor(Number(uid), day, () => renderLiveAttendance(hostId, withApprovals));
+          }),
+        );
       }
       tickDashTimers(); // paint the first tick immediately
-    } catch (e) { if (host.isConnected) toast(e.message, true); }
+    } catch (e) {
+      if (host.isConnected) toast(e.message, true);
+    }
   }
 
   // Start the live panel in a host element with a 1s tick and a fast poll.
@@ -705,17 +985,21 @@
     dashTimers.push(setInterval(() => renderLiveAttendance(hostId, withApprovals), 10000));
   }
 
-  const statCard = (label, value, cls) => `<div class="card stat"><div class="label">${esc(label)}</div><div class="${cls}">${value}</div></div>`;
+  const statCard = (label, value, cls) =>
+    `<div class="card stat"><div class="label">${esc(label)}</div><div class="${cls}">${value}</div></div>`;
 
   // ---------- Clock ----------
   VIEWS.clock = async () => {
-    setMain('Clock', 'Punch in and out, take breaks, and review your timesheet.',
+    setMain(
+      'Clock',
+      'Punch in and out, take breaks, and review your timesheet.',
       `<div class="cards" style="grid-template-columns:1fr;max-width:520px;">
          <div class="card clock" id="clockCard"></div>
        </div>
        <div class="admin-only section" style="margin-top:8px;"><h2 style="color:var(--navy);">Team — live now<span class="ratio-ind" id="teamRatio"></span></h2><div id="clockTeam"></div></div>
        <div class="section"><div class="toolbar"><h2 style="margin:0;">My last 14 days</h2><button class="btn btn-ghost btn-sm" id="fixPunchBtn">🛠 Request a correction</button></div><div id="timesheet"></div></div>
-       <div class="section"><h2>My correction requests</h2><div id="myPunchReqs"></div></div>`);
+       <div class="section"><h2>My correction requests</h2><div id="myPunchReqs"></div></div>`,
+    );
     await renderClock();
     loadTimesheet();
     $('#fixPunchBtn').addEventListener('click', () => openPunchRequestModal($('#fixPunchBtn').dataset.day));
@@ -732,37 +1016,65 @@
       <div class="form-row"><div class="field"><label>Day</label><input type="date" id="prDay" value="${esc(presetDay || todayISO())}"></div>
         <div class="field"><label>Request</label><select id="prOperation"><option value="EDIT">Correct a recorded punch</option><option value="ADD">Add a missed punch</option></select></div></div>
       <div class="form-row"><div class="field" id="prOriginalField"><label>Original punch</label><select id="prOriginal"></select></div>
-        <div class="field"><label>Punch type</label><select id="prType">${Object.entries(PUNCH_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>
+        <div class="field"><label>Punch type</label><select id="prType">${Object.entries(PUNCH_LABEL)
+          .map(([v, l]) => `<option value="${v}">${l}</option>`)
+          .join('')}</select></div></div>
       <div class="form-row"><div class="field"><label>Time (24h)</label><input type="time" id="prTime"></div><div class="field"><label>Actual punch date</label><input type="date" id="prEventDate"></div></div>
       <p id="prZone" class="page-sub"></p>
       <div class="form-row one"><div class="field"><label>Reason</label><textarea id="prReason" placeholder="e.g. Forgot to clock out, left at 6:30pm"></textarea></div></div>
       <p id="prError" role="alert" style="color:var(--danger);"></p>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSend" disabled>Send request</button></div>`);
-    const dayInput = $('#prDay'), operationInput = $('#prOperation'), originalInput = $('#prOriginal');
-    const typeInput = $('#prType'), timeInput = $('#prTime'), sendButton = $('#mSend'), errorEl = $('#prError'), originalField = $('#prOriginalField');
-    let events = [], loadedDay = null, loading = 0, sending = false;
+    const dayInput = $('#prDay'),
+      operationInput = $('#prOperation'),
+      originalInput = $('#prOriginal');
+    const typeInput = $('#prType'),
+      timeInput = $('#prTime'),
+      sendButton = $('#mSend'),
+      errorEl = $('#prError'),
+      originalField = $('#prOriginalField');
+    let events = [],
+      loadedDay = null,
+      loading = 0,
+      sending = false;
     const selectOriginal = (updateTime = true) => {
       const editing = operationInput.value === 'EDIT';
       originalField.hidden = !editing;
       typeInput.disabled = editing;
-      const selected = events.find(e => e.id === Number(originalInput.value));
-      if (editing && selected) { typeInput.value = selected.type; if (updateTime) { timeInput.value = selected.time; $('#prEventDate').value = selected.event_date || ''; } }
+      const selected = events.find((e) => e.id === Number(originalInput.value));
+      if (editing && selected) {
+        typeInput.value = selected.type;
+        if (updateTime) {
+          timeInput.value = selected.time;
+          $('#prEventDate').value = selected.event_date || '';
+        }
+      }
       sendButton.disabled = sending || loadedDay !== dayInput.value || (editing && !selected);
     };
     const loadEvents = async () => {
-      const version = ++loading, day = dayInput.value;
-      loadedDay = null; sendButton.disabled = true; errorEl.textContent = '';
+      const version = ++loading,
+        day = dayInput.value;
+      loadedDay = null;
+      sendButton.disabled = true;
+      errorEl.textContent = '';
       try {
         const data = await api.get(`/punch-requests/events?day=${encodeURIComponent(day)}`);
         if (version !== loading || !dayInput.isConnected) return;
-        events = data.events; loadedDay = day;
+        events = data.events;
+        loadedDay = day;
         $('#prZone').textContent = data.timezone || '';
         $('#prEventDate').value = '';
-        originalInput.innerHTML = events.map(e => `<option value="${e.id}">${PUNCH_LABEL[e.type]} · ${esc(e.event_date || day)} ${esc(e.time)} ${esc(e.offset || '')}</option>`).join('');
+        originalInput.innerHTML = events
+          .map(
+            (e) =>
+              `<option value="${e.id}">${PUNCH_LABEL[e.type]} · ${esc(e.event_date || day)} ${esc(e.time)} ${esc(e.offset || '')}</option>`,
+          )
+          .join('');
         if (events.length) originalInput.value = String(events[events.length - 1].id);
         else operationInput.value = 'ADD';
         selectOriginal();
-      } catch (e) { if (version === loading && dayInput.isConnected) errorEl.textContent = e.message; }
+      } catch (e) {
+        if (version === loading && dayInput.isConnected) errorEl.textContent = e.message;
+      }
     };
     dayInput.addEventListener('change', loadEvents);
     operationInput.addEventListener('change', selectOriginal);
@@ -770,39 +1082,83 @@
     $('#mCancel').addEventListener('click', closeModal);
     sendButton.addEventListener('click', async () => {
       if (sendButton.disabled || loadedDay !== dayInput.value) return;
-      const payload = { day: dayInput.value, operation: operationInput.value, type: typeInput.value, time: timeInput.value, reason: $('#prReason').value };
+      const payload = {
+        day: dayInput.value,
+        operation: operationInput.value,
+        type: typeInput.value,
+        time: timeInput.value,
+        reason: $('#prReason').value,
+      };
       if ($('#prEventDate').value) payload.event_date = $('#prEventDate').value;
       if (payload.operation === 'EDIT') payload.target_event_id = Number(originalInput.value);
       if (!payload.day || !payload.time) return toast('Pick a day and time', true);
-      sending = true; sendButton.disabled = true; errorEl.textContent = '';
-      try { await api.post('/punch-requests', payload); if (dayInput.isConnected) closeModal(); toast('Request sent to admin ✓'); loadMyPunchRequests(); }
-      catch (e) { sending = false; errorEl.textContent = e.message; selectOriginal(false); }
+      sending = true;
+      sendButton.disabled = true;
+      errorEl.textContent = '';
+      try {
+        await api.post('/punch-requests', payload);
+        if (dayInput.isConnected) closeModal();
+        toast('Request sent to admin ✓');
+        loadMyPunchRequests();
+      } catch (e) {
+        sending = false;
+        errorEl.textContent = e.message;
+        selectOriginal(false);
+      }
     });
     loadEvents();
   }
   function punchRequestAction(r) {
     const from = r.original_time;
-    return r.operation === 'EDIT' ? `Correct${from ? ' ' + from + ' →' : ''}` : r.operation === 'ADD' ? 'Add' : 'Legacy correction (auto-match)';
+    return r.operation === 'EDIT'
+      ? `Correct${from ? ' ' + from + ' →' : ''}`
+      : r.operation === 'ADD'
+        ? 'Add'
+        : 'Legacy correction (auto-match)';
   }
   async function loadMyPunchRequests() {
     try {
       const { requests } = await api.get('/punch-requests/mine');
-      const el = $('#myPunchReqs'); if (!el) return;
-      if (!requests.length) { el.innerHTML = `<div class="empty">No correction requests.</div>`; return; }
+      const el = $('#myPunchReqs');
+      if (!el) return;
+      if (!requests.length) {
+        el.innerHTML = `<div class="empty">No correction requests.</div>`;
+        return;
+      }
       el.innerHTML = `<table><thead><tr><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
-        ${requests.map((r) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.event_date || '')} ${esc(r.time)} ${esc(r.timezone || '')}</td>
+        ${requests
+          .map(
+            (
+              r,
+            ) => `<tr><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.event_date || '')} ${esc(r.time)} ${esc(r.timezone || '')}</td>
           <td>${esc(r.reason || '—')}</td><td><span class="badge ${REQ_BADGE[r.status] || ''}">${cap(r.status)}</span>${r.admin_note ? `<div style="color:var(--slate);font-size:.76rem;margin-top:3px;">${esc(r.admin_note)}</div>` : ''}</td>
-          <td>${r.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel-req="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}
+          <td>${r.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-cancel-req="${r.id}">Cancel</button>` : ''}</td></tr>`,
+          )
+          .join('')}
       </tbody></table>`;
-      el.querySelectorAll('[data-cancel-req]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/punch-requests/${b.dataset.cancelReq}/cancel`); toast('Cancelled'); loadMyPunchRequests(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+      el.querySelectorAll('[data-cancel-req]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.post(`/punch-requests/${b.dataset.cancelReq}/cancel`);
+            toast('Cancelled');
+            loadMyPunchRequests();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   async function renderClock() {
     let status;
-    try { status = await api.get('/attendance/status'); } catch (e) { return toast(e.message, true); }
+    try {
+      status = await api.get('/attendance/status');
+    } catch (e) {
+      return toast(e.message, true);
+    }
     const labels = { IN: 'Clocked In', OUT: 'Clocked Out', BREAK: 'On Break', OFF: 'Off' };
     const btns = {
       IN: `<button class="btn btn-primary" data-punch="IN">▶ Clock In</button>`,
@@ -822,15 +1178,24 @@
       ${status.needsReview ? '<p style="color:var(--danger);">This session has been open over 24 hours. Review the punches before using its totals.</p>' : ''}
       <div class="meta">Total break this workday: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
       ${status.valid === false ? `<p style="color:var(--danger);">${esc(status.error)} Ask an administrator to correct today’s punches.</p>` : ''}<div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
-    card.querySelectorAll('[data-punch]').forEach((b) => b.addEventListener('click', () => {
-      if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
-      if (b.dataset.punch === 'BREAK_START') return chooseBreak();
-      punch(b.dataset.punch);
-    }));
+    card.querySelectorAll('[data-punch]').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
+        if (b.dataset.punch === 'BREAK_START') return chooseBreak();
+        punch(b.dataset.punch);
+      }),
+    );
     clearInterval(clockTimer);
-    const tick = () => { const el = $('#liveClock'); if (el) el.textContent = new Date().toLocaleTimeString([], { timeZone: status.timezone }); };
+    const tick = () => {
+      const el = $('#liveClock');
+      if (el) el.textContent = new Date().toLocaleTimeString([], { timeZone: status.timezone });
+    };
     let ticks = 0;
-    tick(); clockTimer = setInterval(() => { tick(); if (++ticks % 30 === 0) renderClock(); }, 1000);
+    tick();
+    clockTimer = setInterval(() => {
+      tick();
+      if (++ticks % 30 === 0) renderClock();
+    }, 1000);
   }
 
   // Second confirmation for clocking out — people were hitting it by mistake
@@ -855,17 +1220,25 @@
         <button class="btn btn-danger" id="coConfirm" disabled>⏹ Yes, clock out</button>
       </div>`);
     $('#coCancel').addEventListener('click', closeModal);
-    if (canBreak) $('#coBreak').addEventListener('click', () => { closeModal(); chooseBreak(); });
+    if (canBreak)
+      $('#coBreak').addEventListener('click', () => {
+        closeModal();
+        chooseBreak();
+      });
     const files = $('#coFiles');
     const timesheet = $('#coTimesheet');
     const confirm = $('#coConfirm');
-    const updateConfirm = () => { confirm.disabled = submitted || !files.checked || !timesheet.checked; };
+    const updateConfirm = () => {
+      confirm.disabled = submitted || !files.checked || !timesheet.checked;
+    };
     files.addEventListener('change', updateConfirm);
     timesheet.addEventListener('change', updateConfirm);
     confirm.addEventListener('click', () => {
       if (submitted || !files.checked || !timesheet.checked) return;
-      submitted = true; updateConfirm();
-      closeModal(); punch('OUT');
+      submitted = true;
+      updateConfirm();
+      closeModal();
+      punch('OUT');
     });
   }
 
@@ -873,7 +1246,9 @@
     modal(`<h3>Start break</h3>
       <form id="breakForm">
         <div class="field"><label for="breakType">Break type</label>
-          <select id="breakType">${Object.entries(BREAK_LABEL).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
+          <select id="breakType">${Object.entries(BREAK_LABEL)
+            .map(([value, label]) => `<option value="${value}">${label}</option>`)
+            .join('')}</select>
         </div>
         <div class="field" id="breakReasonField" hidden><label for="breakReason">Reason (required)</label>
           <textarea id="breakReason" rows="3" maxlength="200" disabled></textarea>
@@ -883,8 +1258,11 @@
         <div class="modal-actions"><button class="btn btn-ghost" type="button" id="breakCancel">Cancel</button>
           <button class="btn btn-primary" type="submit" id="breakSubmit">Start break</button></div>
       </form>`);
-    const form = $('#breakForm'), type = $('#breakType'), reason = $('#breakReason');
-    const submit = $('#breakSubmit'), error = $('#breakError');
+    const form = $('#breakForm'),
+      type = $('#breakType'),
+      reason = $('#breakReason');
+    const submit = $('#breakSubmit'),
+      error = $('#breakError');
     type.addEventListener('change', () => {
       const other = type.value === 'OTHER';
       $('#breakReasonField').hidden = !other;
@@ -894,7 +1272,7 @@
       error.textContent = '';
     });
     $('#breakCancel').addEventListener('click', closeModal);
-    form.addEventListener('submit', async event => {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (submit.disabled) return;
       const value = reason.value.trim();
@@ -907,7 +1285,9 @@
       if (type.value === 'OTHER') details.break_reason = value;
       submit.disabled = true;
       error.textContent = '';
-      await punch('BREAK_START', details, () => { if (form.isConnected) closeModal(); });
+      await punch('BREAK_START', details, () => {
+        if (form.isConnected) closeModal();
+      });
       submit.disabled = false;
     });
   }
@@ -919,52 +1299,92 @@
       toast('Recorded ✓');
       await renderClock();
       loadTimesheet();
+    } catch (e) {
+      toast(e.message, true);
     }
-    catch (e) { toast(e.message, true); }
   }
 
   async function loadTimesheet() {
     try {
       const { days } = await api.get('/attendance/timesheet');
-      const el = $('#timesheet'); if (!el) return;
-      if (!days.length) { el.innerHTML = `<div class="empty">No punches yet.</div>`; return; }
+      const el = $('#timesheet');
+      if (!el) return;
+      if (!days.length) {
+        el.innerHTML = `<div class="empty">No punches yet.</div>`;
+        return;
+      }
       el.innerHTML = `<table><thead><tr><th>Date</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th></tr></thead><tbody>
-        ${days.slice().reverse().map((d) => `<tr>
+        ${days
+          .slice()
+          .reverse()
+          .map(
+            (d) => `<tr>
           <td>${esc(d.day)}</td>
           <td>${attendanceTime(d.firstIn, d.timezone)}</td>
           <td>${attendanceTime(d.lastOut, d.timezone)}</td>
-          <td>${fmtMins(d.workedMinutes)}</td><td>${fmtMins(d.breakMinutes)}${d.breaks?.length ? `<details><summary>Break details</summary>
-            <ul>${d.breaks.map(b => `<li>${attendanceTime(b.ts, d.timezone)} · ${esc(BREAK_LABEL[b.break_type])}${b.break_reason ? ' · ' + esc(b.break_reason) : ''}</li>`).join('')}</ul>
-          </details>` : ''}</td></tr>`).join('')}
+          <td>${fmtMins(d.workedMinutes)}</td><td>${fmtMins(d.breakMinutes)}${
+            d.breaks?.length
+              ? `<details><summary>Break details</summary>
+            <ul>${d.breaks.map((b) => `<li>${attendanceTime(b.ts, d.timezone)} · ${esc(BREAK_LABEL[b.break_type])}${b.break_reason ? ' · ' + esc(b.break_reason) : ''}</li>`).join('')}</ul>
+          </details>`
+              : ''
+          }</td></tr>`,
+          )
+          .join('')}
       </tbody></table>`;
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // ---------- Notice board ----------
   VIEWS.noticeboard = async () => {
-    setMain('Notice board', 'Company updates and announcements.',
+    setMain(
+      'Notice board',
+      'Company updates and announcements.',
       `${isAdmin() ? '<div class="toolbar"><span></span><button class="btn btn-primary" id="newNoticeBtn">+ Post notice</button></div>' : ''}
-       <div id="noticeList"></div>`);
+       <div id="noticeList"></div>`,
+    );
     if (isAdmin()) $('#newNoticeBtn').addEventListener('click', () => openNoticeModal());
     loadNotices();
   };
   async function loadNotices() {
     try {
       const { announcements } = await api.get('/announcements');
-      const el = $('#noticeList'); if (!el) return;
-      if (!announcements.length) { el.innerHTML = `<div class="empty">No announcements yet.</div>`; return; }
-      el.innerHTML = announcements.map((a) => `<div class="notice ${a.pinned ? 'pinned' : ''}">
+      const el = $('#noticeList');
+      if (!el) return;
+      if (!announcements.length) {
+        el.innerHTML = `<div class="empty">No announcements yet.</div>`;
+        return;
+      }
+      el.innerHTML = announcements
+        .map(
+          (a) => `<div class="notice ${a.pinned ? 'pinned' : ''}">
         <h3>${esc(a.title)}${a.pinned ? '<span class="pin-tag">📌 Pinned</span>' : ''}</h3>
         <div class="meta">${esc(a.author || 'Admin')} · ${fmtWhen(a.created_ts)}</div>
         ${a.body ? `<div class="body">${esc(a.body)}</div>` : ''}
         ${isAdmin() ? `<div class="row-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" data-edit-notice="${a.id}">Edit</button><button class="btn btn-danger btn-sm" data-del-notice="${a.id}">Delete</button></div>` : ''}
-      </div>`).join('');
-      el.querySelectorAll('[data-edit-notice]').forEach((b) => b.addEventListener('click', () => openNoticeModal(announcements.find((a) => a.id == b.dataset.editNotice))));
-      el.querySelectorAll('[data-del-notice]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm('Delete this notice?')) return;
-        try { await api.del(`/announcements/${b.dataset.delNotice}`); toast('Deleted'); loadNotices(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+      </div>`,
+        )
+        .join('');
+      el.querySelectorAll('[data-edit-notice]').forEach((b) =>
+        b.addEventListener('click', () => openNoticeModal(announcements.find((a) => a.id == b.dataset.editNotice))),
+      );
+      el.querySelectorAll('[data-del-notice]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this notice?')) return;
+          try {
+            await api.del(`/announcements/${b.dataset.delNotice}`);
+            toast('Deleted');
+            loadNotices();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
   function openNoticeModal(a) {
     const editing = !!a;
@@ -978,52 +1398,99 @@
       const payload = { title: $('#anTitle').value, body: $('#anBody').value, pinned: $('#anPin').checked };
       if (!payload.title.trim()) return toast('A title is required', true);
       try {
-        if (editing) await api.put(`/announcements/${a.id}`, payload); else await api.post('/announcements', payload);
-        closeModal(); toast(editing ? 'Saved ✓' : 'Posted ✓'); loadNotices();
-      } catch (e) { toast(e.message, true); }
+        if (editing) await api.put(`/announcements/${a.id}`, payload);
+        else await api.post('/announcements', payload);
+        closeModal();
+        toast(editing ? 'Saved ✓' : 'Posted ✓');
+        loadNotices();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
   // ---------- Trends (admin analytics, hand-drawn SVG — CSP-safe) ----------
   VIEWS.trends = async () => {
-    setMain('Trends', 'How attendance is moving over time.',
-      `<div id="trends"><div class="empty">Loading…</div></div>`);
+    setMain(
+      'Trends',
+      'How attendance is moving over time.',
+      `<div id="trends"><div class="empty">Loading…</div></div>`,
+    );
     try {
       const d = await api.get('/analytics');
       $('#trends').innerHTML = `
         <div class="chart-card"><h2>Hours worked — last 30 days</h2>
-          ${vbars(d.attendance, (r) => r.hours, (r) => r.day.slice(5), 'var(--teal)', 'h')}
+          ${vbars(
+            d.attendance,
+            (r) => r.hours,
+            (r) => r.day.slice(5),
+            'var(--teal)',
+            'h',
+          )}
         </div>`;
-    } catch (e) { $('#trends').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    } catch (e) {
+      $('#trends').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
   };
   // Vertical bar chart.
   function vbars(rows, val, lab, color, unit) {
-    const W = 720, H = 220, pad = 30; const n = rows.length || 1;
-    const bw = (W - 2 * pad) / n; const max = Math.max(1, ...rows.map(val));
-    const bars = rows.map((r, i) => { const h = (val(r) / max) * (H - 2 * pad); const x = pad + i * bw; const y = H - pad - h;
-      return `<rect x="${(x + bw * 0.15).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="${color}"><title>${esc(lab(r))}: ${val(r)}${unit}</title></rect>`; }).join('');
-    const labels = rows.map((r, i) => i % 5 === 0 ? `<text x="${(pad + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" font-size="10" fill="#8a97a3" text-anchor="middle">${esc(lab(r))}</text>` : '').join('');
+    const W = 720,
+      H = 220,
+      pad = 30;
+    const n = rows.length || 1;
+    const bw = (W - 2 * pad) / n;
+    const max = Math.max(1, ...rows.map(val));
+    const bars = rows
+      .map((r, i) => {
+        const h = (val(r) / max) * (H - 2 * pad);
+        const x = pad + i * bw;
+        const y = H - pad - h;
+        return `<rect x="${(x + bw * 0.15).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="${color}"><title>${esc(lab(r))}: ${val(r)}${unit}</title></rect>`;
+      })
+      .join('');
+    const labels = rows
+      .map((r, i) =>
+        i % 5 === 0
+          ? `<text x="${(pad + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" font-size="10" fill="#8a97a3" text-anchor="middle">${esc(lab(r))}</text>`
+          : '',
+      )
+      .join('');
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" role="img"><line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e3eaf1"/>${bars}${labels}</svg>`;
   }
   // ---------- Leaves ----------
-  const LEAVE_CATEGORIES = { REGULAR: 'Regular leave', FLEXI: 'Flexi leave', BIRTHDAY: 'Birthday leave', ANNIVERSARY: 'Anniversary leave' };
-  const leaveCategoryOptions = () => Object.entries(LEAVE_CATEGORIES).map(([value, label]) => `<option value="${value}">${value === 'REGULAR' ? 'Regular leave' : label}</option>`).join('');
-  const leaveTypeLabel = l => `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
-  const salaryMoney = paise => Number.isSafeInteger(paise) && paise >= 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100) : 'Unavailable';
-  const leavePaymentLabel = l => l.pay_status === 'REVIEW' ? 'Needs review' : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}${l.deduction_estimate?.version === 1 ? ' · Historical 30-day basis' : l.deduction_estimate && l.deduction_estimate.version < 3 ? ' · Historical estimate before monthly-limit policy' : ''}`;
+  const LEAVE_CATEGORIES = {
+    REGULAR: 'Regular leave',
+    FLEXI: 'Flexi leave',
+    BIRTHDAY: 'Birthday leave',
+    ANNIVERSARY: 'Anniversary leave',
+  };
+  const leaveCategoryOptions = () =>
+    Object.entries(LEAVE_CATEGORIES)
+      .map(([value, label]) => `<option value="${value}">${value === 'REGULAR' ? 'Regular leave' : label}</option>`)
+      .join('');
+  const leaveTypeLabel = (l) =>
+    `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
+  const salaryMoney = (paise) =>
+    Number.isSafeInteger(paise) && paise >= 0
+      ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100)
+      : 'Unavailable';
+  const leavePaymentLabel = (l) =>
+    l.pay_status === 'REVIEW'
+      ? 'Needs review'
+      : `${l.paid_days ?? l.days} paid / ${l.unpaid_days ?? 0} unpaid${l.deduction_estimate ? (l.deduction_estimate.status === 'AVAILABLE' ? ` · Estimated deduction at request: ${salaryMoney(l.deduction_estimate.total_paise)}` : ' · Deduction estimate unavailable') : ''}${l.deduction_estimate?.version === 1 ? ' · Historical 30-day basis' : l.deduction_estimate && l.deduction_estimate.version < 3 ? ' · Historical estimate before monthly-limit policy' : ''}`;
   function leavePreviewMarkup(leave, admin = false) {
     const estimate = leave.deduction_estimate;
     const available = estimate?.status === 'AVAILABLE';
-    const money = paise => salaryMoney(paise).replace(/\.00$/, '');
-    const days = n => `${n} ${n === 1 ? 'day' : 'days'}`;
+    const money = (paise) => salaryMoney(paise).replace(/\.00$/, '');
+    const days = (n) => `${n} ${n === 1 ? 'day' : 'days'}`;
     return `<div class="leave-preview-heading"><strong>${days(leave.days)} total</strong><span>${leave.paid_days} paid · ${leave.unpaid_days} unpaid${leave.non_working_days ? ` · ${leave.non_working_days} non-working` : ''}</span></div>
       <div class="leave-preview-deduction"><span>Estimated deduction</span><strong>${available ? money(estimate.total_paise) : 'Unavailable'}</strong></div>
       ${!available ? `<p class="leave-preview-note">${admin ? 'Add the employee’s salary' : 'Ask an admin to add your salary'} to see the amount. You can still ${admin ? 'save this leave' : 'apply'}.</p>` : ''}
       <details class="leave-preview-details"><summary>Calculation &amp; leave rules</summary><div>
-        ${available ? estimate.items.map(item => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ ${item.divisor || estimate.divisor} × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
+        ${available ? estimate.items.map((item) => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ ${item.divisor || estimate.divisor} × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
         <p>The 1st–12th is unpaid. Outside it, regular paid leave is limited to 1.5 scheduled days each month; excess is unpaid. Unused monthly allowance does not accumulate. Only paid working time uses leave balance.</p>
         <p>Deductions use monthly gross salary effective on each leave date, divided by the actual calendar days in that month. Weekends and full holidays are excluded; a half holiday has only 0.5 working day. Half-day leave uses up to 0.5 scheduled day. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
-        ${leave.policy_notes?.map(note => `<p>${esc(note)}</p>`).join('') || ''}<p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
+        ${leave.policy_notes?.map((note) => `<p>${esc(note)}</p>`).join('') || ''}<p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
       </div></details>`;
   }
   function leaveBalanceMarkup(b, activity) {
@@ -1033,9 +1500,13 @@
       ['Flexi', b.buckets.flexi],
       ['Birthday / anniversary', b.buckets.special],
     ];
-    const annualRow = (label, balance) => `<tr><th scope="row">${label}</th>${['entitlement', 'used', 'pending', 'available'].map(key => `<td class="leave-value">${balance[key]}</td>`).join('')}</tr>`;
+    const annualRow = (label, balance) =>
+      `<tr><th scope="row">${label}</th>${['entitlement', 'used', 'pending', 'available'].map((key) => `<td class="leave-value">${balance[key]}</td>`).join('')}</tr>`;
     const monthly = b.monthly_regular;
-    const monthLabel = new Date(monthly.month + '-01T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const monthLabel = new Date(monthly.month + '-01T00:00:00').toLocaleDateString(undefined, {
+      month: 'long',
+      year: 'numeric',
+    });
     return `<section class="leave-balance-panel" aria-label="Leave balances">
       <div class="leave-annual-summary">
         <h3>Annual paid leave balance</h3>
@@ -1079,12 +1550,17 @@
   function mountTeamLeaves() {
     $('#markLeaveBtn').addEventListener('click', () => openMarkLeaveModal());
     $('#flagAbsBtn').addEventListener('click', async () => {
-      const btn = $('#flagAbsBtn'); btn.disabled = true;
+      const btn = $('#flagAbsBtn');
+      btn.disabled = true;
       try {
         const r = await api.post('/leaves/flag-absences');
         toast(r.created ? `Flagged ${r.created} absence(s) for ${r.day} ✓` : `No new absences for ${r.day}`);
         await refreshEmployeeLeaveData();
-      } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        btn.disabled = false;
+      }
     });
     const team = $('#employeeTeamLeave');
     team.addEventListener('toggle', () => {
@@ -1106,12 +1582,20 @@
   let LEAVE_BALANCES = []; // cached from /leaves/summary for the balance hint
   async function openMarkLeaveModal(target = null, kind = 'FULL') {
     if (!target && !LEAVE_BALANCES.length) {
-      try { LEAVE_BALANCES = (await api.get('/leaves/summary')).rows; } catch (e) { return toast(e.message, true); }
+      try {
+        LEAVE_BALANCES = (await api.get('/leaves/summary')).rows;
+      } catch (e) {
+        return toast(e.message, true);
+      }
     }
     const choices = target ? [target.user] : LEAVE_BALANCES;
     const date = target?.day || todayISO();
     const locked = target ? 'disabled' : '';
-    const title = target ? (kind === 'HALF' ? 'Mark half-day leave' : 'Mark full-day leave') : 'Mark leave for an employee';
+    const title = target
+      ? kind === 'HALF'
+        ? 'Mark half-day leave'
+        : 'Mark full-day leave'
+      : 'Mark leave for an employee';
     modal(`<h3>${title}</h3>
       <p class="leave-form-intro">Saves as approved and notifies the employee.</p>
       <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser" ${locked}>${choices.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
@@ -1123,7 +1607,7 @@
       <div class="form-row one"><div class="field"><label for="mlEmergency">Emergency exception</label><select id="mlEmergency"><option value="NONE">None — planned leave</option><option value="HEALTH">Health emergency</option><option value="OTHER">Other emergency</option></select></div></div>
       <div id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
-    if (!target && LEAVE_BALANCES.some(user => String(user.id) === myPerfUserId)) $('#mlUser').value = myPerfUserId;
+    if (!target && LEAVE_BALANCES.some((user) => String(user.id) === myPerfUserId)) $('#mlUser').value = myPerfUserId;
     $('#mlKind').value = kind;
     const form = wireLeavePreview('ml', '#mSave', true);
     $('#mCancel').addEventListener('click', closeModal);
@@ -1136,7 +1620,11 @@
         toast('Leave marked ✓');
         LEAVE_BALANCES = []; // refetch next time — balance changed
         refreshEmployeeLeaveData();
-      } catch (e) { toast(e.message, true); } finally { form.saving(false); }
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        form.saving(false);
+      }
     });
   }
 
@@ -1144,27 +1632,50 @@
     try {
       const { rows } = await api.get('/leaves/summary');
       LEAVE_BALANCES = rows;
-      const el = $('#leaveSummary'); if (!el) return;
-      el.innerHTML = rows.length ? `<p class="page-sub" style="margin:0 0 10px;">Click a row to see that employee's leave history.</p>
+      const el = $('#leaveSummary');
+      if (!el) return;
+      el.innerHTML = rows.length
+        ? `<p class="page-sub" style="margin:0 0 10px;">Click a row to see that employee's leave history.</p>
         <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Annual paid left</th><th>Regular · this month</th><th>Regular · annual</th><th>Flexi</th><th>Birthday / anniversary</th><th>Taken (last 30 days)</th><th>Taken (this year)</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr style="cursor:pointer;" data-leave-emp="${r.id}" data-leave-name="${esc(r.name)}"><td><strong>${esc(r.name)}</strong></td><td>${esc(r.department || '—')}</td>
+        ${rows
+          .map(
+            (
+              r,
+            ) => `<tr style="cursor:pointer;" data-leave-emp="${r.id}" data-leave-name="${esc(r.name)}"><td><strong>${esc(r.name)}</strong></td><td>${esc(r.department || '—')}</td>
           <td><strong>${r.balance}</strong> ${r.balance === 1 ? 'day' : 'days'}</td>
           <td>${r.balances.monthly_regular.available} / 1.5</td><td>${r.balances.buckets.regular.remaining}</td><td>${r.balances.buckets.flexi.remaining}</td><td>${r.balances.buckets.special.remaining}</td>
-          <td>${daysLabel(r.taken30)}</td><td>${daysLabel(r.takenYear)}</td></tr>`).join('')}
-      </tbody></table></div>` : `<div class="empty">No employees.</div>`;
-      el.querySelectorAll('[data-leave-emp]').forEach((tr) => tr.addEventListener('click', () => openLeaveBreakdown(tr.dataset.leaveEmp, tr.dataset.leaveName)));
-    } catch (e) { toast(e.message, true); }
+          <td>${daysLabel(r.taken30)}</td><td>${daysLabel(r.takenYear)}</td></tr>`,
+          )
+          .join('')}
+      </tbody></table></div>`
+        : `<div class="empty">No employees.</div>`;
+      el.querySelectorAll('[data-leave-emp]').forEach((tr) =>
+        tr.addEventListener('click', () => openLeaveBreakdown(tr.dataset.leaveEmp, tr.dataset.leaveName)),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   async function openLeaveBreakdown(userId, name) {
     modal(`<h3>Leave history — ${esc(name)}</h3><div class="leave-table-wrap" id="lbBody">Loading…</div>`);
     try {
       const { leaves } = await api.get(`/leaves/for/${userId}`);
-      $('#lbBody').innerHTML = leaves.length ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th></tr></thead><tbody>
-        ${leaves.map((l) => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.policy_notes?.map(note => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No leave records.</div>`;
-    } catch (e) { $('#lbBody').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+      $('#lbBody').innerHTML = leaves.length
+        ? `<table><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Status</th></tr></thead><tbody>
+        ${leaves
+          .map(
+            (
+              l,
+            ) => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
+          <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.policy_notes?.map((note) => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td></tr>`,
+          )
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">No leave records.</div>`;
+    } catch (e) {
+      $('#lbBody').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
     const done = document.createElement('div');
     done.className = 'modal-actions';
     done.innerHTML = '<button class="btn btn-primary" id="lbClose">Close</button>';
@@ -1178,134 +1689,225 @@
       const today = todayISO();
       const onNowOf = (l) => l.start_date <= today && l.end_date >= today;
       // Currently-on-leave first, then upcoming; within each group, earliest start first.
-      const sorted = leaves.slice().sort((a, b) =>
-        (onNowOf(b) - onNowOf(a)) || a.start_date.localeCompare(b.start_date));
+      const sorted = leaves.slice().sort((a, b) => onNowOf(b) - onNowOf(a) || a.start_date.localeCompare(b.start_date));
       const nowCount = leaves.filter(onNowOf).length;
       const heading = $('#onLeaveHeading');
       if (heading) heading.textContent = `On leave — ${nowCount} now · ${leaves.length - nowCount} upcoming`;
-      const el = $('#onLeave'); if (!el) return;
-      el.innerHTML = sorted.length ? `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Status</th></tr></thead><tbody>
-        ${sorted.map((l) => {
-          const onNow = onNowOf(l);
-          return `<tr><td>${esc(l.name)}</td>
+      const el = $('#onLeave');
+      if (!el) return;
+      el.innerHTML = sorted.length
+        ? `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Status</th></tr></thead><tbody>
+        ${sorted
+          .map((l) => {
+            const onNow = onNowOf(l);
+            return `<tr><td>${esc(l.name)}</td>
             <td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
             <td>${esc(cap(l.kind))}</td><td>${l.days}</td>
             <td>${onNow ? '<span class="badge b-pending">On leave now</span>' : '<span class="badge b-todo">Upcoming</span>'}</td></tr>`;
-        }).join('')}
-      </tbody></table>` : `<div class="empty">No one is on leave now or in the near future.</div>`;
-    } catch (e) { toast(e.message, true); }
+          })
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">No one is on leave now or in the near future.</div>`;
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   async function loadEmployeeLeaveDetails() {
-    const host = $('#employeeLeaveDetails'), user = selectedEmployee();
+    const host = $('#employeeLeaveDetails'),
+      user = selectedEmployee();
     if (!host || !user) return;
-    if (user.role === 'ADMIN') { host.innerHTML = '<p class="empty">Personal leave is not available for admin accounts. Employee approvals and balances are below.</p>'; return; }
+    if (user.role === 'ADMIN') {
+      host.innerHTML =
+        '<p class="empty">Personal leave is not available for admin accounts. Employee approvals and balances are below.</p>';
+      return;
+    }
     host.innerHTML = '<p role="status">Loading leave balances and history…</p>';
     const current = ++employeeLeaveVersion;
     try {
       const leaveUrl = isAdmin() ? `/leaves/for/${user.id}` : '/leaves/mine';
       const { balances, activity, leaves } = await api.get(leaveUrl + '?month=' + myPerfMonth);
       if (current !== employeeLeaveVersion || !host.isConnected || selectedEmployee()?.id !== user.id) return;
-      host.innerHTML = leaveBalanceMarkup(balances, activity) + `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` + (leaves.length ? `<table aria-label="Leave history"><thead><tr><th>Dates</th><th>Type</th><th>Paid days</th><th>Unpaid days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
-        ${leaves.map(l => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
+      host.innerHTML =
+        leaveBalanceMarkup(balances, activity) +
+        `<h3>Leave history — ${esc(user.name)}</h3><div class="leave-table-wrap">` +
+        (leaves.length
+          ? `<table aria-label="Leave history"><thead><tr><th>Dates</th><th>Type</th><th>Paid days</th><th>Unpaid days</th><th>Reason</th><th>Status</th><th>Action / note</th></tr></thead><tbody>
+        ${leaves
+          .map(
+            (
+              l,
+            ) => `<tr><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
           <td>${esc(leaveTypeLabel(l))}${l.non_working_days ? `<div class="leave-balance-note">${l.non_working_days} non-working days</div>` : ''}</td>
           ${l.pay_status === 'REVIEW' ? '<td colspan="2">Needs review</td>' : `<td>${l.paid_days ?? '—'}</td><td>${l.unpaid_days ?? '—'}</td>`}
           <td>${esc(l.reason || '—')}</td><td>${badge(l.status)}</td>
-          <td>${l.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>`) : esc(l.admin_note || '—')}${l.deduction_estimate || l.policy_notes?.length ? `<details class="leave-balance-note"><summary>Details</summary>${l.deduction_estimate ? `<div>${esc(leavePaymentLabel(l))}</div>` : ''}${l.policy_notes?.map(note => `<div>${esc(note)}</div>`).join('') || ''}</details>` : ''}</td></tr>`).join('')}
-        </tbody></table>` : '<div class="empty">No leave requests yet.</div>') + '</div>';
+          <td>${l.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-cancel="${l.id}">Cancel</button>`) : esc(l.admin_note || '—')}${l.deduction_estimate || l.policy_notes?.length ? `<details class="leave-balance-note"><summary>Details</summary>${l.deduction_estimate ? `<div>${esc(leavePaymentLabel(l))}</div>` : ''}${l.policy_notes?.map((note) => `<div>${esc(note)}</div>`).join('') || ''}</details>` : ''}</td></tr>`,
+          )
+          .join('')}
+        </tbody></table>`
+          : '<div class="empty">No leave requests yet.</div>') +
+        '</div>';
       host.insertAdjacentHTML('beforeend', '<div class="section" id="employeeShortDays"></div>');
       await loadEmployeeShortDays(user, current);
       wireLeaveApprovals();
-      host.querySelectorAll('[data-cancel]').forEach(button => button.addEventListener('click', async () => {
-        button.disabled = true;
-        try { await api.post(`/leaves/${button.dataset.cancel}/cancel`); toast('Cancelled'); await refreshEmployeeLeaveData(); }
-        catch (e) { toast(e.message, true); button.disabled = false; }
-      }));
-    } catch (e) { if (current === employeeLeaveVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
+      host.querySelectorAll('[data-cancel]').forEach((button) =>
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            await api.post(`/leaves/${button.dataset.cancel}/cancel`);
+            toast('Cancelled');
+            await refreshEmployeeLeaveData();
+          } catch (e) {
+            toast(e.message, true);
+            button.disabled = false;
+          }
+        }),
+      );
+    } catch (e) {
+      if (current === employeeLeaveVersion && host.isConnected)
+        host.innerHTML = `<p role="alert">${esc(e.message)}</p>`;
+    }
   }
 
   function shortDayTable(records, team = false) {
     if (!records.length) return '<p class="empty">No Short Day requests.</p>';
-    return `<div class="table-wrap"><table><thead><tr>${team ? '<th>Employee</th>' : ''}<th>Date / local start</th><th>Minutes</th><th>Status</th><th>Action / note</th></tr></thead><tbody>${records.map(r => `<tr>${team ? `<td>${esc(r.name)}</td>` : ''}<td>${fmtDate(r.date)}${r.start_time ? ` · ${esc(r.start_time)}<div class="leave-balance-note">${esc(r.timezone)}</div>` : ''}</td><td>${r.minutes ?? '—'}</td><td>${badge(r.status)}</td><td>${r.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-short-approve="${r.id}">Approve Short Day</button><button class="btn btn-danger btn-sm" data-short-reject="${r.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-short-cancel="${r.id}">Cancel</button>`) : esc(r.admin_note || '—')}${r.reason ? `<div class="leave-balance-note">${esc(r.reason)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="table-wrap"><table><thead><tr>${team ? '<th>Employee</th>' : ''}<th>Date / local start</th><th>Minutes</th><th>Status</th><th>Action / note</th></tr></thead><tbody>${records.map((r) => `<tr>${team ? `<td>${esc(r.name)}</td>` : ''}<td>${fmtDate(r.date)}${r.start_time ? ` · ${esc(r.start_time)}<div class="leave-balance-note">${esc(r.timezone)}</div>` : ''}</td><td>${r.minutes ?? '—'}</td><td>${badge(r.status)}</td><td>${r.status === 'PENDING' ? (isAdmin() ? `<div class="row-actions"><button class="btn btn-primary btn-sm" data-short-approve="${r.id}">Approve Short Day</button><button class="btn btn-danger btn-sm" data-short-reject="${r.id}">Reject</button></div>` : `<button class="btn btn-ghost btn-sm" data-short-cancel="${r.id}">Cancel</button>`) : esc(r.admin_note || '—')}${r.reason ? `<div class="leave-balance-note">${esc(r.reason)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
   }
   function wireShortDays(root) {
-    root.querySelectorAll('[data-short-approve],[data-short-reject],[data-short-cancel]').forEach(button => {
-      if (button.dataset.wired) return; button.dataset.wired = '1';
+    root.querySelectorAll('[data-short-approve],[data-short-reject],[data-short-cancel]').forEach((button) => {
+      if (button.dataset.wired) return;
+      button.dataset.wired = '1';
       button.addEventListener('click', async () => {
         button.disabled = true;
         const id = button.dataset.shortApprove || button.dataset.shortReject || button.dataset.shortCancel;
         try {
-          await api.post(`/short-days/${id}/${button.dataset.shortCancel ? 'cancel' : 'decide'}`, button.dataset.shortCancel ? {} : {decision:button.dataset.shortApprove ? 'APPROVED' : 'REJECTED'});
-          toast('Short Day updated'); await refreshEmployeeLeaveData();
-        } catch(e) { toast(e.message,true); button.disabled = false; }
+          await api.post(
+            `/short-days/${id}/${button.dataset.shortCancel ? 'cancel' : 'decide'}`,
+            button.dataset.shortCancel ? {} : { decision: button.dataset.shortApprove ? 'APPROVED' : 'REJECTED' },
+          );
+          toast('Short Day updated');
+          await refreshEmployeeLeaveData();
+        } catch (e) {
+          toast(e.message, true);
+          button.disabled = false;
+        }
       });
     });
   }
   async function loadEmployeeShortDays(user, version) {
-    const root = $('#employeeShortDays'); if (!root) return;
+    const root = $('#employeeShortDays');
+    if (!root) return;
     try {
       const data = await api.get('/short-days?month=' + myPerfMonth + (isAdmin() ? '&user_id=' + user.id : ''));
       if (!root.isConnected || version !== employeeLeaveVersion) return;
       const charge = data.leave_charge;
       root.innerHTML = `<div class="toolbar"><h3>Short Days</h3>${isAdmin() ? '' : '<button class="btn btn-ghost" id="requestShortDay">Request Short Day</button>'}</div>
         <p class="page-sub">${data.approved_days} approved in ${esc(data.month)} · ${charge.paid_days} days from leave balance · ${charge.unpaid_days} unpaid</p>
-        <details><summary>Short Day history</summary>${shortDayTable(data.requests.filter(r => r.date.startsWith(data.month)))}</details>`;
+        <details><summary>Short Day history</summary>${shortDayTable(data.requests.filter((r) => r.date.startsWith(data.month)))}</details>`;
 
       $('#requestShortDay')?.addEventListener('click', () => openShortDayRequest(data.timezone));
       wireShortDays(root);
-    } catch(e) { if (root.isConnected) root.textContent = e.message; }
+    } catch (e) {
+      if (root.isConnected) root.textContent = e.message;
+    }
   }
   function openShortDayRequest(timezone) {
     modal(`<h3>Request Short Day</h3>
       <p>Up to two hours per date. First approved Short Day of the month is free. Management approval is required before the start. Times are in ${esc(timezone)}.</p><div class="form-row"><div class="field"><label for="sdDate">Date</label><input id="sdDate" type="date" value="${esc(todayISO())}"></div><div class="field"><label for="sdTime">Start time</label><input id="sdTime" type="time"></div></div><div class="form-row"><div class="field"><label for="sdMinutes">Minutes</label><input id="sdMinutes" type="number" min="1" max="120" value="60"></div><div class="field"><label for="sdReason">Reason (optional)</label><input id="sdReason" maxlength="500"></div></div><p role="alert" id="sdStatus"></p><div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="sdSubmit">Submit request</button></div>`);
-    $('#mCancel').addEventListener('click',closeModal);
+    $('#mCancel').addEventListener('click', closeModal);
     $('#sdSubmit').addEventListener('click', async () => {
-      const button = $('#sdSubmit'); button.disabled = true;
+      const button = $('#sdSubmit');
+      button.disabled = true;
       const status = $('#sdStatus');
       try {
         await api.post('/short-days', {
-          date: $('#sdDate').value, start_time: $('#sdTime').value,
-          minutes: Number($('#sdMinutes').value), reason: $('#sdReason').value,
+          date: $('#sdDate').value,
+          start_time: $('#sdTime').value,
+          minutes: Number($('#sdMinutes').value),
+          reason: $('#sdReason').value,
         });
         if (button.isConnected) closeModal();
         toast('Short Day requested');
         await refreshEmployeeLeaveData();
-      } catch (e) { status.textContent = e.message; button.disabled = false; }
+      } catch (e) {
+        status.textContent = e.message;
+        button.disabled = false;
+      }
     });
   }
 
   // One preview path for employee requests and admin-recorded leave. Stale
   // responses cannot enable a submit button for a different set of dates.
   function wireLeavePreview(prefix, buttonSelector, admin = false) {
-    const start = $('#' + prefix + 'Start'), end = $('#' + prefix + 'End');
-    const kind = $('#' + prefix + 'Kind'), category = $('#' + prefix + 'Category');
+    const start = $('#' + prefix + 'Start'),
+      end = $('#' + prefix + 'End');
+    const kind = $('#' + prefix + 'Kind'),
+      category = $('#' + prefix + 'Category');
     const emergency = $('#' + prefix + 'Emergency');
-    const reason = $('#' + prefix + 'Reason'), preview = $('#' + prefix + 'Preview');
-    const user = admin ? $('#mlUser') : null, button = $(buttonSelector);
-    let valid = false, busy = false, version = 0;
+    const reason = $('#' + prefix + 'Reason'),
+      preview = $('#' + prefix + 'Preview');
+    const user = admin ? $('#mlUser') : null,
+      button = $(buttonSelector);
+    let valid = false,
+      busy = false,
+      version = 0;
     const fixedDate = start.disabled;
-    const payload = () => ({ start_date: start.value, end_date: kind.value === 'HALF' ? start.value : end.value, kind: kind.value, category: category.value, reason: reason.value, emergency_type:emergency.value, ...(admin ? { user_id: Number(user.value) } : {}) });
-    const updateButton = () => { button.disabled = !valid || busy; };
+    const payload = () => ({
+      start_date: start.value,
+      end_date: kind.value === 'HALF' ? start.value : end.value,
+      kind: kind.value,
+      category: category.value,
+      reason: reason.value,
+      emergency_type: emergency.value,
+      ...(admin ? { user_id: Number(user.value) } : {}),
+    });
+    const updateButton = () => {
+      button.disabled = !valid || busy;
+    };
     const refresh = async () => {
       const current = ++version;
-      valid = false; updateButton();
+      valid = false;
+      updateButton();
       end.disabled = fixedDate || kind.value === 'HALF';
       if (end.disabled || end.value < start.value) end.value = start.value;
       const reasonLabel = $('#lReasonLabel');
-      if (!admin && reasonLabel) { const flexi = category.value === 'FLEXI'; reasonLabel.textContent = flexi ? 'Reason (optional)' : 'Reason *'; reason.required = !flexi; reason.placeholder = flexi ? 'Optional — no explanation needed for Flexi leave' : 'Required — e.g. family function, medical, personal work'; }
-      preview.textContent = 'Checking leave dates and balance…'; preview.classList.remove('error');
+      if (!admin && reasonLabel) {
+        const flexi = category.value === 'FLEXI';
+        reasonLabel.textContent = flexi ? 'Reason (optional)' : 'Reason *';
+        reason.required = !flexi;
+        reason.placeholder = flexi
+          ? 'Optional — no explanation needed for Flexi leave'
+          : 'Required — e.g. family function, medical, personal work';
+      }
+      preview.textContent = 'Checking leave dates and balance…';
+      preview.classList.remove('error');
       try {
         const result = await api.post('/leaves/preview', payload());
         if (current !== version || !preview.isConnected) return;
         valid = true;
         const l = result.leave;
         preview.innerHTML = leavePreviewMarkup(l, admin);
-      } catch (e) { if (current === version && preview.isConnected) { preview.textContent = e.message; preview.classList.add('error'); } }
+      } catch (e) {
+        if (current === version && preview.isConnected) {
+          preview.textContent = e.message;
+          preview.classList.add('error');
+        }
+      }
       if (current === version) updateButton();
     };
-    [start, end, kind, category, emergency, user].filter(Boolean).forEach(el => el.addEventListener('change', refresh));
+    [start, end, kind, category, emergency, user]
+      .filter(Boolean)
+      .forEach((el) => el.addEventListener('change', refresh));
     refresh();
-    return { payload, ready: () => valid && !busy, connected: () => button.isConnected, saving: value => { busy = value; updateButton(); } };
+    return {
+      payload,
+      ready: () => valid && !busy,
+      connected: () => button.isConnected,
+      saving: (value) => {
+        busy = value;
+        updateButton();
+      },
+    };
   }
 
   function openApplyLeave() {
@@ -1323,73 +1925,118 @@
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSubmit').addEventListener('click', async () => {
       if (!form.ready()) return;
-      if ($('#lCategory').value !== 'FLEXI' && !$('#lReason').value.trim()) return toast('Please give a reason for your leave', true);
+      if ($('#lCategory').value !== 'FLEXI' && !$('#lReason').value.trim())
+        return toast('Please give a reason for your leave', true);
       form.saving(true);
       try {
         await api.post('/leaves', form.payload());
-        closeModal(); toast('Request submitted ✓'); refreshEmployeeLeaveData();
-      } catch (e) { toast(e.message, true); } finally { form.saving(false); }
+        closeModal();
+        toast('Request submitted ✓');
+        refreshEmployeeLeaveData();
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        form.saving(false);
+      }
     });
   }
 
   function leaveApprovalTable(leaves) {
     return `<table><thead><tr><th>Employee</th><th>Dates</th><th>Type</th><th>Days</th><th>Reason</th><th>Action</th></tr></thead><tbody>
-      ${leaves.map((l) => `<tr>
+      ${leaves
+        .map(
+          (l) => `<tr>
         <td>${esc(l.name)}</td><td>${fmtDate(l.start_date)}${l.end_date !== l.start_date ? ' → ' + fmtDate(l.end_date) : ''}</td>
-        <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.policy_notes?.map(note => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
+        <td>${esc(leaveTypeLabel(l))}<div class="leave-balance-note">${esc(leavePaymentLabel(l))}${l.policy_notes?.map((note) => `<br>${esc(note)}`).join('') || ''}</div></td><td>${l.days}</td><td>${esc(l.reason || '—')}</td>
         <td><div class="row-actions"><button class="btn btn-primary btn-sm" data-approve="${l.id}">Approve</button>
           <button class="btn btn-danger btn-sm" data-reject="${l.id}">Reject</button></div></td>
-      </tr>`).join('')}</tbody></table>`;
+      </tr>`,
+        )
+        .join('')}</tbody></table>`;
   }
 
   function punchApprovalTable(requests) {
     return `<table><thead><tr><th>Employee</th><th>Day</th><th>Punch</th><th>Time</th><th>Reason</th><th>Action</th></tr></thead><tbody>
-      ${requests.map((r) => `<tr>
+      ${requests
+        .map(
+          (r) => `<tr>
         <td>${esc(r.name)}</td><td>${esc(r.day)}</td><td>${PUNCH_LABEL[r.type] || r.type}</td><td>${esc(punchRequestAction(r))} ${esc(r.event_date || '')} ${esc(r.time)} ${esc(r.timezone || '')}</td><td>${esc(r.reason || '—')}</td>
         <td class="row-actions"><button class="btn btn-primary btn-sm" data-preq-approve="${r.id}">Approve</button>
           <button class="btn btn-danger btn-sm" data-preq-reject="${r.id}">Reject</button></td>
-      </tr>`).join('')}</tbody></table>`;
+      </tr>`,
+        )
+        .join('')}</tbody></table>`;
   }
   function wirePunchApprovals() {
     document.querySelectorAll('[data-preq-approve],[data-preq-reject]').forEach((b) => {
-      if (b.dataset.wired) return; b.dataset.wired = '1';
+      if (b.dataset.wired) return;
+      b.dataset.wired = '1';
       b.addEventListener('click', async () => {
         if (b.disabled) return;
         const id = b.dataset.preqApprove || b.dataset.preqReject;
         const decision = b.dataset.preqApprove ? 'APPROVED' : 'REJECTED';
         const buttons = b.closest('tr').querySelectorAll('button');
-        buttons.forEach(button => { button.disabled = true; });
-        try { await api.post(`/punch-requests/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓ — attendance updated' : 'Rejected');
+        buttons.forEach((button) => {
+          button.disabled = true;
+        });
+        try {
+          await api.post(`/punch-requests/${id}/decide`, { decision });
+          toast(decision === 'APPROVED' ? 'Approved ✓ — attendance updated' : 'Rejected');
           navigate(document.querySelector('.nav-item.active').dataset.view);
-        } catch (e) { toast(e.message, true); buttons.forEach(button => { button.disabled = false; }); }
+        } catch (e) {
+          toast(e.message, true);
+          buttons.forEach((button) => {
+            button.disabled = false;
+          });
+        }
       });
     });
   }
 
   function wireLeaveApprovals() {
     document.querySelectorAll('[data-approve],[data-reject]').forEach((b) => {
-      if (b.dataset.wired) return; b.dataset.wired = '1';
+      if (b.dataset.wired) return;
+      b.dataset.wired = '1';
       b.addEventListener('click', async () => {
         if (b.disabled) return;
         const id = b.dataset.approve || b.dataset.reject;
         const decision = b.dataset.approve ? 'APPROVED' : 'REJECTED';
         const buttons = b.closest('tr').querySelectorAll('button');
-        buttons.forEach(button => { button.disabled = true; });
-        try { await api.post(`/leaves/${id}/decide`, { decision }); toast(decision === 'APPROVED' ? 'Approved ✓' : 'Rejected');
+        buttons.forEach((button) => {
+          button.disabled = true;
+        });
+        try {
+          await api.post(`/leaves/${id}/decide`, { decision });
+          toast(decision === 'APPROVED' ? 'Approved ✓' : 'Rejected');
           navigate(document.querySelector('.nav-item.active').dataset.view);
-        } catch (e) { toast(e.message, true); buttons.forEach(button => { button.disabled = false; }); }
+        } catch (e) {
+          toast(e.message, true);
+          buttons.forEach((button) => {
+            button.disabled = false;
+          });
+        }
       });
     });
   }
 
   async function loadAdminLeaves() {
     try {
-      const [{ leaves }, { requests:shortDays }] = await Promise.all([api.get('/leaves/pending'), api.get('/short-days/pending')]);
-      const host = $('#adminLeaves'); if (!host) return;
+      const [{ leaves }, { requests: shortDays }] = await Promise.all([
+        api.get('/leaves/pending'),
+        api.get('/short-days/pending'),
+      ]);
+      const host = $('#adminLeaves');
+      if (!host) return;
       host.innerHTML = `<h2>Pending approvals (${leaves.length})</h2>${leaves.length ? leaveApprovalTable(leaves) : `<div class="empty">Nothing waiting.</div>`}`;
-      host.insertAdjacentHTML('beforeend', `<h3>Pending Short Day approvals (${shortDays.length})</h3>${shortDayTable(shortDays,true)}`);
-      wireLeaveApprovals(); wireShortDays(host);
-    } catch (e) { toast(e.message, true); }
+      host.insertAdjacentHTML(
+        'beforeend',
+        `<h3>Pending Short Day approvals (${shortDays.length})</h3>${shortDayTable(shortDays, true)}`,
+      );
+      wireLeaveApprovals();
+      wireShortDays(host);
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // Cache of active clients + users for dropdowns and labels.
@@ -1398,10 +2045,16 @@
   async function loadLookups() {
     try {
       const [c, u] = await Promise.all([api.get('/clients'), api.get('/users')]);
-      CLIENTS = c.clients; USERS = u.users;
-    } catch (e) { toast(e.message, true); }
+      CLIENTS = c.clients;
+      USERS = u.users;
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
-  const clientLabel = (t) => t.client_name ? `<span class="badge b-public" style="font-size:.68rem">${esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name)}</span>` : '';
+  const clientLabel = (t) =>
+    t.client_name
+      ? `<span class="badge b-public" style="font-size:.68rem">${esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name)}</span>`
+      : '';
 
   // ---------- Tasks: read-only Asana view ----------
   // Work is created and updated in Asana; the portal just shows each person
@@ -1412,26 +2065,39 @@
     // Admin My tasks combines the two verified owners; team pending remains available.
     if (asanaScope === null) asanaScope = 'MINE';
     if (!admin) asanaScope = 'MINE';
-    setMain(admin ? 'Tasks' : 'My tasks',
-      admin ? 'Live from Asana — your work, or everything still pending across the team.'
+    setMain(
+      admin ? 'Tasks' : 'My tasks',
+      admin
+        ? 'Live from Asana — your work, or everything still pending across the team.'
         : 'Your open work from Asana — add and update tasks in Asana.',
       `<div class="toolbar">
-         ${admin ? `<div class="seg" id="asanaSeg">
+         ${
+           admin
+             ? `<div class="seg" id="asanaSeg">
              <button data-ascope="MINE" class="${asanaScope === 'MINE' ? 'on' : ''}">Abhey &amp; Saurav</button>
              <button data-ascope="TEAM" class="${asanaScope === 'TEAM' ? 'on' : ''}">Team pending</button>
-           </div>` : '<span></span>'}
+           </div>`
+             : '<span></span>'
+         }
          <div class="row-actions">
            <button class="btn btn-ghost" id="asanaRefresh">↻ Refresh</button>
            <a class="btn btn-primary" id="asanaOpen" href="https://app.asana.com/" target="_blank" rel="noopener">Open Asana ↗</a>
          </div></div>
-       <div id="asanaTasks"><div class="empty">Loading…</div></div>`);
+       <div id="asanaTasks"><div class="empty">Loading…</div></div>`,
+    );
 
-    const taskRows = (tasks) => `<table class="atable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
-      ${tasks.map((t) => `<tr>
+    const taskRows = (
+      tasks,
+    ) => `<table class="atable"><thead><tr><th class="c-task">Task</th><th class="c-due">Due</th><th class="c-act"></th></tr></thead><tbody>
+      ${tasks
+        .map(
+          (t) => `<tr>
         <td class="c-task"><strong>${esc(t.name)}</strong>${t.assignee ? `<div class="page-sub">${esc(t.assignee)} · ${esc((t.projects || []).join(', ') || 'No project')}</div>` : ''}</td>
         <td class="c-due">${t.due_on ? `<span class="${t.overdue ? 'due-overdue' : ''}">${fmtDate(t.due_on)}</span>` : '<span class="muted-empty">Not set</span>'}</td>
         <td class="c-act" style="text-align:right;"><a class="btn-fix" href="${esc(t.url)}" target="_blank" rel="noopener">Open ↗</a></td>
-      </tr>`).join('')}
+      </tr>`,
+        )
+        .join('')}
       </tbody></table>`;
 
     const load = async () => {
@@ -1440,15 +2106,24 @@
       try {
         if (asanaScope === 'TEAM') {
           const d = await api.get('/asana/team-tasks');
-          if (!d.groups.length) { el.innerHTML = `<div class="empty">Nothing pending in Asana. 🎉</div>`; return; }
+          if (!d.groups.length) {
+            el.innerHTML = `<div class="empty">Nothing pending in Asana. 🎉</div>`;
+            return;
+          }
           el.innerHTML = `<p class="page-sub" style="margin:0 0 12px;"><strong>${d.totalPending}</strong> pending across ${d.groups.length} ${d.groups.length === 1 ? 'person' : 'people'}${d.totalOverdue ? ` · <strong class="due-overdue">${d.totalOverdue} overdue</strong>` : ''}.</p>
-            ${d.groups.map((g) => `<div class="tgroup active-group">
+            ${d.groups
+              .map(
+                (g) => `<div class="tgroup active-group">
               <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g.name)}</h2>
                 <span class="cnt">(${g.total})</span>${g.overdue ? `<span class="ratio-ind due-overdue">· ${g.overdue} overdue</span>` : ''}</div>
               ${taskRows(g.tasks)}
-            </div>`).join('')}`;
+            </div>`,
+              )
+              .join('')}`;
           // Collapse a person's list by clicking their name.
-          el.querySelectorAll('.tgroup-head').forEach((h) => h.addEventListener('click', () => h.closest('.tgroup').classList.toggle('collapsed')));
+          el.querySelectorAll('.tgroup-head').forEach((h) =>
+            h.addEventListener('click', () => h.closest('.tgroup').classList.toggle('collapsed')),
+          );
           return;
         }
         const { tasks } = await api.get(admin ? '/asana/admin-work' : '/asana/my-tasks');
@@ -1459,24 +2134,34 @@
           if (admin) {
             try {
               const t = await api.get('/asana/team-tasks');
-              if (t.totalPending) hint = `<div style="margin-top:8px;font-size:.88rem;">The team has <strong>${t.totalPending}</strong> pending — switch to <strong>Team pending</strong> to see it.</div>`;
-            } catch (_e) { /* ignore */ }
+              if (t.totalPending)
+                hint = `<div style="margin-top:8px;font-size:.88rem;">The team has <strong>${t.totalPending}</strong> pending — switch to <strong>Team pending</strong> to see it.</div>`;
+            } catch (_e) {
+              /* ignore */
+            }
           }
-          if (!hint) hint = `<div style="margin-top:8px;font-size:.85rem;color:var(--slate);">If you expected tasks here, your Asana account may not be linked — an admin can set your Asana email on your profile.</div>`;
+          if (!hint)
+            hint = `<div style="margin-top:8px;font-size:.85rem;color:var(--slate);">If you expected tasks here, your Asana account may not be linked — an admin can set your Asana email on your profile.</div>`;
           el.innerHTML = `<div class="empty">Nothing open in Asana assigned to you. 🎉${hint}</div>`;
           return;
         }
         const overdue = tasks.filter((t) => t.overdue).length;
         el.innerHTML = `${overdue ? `<p class="page-sub" style="margin:0 0 10px;"><strong class="due-overdue">${overdue} overdue</strong> of ${tasks.length} open task(s).</p>` : `<p class="page-sub" style="margin:0 0 10px;">${tasks.length} open task(s).</p>`}
           ${taskRows(tasks)}`;
-      } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+      } catch (e) {
+        el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+      }
     };
-    if (admin) $('#asanaSeg').addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-ascope]'); if (!b) return;
-      asanaScope = b.dataset.ascope;
-      $('#asanaSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-      load();
-    });
+    if (admin)
+      $('#asanaSeg').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-ascope]');
+        if (!b) return;
+        asanaScope = b.dataset.ascope;
+        $('#asanaSeg')
+          .querySelectorAll('button')
+          .forEach((x) => x.classList.toggle('on', x === b));
+        load();
+      });
     $('#asanaRefresh').addEventListener('click', load);
     load();
   }
@@ -1487,7 +2172,7 @@
   let taskAssignee = '';
   let taskStatus = '';
   let taskPriority = '';
-  let taskScope = null;        // 'MINE' | 'ALL' — defaulted by role on first visit
+  let taskScope = null; // 'MINE' | 'ALL' — defaulted by role on first visit
   let taskOverdueOnly = false;
   let allCollapsed = false;
   let archivedCollapsed = true; // "📦 Archived — done" section starts folded away
@@ -1497,20 +2182,28 @@
   // an outside click. This one-time listener closes any open menu when the click
   // lands outside it — so only one menu is ever open at a time.
   document.addEventListener('click', (e) => {
-    document.querySelectorAll('details.rowmenu[open], details.pillmenu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+    document.querySelectorAll('details.rowmenu[open], details.pillmenu[open]').forEach((d) => {
+      if (!d.contains(e.target)) d.removeAttribute('open');
+    });
   });
   VIEWS.tasks = async () => {
     // Asana is the team's task system. When it's connected, this page is a
     // read-only view of your Asana work; the old in-portal board only appears
     // if Asana isn't configured yet.
     let asanaOn = false;
-    try { asanaOn = (await api.get('/asana/status')).enabled; } catch (_e) {}
+    try {
+      asanaOn = (await api.get('/asana/status')).enabled;
+    } catch (_e) {}
     if (asanaOn) return renderAsanaTasks();
 
     const emp = !isAdmin();
     if (taskScope === null) taskScope = emp ? 'MINE' : 'ALL'; // staff default to their own work
     selectedTasks.clear();
-    setMain('Tasks', isAdmin() ? 'Assign work and track progress, grouped by client.' : 'Your work — switch to All tasks to see the whole team.',
+    setMain(
+      'Tasks',
+      isAdmin()
+        ? 'Assign work and track progress, grouped by client.'
+        : 'Your work — switch to All tasks to see the whole team.',
       `<div class="toolbar">
          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
            <div class="seg" id="scopeSeg" role="tablist" aria-label="Task scope">
@@ -1518,9 +2211,11 @@
              <button data-scope="ALL" class="${taskScope === 'ALL' ? 'on' : ''}">All tasks</button>
            </div>
          </div>
-         ${emp
-    ? '<div class="row-actions"><button class="btn btn-ghost" id="suggestClientBtn">Suggest a client</button><button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button></div>'
-    : '<button class="btn btn-primary" id="newTaskBtn">+ Assign task</button>'}
+         ${
+           emp
+             ? '<div class="row-actions"><button class="btn btn-ghost" id="suggestClientBtn">Suggest a client</button><button class="btn btn-primary" id="addMyTaskBtn">+ Add task</button></div>'
+             : '<button class="btn btn-primary" id="newTaskBtn">+ Assign task</button>'
+         }
        </div>
        <div class="task-filters">
          <input id="taskSearch" class="tf-search" placeholder="Search title, person or client…" autocomplete="off">
@@ -1549,32 +2244,61 @@
          <select id="bulkPriority"><option value="">Priority…</option><option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option></select>
          <button class="btn btn-primary btn-sm" id="bulkApply">Apply</button>
          <button class="btn btn-ghost btn-sm" id="bulkClear" style="color:#c3d2e0;">Clear</button>
-       </div>`);
+       </div>`,
+    );
     await loadLookups();
     $('#scopeSeg').addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-scope]'); if (!b) return;
+      const b = e.target.closest('button[data-scope]');
+      if (!b) return;
       taskScope = b.dataset.scope;
-      $('#scopeSeg').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      $('#scopeSeg')
+        .querySelectorAll('button')
+        .forEach((x) => x.classList.toggle('on', x === b));
       loadAllTasks();
     });
-    $('#clientFilter').innerHTML = `<option value="">All clients</option><option value="none">— No client —</option>`
-      + CLIENTS.map((c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
+    $('#clientFilter').innerHTML =
+      `<option value="">All clients</option><option value="none">— No client —</option>` +
+      CLIENTS.map(
+        (c) => `<option value="${c.id}" ${taskClientFilter == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`,
+      ).join('');
     $('#clientFilter').value = taskClientFilter;
-    $('#clientFilter').addEventListener('change', (e) => { taskClientFilter = e.target.value; loadAllTasks(); });
-    $('#assigneeFilter').innerHTML = `<option value="">Anyone</option>`
-      + USERS.map((u) => `<option value="${u.id}" ${taskAssignee == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+    $('#clientFilter').addEventListener('change', (e) => {
+      taskClientFilter = e.target.value;
+      loadAllTasks();
+    });
+    $('#assigneeFilter').innerHTML =
+      `<option value="">Anyone</option>` +
+      USERS.map(
+        (u) => `<option value="${u.id}" ${taskAssignee == u.id ? 'selected' : ''}>${esc(u.name)}</option>`,
+      ).join('');
     $('#assigneeFilter').value = taskAssignee;
-    $('#assigneeFilter').addEventListener('change', (e) => { taskAssignee = e.target.value; loadAllTasks(); });
+    $('#assigneeFilter').addEventListener('change', (e) => {
+      taskAssignee = e.target.value;
+      loadAllTasks();
+    });
     const search = $('#taskSearch');
     search.value = taskSearch;
-    search.addEventListener('input', (e) => { taskSearch = e.target.value; loadAllTasks(); });
-    const chipRow = (sel, attr, set) => $(sel).addEventListener('click', (e) => {
-      const b = e.target.closest('button[' + attr + ']'); if (!b) return;
-      $(sel).querySelectorAll('.chip').forEach((c) => c.classList.remove('on'));
-      b.classList.add('on'); set(b.getAttribute(attr)); loadAllTasks();
+    search.addEventListener('input', (e) => {
+      taskSearch = e.target.value;
+      loadAllTasks();
     });
-    chipRow('#statusChips', 'data-st', (v) => { taskStatus = v; });
-    chipRow('#priChips', 'data-pri', (v) => { taskPriority = v; });
+    const chipRow = (sel, attr, set) =>
+      $(sel).addEventListener('click', (e) => {
+        const b = e.target.closest('button[' + attr + ']');
+        if (!b) return;
+        $(sel)
+          .querySelectorAll('.chip')
+          .forEach((c) => c.classList.remove('on'));
+        b.classList.add('on');
+        set(b.getAttribute(attr));
+        loadAllTasks();
+      });
+    chipRow('#statusChips', 'data-st', (v) => {
+      taskStatus = v;
+    });
+    chipRow('#priChips', 'data-pri', (v) => {
+      taskPriority = v;
+    });
     $('#overdueChip').addEventListener('click', () => {
       taskOverdueOnly = !taskOverdueOnly;
       $('#overdueChip').classList.toggle('on', taskOverdueOnly);
@@ -1593,8 +2317,14 @@
     } else {
       $('#newTaskBtn').addEventListener('click', () => openTaskModal());
       // Bulk bar wiring (admin only — bulk edits use admin endpoints).
-      $('#bulkAssignee').innerHTML = `<option value="">Assignee…</option>` + USERS.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
-      $('#bulkClear').addEventListener('click', () => { selectedTasks.clear(); refreshBulkBar(); loadAllTasks(); });
+      $('#bulkAssignee').innerHTML =
+        `<option value="">Assignee…</option>` +
+        USERS.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+      $('#bulkClear').addEventListener('click', () => {
+        selectedTasks.clear();
+        refreshBulkBar();
+        loadAllTasks();
+      });
       $('#bulkApply').addEventListener('click', applyBulkActions);
     }
     loadAllTasks();
@@ -1602,17 +2332,23 @@
 
   // ----- Bulk actions -----
   function refreshBulkBar() {
-    const bar = $('#bulkBar'); if (!bar) return;
+    const bar = $('#bulkBar');
+    if (!bar) return;
     bar.classList.toggle('show', selectedTasks.size > 0);
-    const c = $('#bulkCnt'); if (c) c.textContent = `${selectedTasks.size} selected`;
+    const c = $('#bulkCnt');
+    if (c) c.textContent = `${selectedTasks.size} selected`;
   }
   async function applyBulkActions() {
     const ids = [...selectedTasks];
-    const assignee = $('#bulkAssignee').value, status = $('#bulkStatus').value, priority = $('#bulkPriority').value;
+    const assignee = $('#bulkAssignee').value,
+      status = $('#bulkStatus').value,
+      priority = $('#bulkPriority').value;
     if (!ids.length) return;
     if (!assignee && !status && !priority) return toast('Pick an assignee, status or priority to apply', true);
-    const btn = $('#bulkApply'); btn.disabled = true;
-    let ok = 0, failed = 0;
+    const btn = $('#bulkApply');
+    btn.disabled = true;
+    let ok = 0,
+      failed = 0;
     for (const id of ids) {
       try {
         if (assignee || priority) {
@@ -1623,10 +2359,13 @@
         }
         if (status) await api.post(`/tasks/${id}/status`, { status });
         ok++;
-      } catch (_e) { failed++; }
+      } catch (_e) {
+        failed++;
+      }
     }
     btn.disabled = false;
-    selectedTasks.clear(); refreshBulkBar();
+    selectedTasks.clear();
+    refreshBulkBar();
     toast(failed ? `Updated ${ok}, failed ${failed} (checklists may block Done)` : `Updated ${ok} task(s) ✓`, !!failed);
     loadAllTasks();
   }
@@ -1646,9 +2385,17 @@
       const name = $('#pcName').value.trim();
       if (!name) return toast('Please enter a client name', true);
       try {
-        await api.post('/clients', { name, business_type: $('#pcBiz').value, stage: $('#pcStage').value, notes: $('#pcNotes').value });
-        closeModal(); toast('Sent for approval ✓');
-      } catch (e) { toast(e.message, true); }
+        await api.post('/clients', {
+          name,
+          business_type: $('#pcBiz').value,
+          stage: $('#pcStage').value,
+          notes: $('#pcNotes').value,
+        });
+        closeModal();
+        toast('Sent for approval ✓');
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -1665,7 +2412,9 @@
         <div class="field"><label id="mtDueLabel">Due date</label><input type="date" id="mtDue" value="${todayISO()}"></div></div>
       <div class="form-row one"><div class="field"><label>Checklist — one item per line (optional)</label><textarea id="mtChecklist" placeholder="Points to tick off before this can be marked done"></textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Add</button></div>`);
-    $('#mtRepeat').addEventListener('change', (e) => { $('#mtDueLabel').textContent = e.target.value ? 'First occurrence' : 'Due date'; });
+    $('#mtRepeat').addEventListener('change', (e) => {
+      $('#mtDueLabel').textContent = e.target.value ? 'First occurrence' : 'Due date';
+    });
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       const client_id = $('#mtClient').value;
@@ -1676,35 +2425,83 @@
       const checklist = $('#mtChecklist').value;
       try {
         if (repeat) {
-          await api.post('/recurring', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, frequency: repeat, next_due: $('#mtDue').value, lead_days: 7, step: 1, checklist });
+          await api.post('/recurring', {
+            title,
+            description: $('#mtDesc').value,
+            client_id,
+            priority: $('#mtPriority').value,
+            frequency: repeat,
+            next_due: $('#mtDue').value,
+            lead_days: 7,
+            step: 1,
+            checklist,
+          });
           toast('Recurring task added ✓');
         } else {
-          await api.post('/tasks', { title, description: $('#mtDesc').value, client_id, priority: $('#mtPriority').value, due_date: $('#mtDue').value, checklist });
+          await api.post('/tasks', {
+            title,
+            description: $('#mtDesc').value,
+            client_id,
+            priority: $('#mtPriority').value,
+            due_date: $('#mtDue').value,
+            checklist,
+          });
           toast('Task added ✓');
         }
-        closeModal(); loadMyTasks(); loadMyRecurring();
-      } catch (e) { toast(e.message, true); }
+        closeModal();
+        loadMyTasks();
+        loadMyRecurring();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
   async function loadMyRecurring() {
-    const el = $('#myRecurring'); if (!el) return;
+    const el = $('#myRecurring');
+    if (!el) return;
     try {
       const { recurring } = await api.get('/recurring/mine');
-      el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
-        ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
+      el.innerHTML = recurring.length
+        ? `<table><thead><tr><th>Task</th><th>Client</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
+        ${recurring
+          .map(
+            (
+              r,
+            ) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
           <td>${esc(freqText(r.frequency, r.step))}</td><td>${fmtDate(r.next_due)}</td><td>${r.active ? badge('approved') : badge('cancelled')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-mtoggle="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
-            <button class="btn btn-danger btn-sm" data-mdel="${r.id}">✕</button></td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No recurring tasks yet. Use “+ Add task” and pick a Repeat option.</div>`;
-      el.querySelectorAll('[data-mtoggle]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/recurring/${b.dataset.mtoggle}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadMyRecurring(); } catch (e) { toast(e.message, true); }
-      }));
-      el.querySelectorAll('[data-mdel]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm('Delete this recurring task? Tasks already created are kept.')) return;
-        try { await api.del(`/recurring/${b.dataset.mdel}`); toast('Deleted'); loadMyRecurring(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+            <button class="btn btn-danger btn-sm" data-mdel="${r.id}">✕</button></td></tr>`,
+          )
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">No recurring tasks yet. Use “+ Add task” and pick a Repeat option.</div>`;
+      el.querySelectorAll('[data-mtoggle]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.post(`/recurring/${b.dataset.mtoggle}/active`, { active: Number(b.dataset.active) });
+            toast('Updated');
+            loadMyRecurring();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+      el.querySelectorAll('[data-mdel]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this recurring task? Tasks already created are kept.')) return;
+          try {
+            await api.del(`/recurring/${b.dataset.mdel}`);
+            toast('Deleted');
+            loadMyRecurring();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   const statusSelect = (id, status, lockDone) => `<select data-status="${id}">
@@ -1719,28 +2516,46 @@
     const allDone = openItems(t) === 0;
     return `<div style="margin-top:7px;">
       <div style="font-size:.7rem;font-weight:700;letter-spacing:.4px;text-transform:uppercase;margin-bottom:3px;color:${allDone ? 'var(--teal-dark)' : 'var(--slate)'};">✓ Checklist ${done}/${t.checklist.length}${allDone ? ' — ready to complete' : ''}</div>
-      ${t.checklist.map((i) => `<label style="display:flex;gap:7px;align-items:flex-start;font-size:.84rem;margin:2px 0;cursor:pointer;">
+      ${t.checklist
+        .map(
+          (
+            i,
+          ) => `<label style="display:flex;gap:7px;align-items:flex-start;font-size:.84rem;margin:2px 0;cursor:pointer;">
         <input type="checkbox" data-check="${t.id}:${i.id}" ${i.done ? 'checked' : ''} style="margin-top:2px;">
-        <span style="${i.done ? 'text-decoration:line-through;color:var(--slate);' : ''}">${esc(i.text)}</span></label>`).join('')}
+        <span style="${i.done ? 'text-decoration:line-through;color:var(--slate);' : ''}">${esc(i.text)}</span></label>`,
+        )
+        .join('')}
     </div>`;
   }
   function wireChecklist(root, reload) {
-    root.querySelectorAll('[data-check]').forEach((c) => c.addEventListener('change', async () => {
-      const [taskId, itemId] = c.dataset.check.split(':');
-      try { await api.post(`/tasks/${taskId}/checklist/${itemId}`, { done: c.checked }); if (reload) reload(); }
-      catch (e) { toast(e.message, true); }
-    }));
+    root.querySelectorAll('[data-check]').forEach((c) =>
+      c.addEventListener('change', async () => {
+        const [taskId, itemId] = c.dataset.check.split(':');
+        try {
+          await api.post(`/tasks/${taskId}/checklist/${itemId}`, { done: c.checked });
+          if (reload) reload();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
   }
   // A recurring template stores its checklist as a JSON array of strings.
   function parseChecklistJson(json) {
     if (!json) return '';
-    try { const a = JSON.parse(json); return Array.isArray(a) ? a.join('\n') : ''; } catch (_e) { return ''; }
+    try {
+      const a = JSON.parse(json);
+      return Array.isArray(a) ? a.join('\n') : '';
+    } catch (_e) {
+      return '';
+    }
   }
 
   // Compact "✓ 2/3" badge for the admin board.
   function checklistBadge(t) {
     if (!t.checklist || !t.checklist.length) return '';
-    const total = t.checklist.length, done = total - openItems(t);
+    const total = t.checklist.length,
+      done = total - openItems(t);
     const cls = done === total ? 'b-done' : 'b-pending';
     return ` <span class="badge ${cls}" title="checklist">✓ ${done}/${total}</span>`;
   }
@@ -1752,32 +2567,65 @@
   function renderChecklistEditor(task, onClose) {
     const items = task.checklist || [];
     modal(`<h3>Checklist — ${esc(task.title)}</h3>
-      <div>${items.length ? items.map((i) => `<div class="form-row" style="margin-bottom:8px;">
+      <div>${
+        items.length
+          ? items
+              .map(
+                (i) => `<div class="form-row" style="margin-bottom:8px;">
           <div class="field" style="flex:1;"><input value="${esc(i.text)}" data-cltext="${i.id}"></div>
           <div class="field" style="flex:0 0 auto;display:flex;gap:6px;align-items:center;padding-top:2px;">
             <span title="${i.done ? 'done' : 'open'}" style="font-size:1.05rem;">${i.done ? '✅' : '⬜'}</span>
             <button class="btn btn-primary btn-sm" data-clsave="${i.id}">Save</button>
             <button class="btn btn-danger btn-sm" data-cldel="${i.id}">✕</button>
-          </div></div>`).join('') : '<div class="empty" style="margin-bottom:10px;">No checklist items yet.</div>'}</div>
+          </div></div>`,
+              )
+              .join('')
+          : '<div class="empty" style="margin-bottom:10px;">No checklist items yet.</div>'
+      }</div>
       <div class="form-row" style="margin-bottom:0;"><div class="field" style="flex:1;"><input id="clNew" placeholder="Add a checklist item…"></div>
         <div class="field" style="flex:0 0 auto;padding-top:2px;"><button class="btn btn-navy btn-sm" id="clAdd">Add</button></div></div>
       <div class="modal-actions"><button class="btn btn-primary" id="clDone">Done</button></div>`);
     const rerender = (updated) => renderChecklistEditor(updated, onClose);
-    document.querySelectorAll('[data-clsave]').forEach((b) => b.addEventListener('click', async () => {
-      const id = b.dataset.clsave;
-      try { const r = await api.post(`/tasks/${task.id}/checklist/${id}`, { text: document.querySelector(`[data-cltext="${id}"]`).value }); toast('Saved ✓'); rerender(r.task); }
-      catch (e) { toast(e.message, true); }
-    }));
-    document.querySelectorAll('[data-cldel]').forEach((b) => b.addEventListener('click', async () => {
-      try { const r = await api.del(`/tasks/${task.id}/checklist/${b.dataset.cldel}`); toast('Removed'); rerender(r.task); }
-      catch (e) { toast(e.message, true); }
-    }));
+    document.querySelectorAll('[data-clsave]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const id = b.dataset.clsave;
+        try {
+          const r = await api.post(`/tasks/${task.id}/checklist/${id}`, {
+            text: document.querySelector(`[data-cltext="${id}"]`).value,
+          });
+          toast('Saved ✓');
+          rerender(r.task);
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
+    document.querySelectorAll('[data-cldel]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        try {
+          const r = await api.del(`/tasks/${task.id}/checklist/${b.dataset.cldel}`);
+          toast('Removed');
+          rerender(r.task);
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
     $('#clAdd').addEventListener('click', async () => {
-      const text = $('#clNew').value.trim(); if (!text) return;
-      try { const r = await api.post(`/tasks/${task.id}/checklist`, { text }); toast('Added ✓'); rerender(r.task); }
-      catch (e) { toast(e.message, true); }
+      const text = $('#clNew').value.trim();
+      if (!text) return;
+      try {
+        const r = await api.post(`/tasks/${task.id}/checklist`, { text });
+        toast('Added ✓');
+        rerender(r.task);
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
-    $('#clDone').addEventListener('click', () => { closeModal(); if (onClose) onClose(); });
+    $('#clDone').addEventListener('click', () => {
+      closeModal();
+      if (onClose) onClose();
+    });
   }
 
   // Legacy simple list — now only used if a #myTasks container exists (the
@@ -1785,17 +2633,37 @@
   async function loadMyTasks() {
     try {
       const el = $('#myTasks');
-      if (!el) { loadAllTasks(); return; } // unified board took over
+      if (!el) {
+        loadAllTasks();
+        return;
+      } // unified board took over
       const { tasks } = await api.get('/tasks/mine');
-      el.innerHTML = tasks.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>
-        ${tasks.map((t) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}
+      el.innerHTML = tasks.length
+        ? `<table><thead><tr><th>Task</th><th>Client</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>
+        ${tasks
+          .map(
+            (
+              t,
+            ) => `<tr><td><strong>${esc(t.title)}</strong>${t.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(t.description)}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;margin-top:3px;">by ${esc(t.assigner_name)}${t.recurring_id ? ' · 🔁 recurring' : ''}</div>${checklistHtml(t)}
           <div style="margin-top:6px;"><button class="btn btn-ghost btn-sm" data-mychecklist="${t.id}">${t.checklist && t.checklist.length ? 'Edit checklist' : '+ Add checklist'}</button></div></td>
-          <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No tasks assigned to you. 🎉</div>`;
+          <td>${clientLabel(t) || '—'}</td><td>${badge(t.priority)}</td><td>${fmtDate(t.due_date)}</td><td>${statusSelect(t.id, t.status, openItems(t) > 0)}</td></tr>`,
+          )
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">No tasks assigned to you. 🎉</div>`;
       wireStatusSelects(el, loadMyTasks);
       wireChecklist(el, loadMyTasks);
-      el.querySelectorAll('[data-mychecklist]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(tasks.find((t) => t.id == b.dataset.mychecklist), loadMyTasks)));
-    } catch (e) { toast(e.message, true); }
+      el.querySelectorAll('[data-mychecklist]').forEach((b) =>
+        b.addEventListener('click', () =>
+          openChecklistEditor(
+            tasks.find((t) => t.id == b.dataset.mychecklist),
+            loadMyTasks,
+          ),
+        ),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // Inline assignee dropdown for a task row — reassign without opening a modal.
@@ -1805,7 +2673,11 @@
 
   // Color-coded status pill; clicking opens a small menu to change state.
   // Interactive only for admins or the task's own assignee.
-  const STATUS_META = { TODO: ['To do', 'spill-todo', '#8a97a3'], IN_PROGRESS: ['In progress', 'spill-in_progress', '#f5b942'], DONE: ['Done', 'spill-done', '#0e9f7e'] };
+  const STATUS_META = {
+    TODO: ['To do', 'spill-todo', '#8a97a3'],
+    IN_PROGRESS: ['In progress', 'spill-in_progress', '#f5b942'],
+    DONE: ['Done', 'spill-done', '#0e9f7e'],
+  };
   function statusPill(t) {
     const [label, cls] = STATUS_META[t.status] || STATUS_META.TODO;
     const canEdit = isAdmin() || t.assignee_id === ME.id;
@@ -1813,7 +2685,12 @@
     const lockDone = openItems(t) > 0;
     return `<details class="pillmenu"><summary><span class="spill ${cls}">${label} <span class="cv">▾</span></span></summary>
       <div class="pill-list">
-        ${Object.entries(STATUS_META).map(([v, [l, , dot]]) => `<button data-setstatus="${t.id}:${v}" ${v === 'DONE' && lockDone ? 'disabled title="Finish the checklist first"' : ''} ${v === t.status ? 'style="font-weight:700;"' : ''}><span class="dot" style="background:${dot}"></span>${l}${v === t.status ? ' ✓' : ''}</button>`).join('')}
+        ${Object.entries(STATUS_META)
+          .map(
+            ([v, [l, , dot]]) =>
+              `<button data-setstatus="${t.id}:${v}" ${v === 'DONE' && lockDone ? 'disabled title="Finish the checklist first"' : ''} ${v === t.status ? 'style="font-weight:700;"' : ''}><span class="dot" style="background:${dot}"></span>${l}${v === t.status ? ' ✓' : ''}</button>`,
+          )
+          .join('')}
       </div></details>`;
   }
   // Due-date cell: overdue (not done) = bold red; done = muted strike-through.
@@ -1832,120 +2709,235 @@
       const ALL = tasks; // unfiltered — for modal lookups by id
       if (taskScope === 'MINE') tasks = tasks.filter((t) => t.assignee_id === ME.id);
       if (taskClientFilter === 'none') tasks = tasks.filter((t) => !t.client_id);
-      else if (taskClientFilter) tasks = tasks.filter((t) => t.client_id == taskClientFilter || t.client_parent_id == taskClientFilter); // roll up: a CPA shows its files too
+      else if (taskClientFilter)
+        tasks = tasks.filter((t) => t.client_id == taskClientFilter || t.client_parent_id == taskClientFilter); // roll up: a CPA shows its files too
       if (taskAssignee) tasks = tasks.filter((t) => t.assignee_id == taskAssignee);
       if (taskPriority) tasks = tasks.filter((t) => t.priority === taskPriority);
-      if (taskOverdueOnly) { const today = todayISO(); tasks = tasks.filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today); }
+      if (taskOverdueOnly) {
+        const today = todayISO();
+        tasks = tasks.filter((t) => t.status !== 'DONE' && t.due_date && t.due_date < today);
+      }
       if (taskSearch.trim()) {
         const q = taskSearch.trim().toLowerCase();
-        tasks = tasks.filter((t) => [t.title, t.description, t.assignee_name, t.client_name, t.client_parent_name]
-          .some((f) => String(f || '').toLowerCase().includes(q)));
+        tasks = tasks.filter((t) =>
+          [t.title, t.description, t.assignee_name, t.client_name, t.client_parent_name].some((f) =>
+            String(f || '')
+              .toLowerCase()
+              .includes(q),
+          ),
+        );
       }
       // Done tasks drop out of the active groups and collect in the Archived
       // section below. The status chips only filter active (To do / In progress).
       const archived = tasks.filter((t) => t.status === 'DONE');
       tasks = tasks.filter((t) => t.status !== 'DONE');
       if (taskStatus && taskStatus !== 'DONE') tasks = tasks.filter((t) => t.status === taskStatus);
-      const filtered = !!(taskClientFilter || taskAssignee || taskStatus || taskPriority || taskSearch.trim() || taskOverdueOnly || taskScope === 'MINE');
-      const el = $('#allTasks'); if (!el) return;
+      const filtered = !!(
+        taskClientFilter ||
+        taskAssignee ||
+        taskStatus ||
+        taskPriority ||
+        taskSearch.trim() ||
+        taskOverdueOnly ||
+        taskScope === 'MINE'
+      );
+      const el = $('#allTasks');
+      if (!el) return;
       // prune selections that are no longer visible
       const visibleIds = new Set(tasks.map((t) => t.id));
-      [...selectedTasks].forEach((id) => { if (!visibleIds.has(id)) selectedTasks.delete(id); });
+      [...selectedTasks].forEach((id) => {
+        if (!visibleIds.has(id)) selectedTasks.delete(id);
+      });
       refreshBulkBar();
-      if (!tasks.length && !archived.length) { el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet. 🎉'}</div>`; return; }
+      if (!tasks.length && !archived.length) {
+        el.innerHTML = `<div class="empty">${filtered ? 'No tasks match these filters.' : 'No tasks here yet. 🎉'}</div>`;
+        return;
+      }
 
       // Roll sub-client (file) tasks up under their parent CPA; standalone
       // clients group on their own; untagged tasks go under "General".
       const groups = {};
-      tasks.forEach((t) => { const k = t.client_parent_name || t.client_name || '— General —'; (groups[k] = groups[k] || []).push(t); });
-      const order = Object.keys(groups).sort((a, b) => (a === '— General —') - (b === '— General —') || a.localeCompare(b));
+      tasks.forEach((t) => {
+        const k = t.client_parent_name || t.client_name || '— General —';
+        (groups[k] = groups[k] || []).push(t);
+      });
+      const order = Object.keys(groups).sort(
+        (a, b) => (a === '— General —') - (b === '— General —') || a.localeCompare(b),
+      );
       if (opts.collapseAll) order.forEach((g) => collapsedGroups.add(g));
       // Within a group, manual order (drag) wins; unordered rows keep API order.
       order.forEach((g) => groups[g].sort((a, b) => (a.sort_order ?? 1e9) - (b.sort_order ?? 1e9)));
       // Map a group header back to a client id for quick-add.
-      const groupClientId = (g) => (g === '— General —' ? '' : (CLIENTS.find((c) => !c.parent_id && c.name === g)?.id || ''));
+      const groupClientId = (g) =>
+        g === '— General —' ? '' : CLIENTS.find((c) => !c.parent_id && c.name === g)?.id || '';
 
-      const activeHtml = order.map((g) => `
+      const activeHtml = order
+        .map(
+          (g) => `
         <div class="tgroup active-group ${collapsedGroups.has(g) ? 'collapsed' : ''}">
           <div class="tgroup-head"><span class="caret">▾</span><h2>${esc(g)}</h2><span class="cnt">(${groups[g].length})</span></div>
           <table class="ttable"><thead><tr>${admin ? '<th class="c-check"></th>' : ''}<th class="c-task">Task</th><th class="c-assignee">Assignee</th><th class="c-pri">Priority</th><th class="c-due">Due</th><th class="c-status">Status</th><th class="c-act"></th></tr></thead><tbody data-group="${esc(g)}">
-          ${groups[g].map((t) => `<tr data-task-row="${t.id}">
+          ${groups[g]
+            .map(
+              (t) => `<tr data-task-row="${t.id}">
             ${admin ? `<td class="c-check" style="white-space:nowrap;"><span class="drag-h" data-drag="${t.id}" title="Drag to reorder">⠿</span> <input type="checkbox" class="task-check" data-sel="${t.id}" ${selectedTasks.has(t.id) ? 'checked' : ''}></td>` : ''}
             <td class="c-task"><strong>${esc(t.title)}</strong>${t.client_parent_name ? ` <span class="badge b-public" style="font-size:.66rem">${esc(t.client_name)}</span>` : ''}${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
             <td class="c-assignee">${admin ? assigneeInlineSelect(t) : esc(t.assignee_name)}</td><td class="c-pri">${badge(t.priority)}</td><td class="c-due">${dueCell(t)}</td><td class="c-status">${statusPill(t)}</td>
-            <td class="c-act" style="text-align:right;">${admin || t.assignee_id === ME.id ? `<details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
+            <td class="c-act" style="text-align:right;">${
+              admin || t.assignee_id === ME.id
+                ? `<details class="rowmenu"><summary title="Actions">⋯</summary><div class="rowmenu-list">
               <button data-checklist-task="${t.id}">✓ Checklist</button>
               ${admin ? `<button data-edit-task="${t.id}">✎ Edit</button><button class="danger" data-del-task="${t.id}">🗑 Delete</button>` : ''}
-            </div></details>` : ''}</td></tr>`).join('')}
+            </div></details>`
+                : ''
+            }</td></tr>`,
+            )
+            .join('')}
           ${admin ? `<tr class="quickadd"><td colspan="7"><input data-quickadd="${esc(groupClientId(g))}" placeholder="＋ Add quick task to ${esc(g)} — type a title and press Enter" aria-label="Quick task for ${esc(g)}"></td></tr>` : ''}
-          </tbody></table></div>`).join('');
+          </tbody></table></div>`,
+        )
+        .join('');
       // Archived (Done) — folded away by default; reopen or delete from here.
-      const archivedHtml = archived.length ? `
+      const archivedHtml = archived.length
+        ? `
         <div class="tgroup archived-group ${archivedCollapsed ? 'collapsed' : ''}">
           <div class="tgroup-head" id="archivedHead"><span class="caret">▾</span><h2>📦 Archived — done</h2><span class="cnt">(${archived.length})</span></div>
           <table class="ttable"><thead><tr><th class="c-task">Task</th><th class="c-client">Client</th><th class="c-assignee">Assignee</th><th class="c-due">Completed</th><th class="c-act"></th></tr></thead><tbody>
-          ${archived.map((t) => `<tr>
+          ${archived
+            .map(
+              (t) => `<tr>
             <td class="c-task"><strong>${esc(t.title)}</strong>${t.recurring_id ? ' <span title="from a recurring schedule">🔁</span>' : ''}${checklistBadge(t)}</td>
             <td class="c-client">${t.client_name ? esc(t.client_parent_name ? t.client_parent_name + ' › ' + t.client_name : t.client_name) : '<span class="muted-empty">—</span>'}</td>
             <td class="c-assignee">${esc(t.assignee_name)}</td>
             <td class="c-due">${new Date(t.updated_ts).toLocaleDateString()}</td>
             <td class="c-act" style="text-align:right;white-space:nowrap;">${admin || t.assignee_id === ME.id ? `<button class="btn btn-ghost btn-sm" data-reopen="${t.id}">↩ Reopen</button>` : ''}${admin ? ` <button class="btn btn-danger btn-sm" data-del-task="${t.id}" title="Delete permanently">🗑</button>` : ''}</td>
-          </tr>`).join('')}
-          </tbody></table></div>` : '';
-      const activeEmptyHtml = activeHtml ? '' : `<div class="empty">${filtered ? 'No active tasks match these filters.' : 'No active tasks — all clear. 🎉'}</div>`;
+          </tr>`,
+            )
+            .join('')}
+          </tbody></table></div>`
+        : '';
+      const activeEmptyHtml = activeHtml
+        ? ''
+        : `<div class="empty">${filtered ? 'No active tasks match these filters.' : 'No active tasks — all clear. 🎉'}</div>`;
       el.innerHTML = (activeHtml || activeEmptyHtml) + archivedHtml;
 
       // Collapse / expand a client group (remembered while the page is open).
-      el.querySelectorAll('.active-group .tgroup-head').forEach((h, i) => h.addEventListener('click', () => {
-        const g = order[i];
-        if (collapsedGroups.has(g)) collapsedGroups.delete(g); else collapsedGroups.add(g);
-        h.closest('.tgroup').classList.toggle('collapsed');
-      }));
+      el.querySelectorAll('.active-group .tgroup-head').forEach((h, i) =>
+        h.addEventListener('click', () => {
+          const g = order[i];
+          if (collapsedGroups.has(g)) collapsedGroups.delete(g);
+          else collapsedGroups.add(g);
+          h.closest('.tgroup').classList.toggle('collapsed');
+        }),
+      );
       const archHead = $('#archivedHead');
-      if (archHead) archHead.addEventListener('click', () => { archivedCollapsed = !archivedCollapsed; archHead.closest('.tgroup').classList.toggle('collapsed'); });
+      if (archHead)
+        archHead.addEventListener('click', () => {
+          archivedCollapsed = !archivedCollapsed;
+          archHead.closest('.tgroup').classList.toggle('collapsed');
+        });
       const reload = () => loadAllTasks();
       // Reopen an archived (done) task — moves it back to In progress / active.
-      el.querySelectorAll('[data-reopen]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/tasks/${b.dataset.reopen}/status`, { status: 'IN_PROGRESS' }); toast('Reopened ✓'); reload(); }
-        catch (e) { toast(e.message, true); }
-      }));
+      el.querySelectorAll('[data-reopen]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.post(`/tasks/${b.dataset.reopen}/status`, { status: 'IN_PROGRESS' });
+            toast('Reopened ✓');
+            reload();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
       // Status pill menus
-      el.querySelectorAll('[data-setstatus]').forEach((b) => b.addEventListener('click', async () => {
-        const [id, status] = b.dataset.setstatus.split(':');
-        b.closest('details')?.removeAttribute('open');
-        try { await api.post(`/tasks/${id}/status`, { status }); toast('Updated ✓'); reload(); }
-        catch (e) { toast(e.message, true); }
-      }));
+      el.querySelectorAll('[data-setstatus]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const [id, status] = b.dataset.setstatus.split(':');
+          b.closest('details')?.removeAttribute('open');
+          try {
+            await api.post(`/tasks/${id}/status`, { status });
+            toast('Updated ✓');
+            reload();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
       // Row selection checkboxes -> bulk bar
-      el.querySelectorAll('[data-sel]').forEach((cb) => cb.addEventListener('change', () => {
-        const id = Number(cb.dataset.sel);
-        if (cb.checked) selectedTasks.add(id); else selectedTasks.delete(id);
-        refreshBulkBar();
-      }));
+      el.querySelectorAll('[data-sel]').forEach((cb) =>
+        cb.addEventListener('change', () => {
+          const id = Number(cb.dataset.sel);
+          if (cb.checked) selectedTasks.add(id);
+          else selectedTasks.delete(id);
+          refreshBulkBar();
+        }),
+      );
       // Quick add: Enter creates a task in that client group (To do / Medium).
-      el.querySelectorAll('[data-quickadd]').forEach((inp) => inp.addEventListener('keydown', async (e) => {
-        if (e.key !== 'Enter') return;
-        const title = inp.value.trim(); if (!title) return;
-        inp.disabled = true;
-        try {
-          await api.post('/tasks', { title, client_id: inp.dataset.quickadd || null, assignee_id: ME.id, priority: 'MEDIUM' });
-          toast('Task added ✓'); reload();
-        } catch (err) { toast(err.message, true); inp.disabled = false; }
-      }));
+      el.querySelectorAll('[data-quickadd]').forEach((inp) =>
+        inp.addEventListener('keydown', async (e) => {
+          if (e.key !== 'Enter') return;
+          const title = inp.value.trim();
+          if (!title) return;
+          inp.disabled = true;
+          try {
+            await api.post('/tasks', {
+              title,
+              client_id: inp.dataset.quickadd || null,
+              assignee_id: ME.id,
+              priority: 'MEDIUM',
+            });
+            toast('Task added ✓');
+            reload();
+          } catch (err) {
+            toast(err.message, true);
+            inp.disabled = false;
+          }
+        }),
+      );
       // Drag-and-drop manual ordering within a group (admin).
       if (admin) wireTaskDrag(el);
-      if (admin) el.querySelectorAll('[data-assignee]').forEach((s) => s.addEventListener('change', async () => {
-        try { await api.put(`/tasks/${s.dataset.assignee}`, { assignee_id: Number(s.value) }); toast('Reassigned ✓'); reload(); }
-        catch (e) { toast(e.message, true); reload(); }
-      }));
-      el.querySelectorAll('.rowmenu-list button').forEach((b) => b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')));
-      el.querySelectorAll('[data-checklist-task]').forEach((b) => b.addEventListener('click', () => openChecklistEditor(ALL.find((t) => t.id == b.dataset.checklistTask), reload)));
-      el.querySelectorAll('[data-edit-task]').forEach((b) => b.addEventListener('click', () => openTaskModal(ALL.find((t) => t.id == b.dataset.editTask))));
-      el.querySelectorAll('[data-del-task]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm('Delete this task?')) return;
-        try { await api.del(`/tasks/${b.dataset.delTask}`); toast('Deleted'); reload(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+      if (admin)
+        el.querySelectorAll('[data-assignee]').forEach((s) =>
+          s.addEventListener('change', async () => {
+            try {
+              await api.put(`/tasks/${s.dataset.assignee}`, { assignee_id: Number(s.value) });
+              toast('Reassigned ✓');
+              reload();
+            } catch (e) {
+              toast(e.message, true);
+              reload();
+            }
+          }),
+        );
+      el.querySelectorAll('.rowmenu-list button').forEach((b) =>
+        b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')),
+      );
+      el.querySelectorAll('[data-checklist-task]').forEach((b) =>
+        b.addEventListener('click', () =>
+          openChecklistEditor(
+            ALL.find((t) => t.id == b.dataset.checklistTask),
+            reload,
+          ),
+        ),
+      );
+      el.querySelectorAll('[data-edit-task]').forEach((b) =>
+        b.addEventListener('click', () => openTaskModal(ALL.find((t) => t.id == b.dataset.editTask))),
+      );
+      el.querySelectorAll('[data-del-task]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this task?')) return;
+          try {
+            await api.del(`/tasks/${b.dataset.delTask}`);
+            toast('Deleted');
+            reload();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // HTML5 drag-and-drop: reorder rows within one client group's tbody, then
@@ -1954,15 +2946,29 @@
     let dragging = null;
     root.querySelectorAll('.drag-h').forEach((h) => {
       const row = h.closest('tr');
-      h.addEventListener('mousedown', () => { row.draggable = true; });
-      row.addEventListener('dragstart', (e) => { dragging = row; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      h.addEventListener('mousedown', () => {
+        row.draggable = true;
+      });
+      row.addEventListener('dragstart', (e) => {
+        dragging = row;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
       row.addEventListener('dragend', async () => {
-        row.classList.remove('dragging'); row.draggable = false;
+        row.classList.remove('dragging');
+        row.draggable = false;
         root.querySelectorAll('tr.drag-over').forEach((r) => r.classList.remove('drag-over'));
         if (!dragging) return;
-        const tbody = dragging.closest('tbody'); dragging = null;
+        const tbody = dragging.closest('tbody');
+        dragging = null;
         const ids = [...tbody.querySelectorAll('tr[data-task-row]')].map((r) => Number(r.dataset.taskRow));
-        try { await api.post('/tasks/reorder', { ids }); toast('Order saved ✓'); } catch (e) { toast(e.message, true); loadAllTasks(); }
+        try {
+          await api.post('/tasks/reorder', { ids });
+          toast('Order saved ✓');
+        } catch (e) {
+          toast(e.message, true);
+          loadAllTasks();
+        }
       });
     });
     root.querySelectorAll('tbody').forEach((tb) => {
@@ -1974,25 +2980,40 @@
         if (!over || over === dragging) return;
         over.classList.add('drag-over');
         const rect = over.getBoundingClientRect();
-        if (e.clientY < rect.top + rect.height / 2) over.before(dragging); else over.after(dragging);
+        if (e.clientY < rect.top + rect.height / 2) over.before(dragging);
+        else over.after(dragging);
       });
     });
   }
 
   function wireStatusSelects(root, reload) {
-    root.querySelectorAll('[data-status]').forEach((s) => s.addEventListener('change', async () => {
-      try { await api.post(`/tasks/${s.dataset.status}/status`, { status: s.value }); toast('Updated ✓'); if (reload) reload(); }
-      catch (e) { toast(e.message, true); }
-    }));
+    root.querySelectorAll('[data-status]').forEach((s) =>
+      s.addEventListener('change', async () => {
+        try {
+          await api.post(`/tasks/${s.dataset.status}/status`, { status: s.value });
+          toast('Updated ✓');
+          if (reload) reload();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
   }
 
   // "Parent › File" when a client is a sub-client, else just its name.
   const clientPath = (c) => (c.parent_name ? `${c.parent_name} › ${c.name}` : c.name);
   function clientOptions(selectedId) {
-    return `<option value="">— No client —</option>` + CLIENTS.map((c) => `<option value="${c.id}" ${selectedId == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`).join('');
+    return (
+      `<option value="">— No client —</option>` +
+      CLIENTS.map(
+        (c) => `<option value="${c.id}" ${selectedId == c.id ? 'selected' : ''}>${esc(clientPath(c))}</option>`,
+      ).join('')
+    );
   }
   function userOptions(selectedId) {
-    return USERS.map((u) => `<option value="${u.id}" ${selectedId == u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+    return USERS.map(
+      (u) => `<option value="${u.id}" ${selectedId == u.id ? 'selected' : ''}>${esc(u.name)}</option>`,
+    ).join('');
   }
 
   async function openTaskModal(task) {
@@ -2010,20 +3031,35 @@
     const initialChecklist = (task?.checklist || []).map((i) => i.text).join('\n');
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { title: $('#tTitle').value, description: $('#tDesc').value, client_id: $('#tClient').value || null, assignee_id: Number($('#tAssignee').value), priority: $('#tPriority').value, due_date: $('#tDue').value };
+      const payload = {
+        title: $('#tTitle').value,
+        description: $('#tDesc').value,
+        client_id: $('#tClient').value || null,
+        assignee_id: Number($('#tAssignee').value),
+        priority: $('#tPriority').value,
+        due_date: $('#tDue').value,
+      };
       // Only send checklist on create, or on edit if it actually changed (avoids resetting tick state).
       if (!editing || $('#tChecklist').value !== initialChecklist) payload.checklist = $('#tChecklist').value;
       try {
-        if (editing) await api.put(`/tasks/${task.id}`, payload); else await api.post('/tasks', payload);
-        closeModal(); toast(editing ? 'Saved ✓' : 'Assigned ✓'); loadAllTasks(); loadMyTasks();
-      } catch (e) { toast(e.message, true); }
+        if (editing) await api.put(`/tasks/${task.id}`, payload);
+        else await api.post('/tasks', payload);
+        closeModal();
+        toast(editing ? 'Saved ✓' : 'Assigned ✓');
+        loadAllTasks();
+        loadMyTasks();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
   // ---------- Clients + Recurring schedules (admin) ----------
   VIEWS.clients = async () => {
     if (!isAdmin()) return navigate('dashboard');
-    setMain('Clients', 'Your client list and the recurring work scheduled for each.',
+    setMain(
+      'Clients',
+      'Your client list and the recurring work scheduled for each.',
       `<div id="pendingClients"></div>
        <div class="toolbar"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
            <h2 style="margin:0;color:var(--navy);">Clients</h2>
@@ -2033,16 +3069,29 @@
        <div id="clientTable" style="margin-bottom:30px;"></div>
        <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Recurring schedules</h2>
          <div class="row-actions"><button class="btn btn-ghost" id="runRecBtn">Generate due now</button><button class="btn btn-primary" id="addRecBtn">+ New schedule</button></div></div>
-       <div id="recTable"></div>`);
+       <div id="recTable"></div>`,
+    );
     await loadLookups();
     $('#addClientBtn').addEventListener('click', () => openClientModal());
     $('#importTasksBtn').addEventListener('click', () => openImportTasksModal());
-    $('#clientFilter').addEventListener('change', (e) => { clientGroupFilter = e.target.value; renderClientTable(); });
+    $('#clientFilter').addEventListener('change', (e) => {
+      clientGroupFilter = e.target.value;
+      renderClientTable();
+    });
     $('#clientSearch').value = clientSearch;
-    $('#clientSearch').addEventListener('input', (e) => { clientSearch = e.target.value; renderClientTable(); });
+    $('#clientSearch').addEventListener('input', (e) => {
+      clientSearch = e.target.value;
+      renderClientTable();
+    });
     $('#addRecBtn').addEventListener('click', () => openRecurringModal());
     $('#runRecBtn').addEventListener('click', async () => {
-      try { const r = await api.post('/recurring/run'); toast(`Generated ${r.created} task(s)`); loadRecurring(); } catch (e) { toast(e.message, true); }
+      try {
+        const r = await api.post('/recurring/run');
+        toast(`Generated ${r.created} task(s)`);
+        loadRecurring();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
     loadPendingClients();
     loadClients();
@@ -2051,33 +3100,54 @@
 
   // Admin: clients proposed by employees, awaiting approval.
   async function loadPendingClients() {
-    const el = $('#pendingClients'); if (!el) return;
+    const el = $('#pendingClients');
+    if (!el) return;
     try {
       const { clients } = await api.get('/clients/pending');
-      if (!clients.length) { el.innerHTML = ''; return; }
+      if (!clients.length) {
+        el.innerHTML = '';
+        return;
+      }
       el.innerHTML = `<div class="section">
         <h2 style="color:var(--navy);">🕓 Client approvals (${clients.length})</h2>
         <table><thead><tr><th>Proposed client</th><th>Business type</th><th>Stage</th><th>Suggested by</th><th>Notes</th><th>Action</th></tr></thead><tbody>
-        ${clients.map((c) => `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
+        ${clients
+          .map(
+            (
+              c,
+            ) => `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.business_type || '—')}</td><td>${stageBadge(c.stage)}</td>
           <td>${esc(c.created_by_name || '—')}</td><td>${esc(c.notes || '—')}</td>
           <td class="row-actions"><button class="btn btn-primary btn-sm" data-appr="${c.id}">Approve</button>
-            <button class="btn btn-danger btn-sm" data-rej="${c.id}">Reject</button></td></tr>`).join('')}
+            <button class="btn btn-danger btn-sm" data-rej="${c.id}">Reject</button></td></tr>`,
+          )
+          .join('')}
         </tbody></table></div>`;
-      el.querySelectorAll('[data-appr]').forEach((b) => b.addEventListener('click', () => decideClient(b.dataset.appr, 'APPROVED')));
-      el.querySelectorAll('[data-rej]').forEach((b) => b.addEventListener('click', () => decideClient(b.dataset.rej, 'REJECTED')));
-    } catch (e) { toast(e.message, true); }
+      el.querySelectorAll('[data-appr]').forEach((b) =>
+        b.addEventListener('click', () => decideClient(b.dataset.appr, 'APPROVED')),
+      );
+      el.querySelectorAll('[data-rej]').forEach((b) =>
+        b.addEventListener('click', () => decideClient(b.dataset.rej, 'REJECTED')),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
   async function decideClient(id, decision) {
     try {
       await api.post(`/clients/${id}/approval`, { decision });
       toast(decision === 'APPROVED' ? 'Client approved ✓' : 'Rejected');
-      loadPendingClients(); loadClients(); loadLookups();
-    } catch (e) { toast(e.message, true); }
+      loadPendingClients();
+      loadClients();
+      loadLookups();
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   const STAGE_LABEL = { PROSPECT: 'Prospect', INTERVIEWED: 'Interviewed – not signed', SIGNED: 'Signed' };
   const STAGE_CLASS = { PROSPECT: 'b-todo', INTERVIEWED: 'b-pending', SIGNED: 'b-done' };
-  const stageBadge = (s) => `<span class="badge ${STAGE_CLASS[s] || 'b-todo'}">${esc(STAGE_LABEL[s] || cap(s || 'Prospect'))}</span>`;
+  const stageBadge = (s) =>
+    `<span class="badge ${STAGE_CLASS[s] || 'b-todo'}">${esc(STAGE_LABEL[s] || cap(s || 'Prospect'))}</span>`;
 
   let ALL_CLIENTS = []; // cached for the parent-client picker
   let clientGroupFilter = ''; // '' = all; otherwise a parent id (show it + its files)
@@ -2097,9 +3167,7 @@
   // Fetch clients and upcoming task deadlines, then render.
   async function loadClients() {
     try {
-      const [{ clients }, tasksRes] = await Promise.all([
-        api.get('/clients/all'), api.get('/tasks/all'),
-      ]);
+      const [{ clients }, tasksRes] = await Promise.all([api.get('/clients/all'), api.get('/tasks/all')]);
       ALL_CLIENTS = clients;
       // Next deadline per client = soonest upcoming due date among its open tasks.
       CLIENT_DEADLINE = {};
@@ -2110,7 +3178,9 @@
         if (!cur || t.due_date < cur) CLIENT_DEADLINE[t.client_id] = t.due_date;
       });
       renderClientTable();
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // Sortable header cell.
@@ -2122,40 +3192,67 @@
 
   // Apply the current filter/search/sort to the cached clients and paint the table.
   function renderClientTable() {
-    const el = $('#clientTable'); if (!el) return;
+    const el = $('#clientTable');
+    if (!el) return;
     const clients = ALL_CLIENTS;
     // Filter dropdown: top-level clients (the ones that can hold files).
     const filterEl = $('#clientFilter');
     if (filterEl) {
       const parents = clients.filter((c) => !c.parent_id);
-      filterEl.innerHTML = `<option value="">All clients</option>` + parents.map((p) => `<option value="${p.id}" ${clientGroupFilter == p.id ? 'selected' : ''}>${esc(p.name)} + files</option>`).join('');
+      filterEl.innerHTML =
+        `<option value="">All clients</option>` +
+        parents
+          .map(
+            (p) =>
+              `<option value="${p.id}" ${clientGroupFilter == p.id ? 'selected' : ''}>${esc(p.name)} + files</option>`,
+          )
+          .join('');
       filterEl.value = clientGroupFilter;
     }
     let shown = clientGroupFilter
       ? clients.filter((c) => c.id == clientGroupFilter || c.parent_id == clientGroupFilter)
       : clients.slice();
     const q = clientSearch.trim().toLowerCase();
-    if (q) shown = shown.filter((c) => [c.name, c.business_type, c.email, c.code, c.parent_name].some((f) => String(f || '').toLowerCase().includes(q)));
+    if (q)
+      shown = shown.filter((c) =>
+        [c.name, c.business_type, c.email, c.code, c.parent_name].some((f) =>
+          String(f || '')
+            .toLowerCase()
+            .includes(q),
+        ),
+      );
 
     // Sorting
     const rank = { SIGNED: 3, INTERVIEWED: 2, PROSPECT: 1 };
     const val = (c) => {
       switch (clientSort.key) {
-        case 'business_type': return String(c.business_type || '').toLowerCase();
-        case 'email': return String(c.email || '').toLowerCase();
-        case 'deadline': return CLIENT_DEADLINE[c.id] || '9999-99-99';
-        case 'status': return (c.active ? 10 : 0) + (rank[c.stage] || 0);
-        default: return String(c.name || '').toLowerCase();
+        case 'business_type':
+          return String(c.business_type || '').toLowerCase();
+        case 'email':
+          return String(c.email || '').toLowerCase();
+        case 'deadline':
+          return CLIENT_DEADLINE[c.id] || '9999-99-99';
+        case 'status':
+          return (c.active ? 10 : 0) + (rank[c.stage] || 0);
+        default:
+          return String(c.name || '').toLowerCase();
       }
     };
-    shown.sort((a, b) => { const va = val(a), vb = val(b); return (va < vb ? -1 : va > vb ? 1 : 0) * clientSort.dir; });
+    shown.sort((a, b) => {
+      const va = val(a),
+        vb = val(b);
+      return (va < vb ? -1 : va > vb ? 1 : 0) * clientSort.dir;
+    });
 
-    el.innerHTML = shown.length ? `<table class="ttable-clients"><thead><tr>
+    el.innerHTML = shown.length
+      ? `<table class="ttable-clients"><thead><tr>
         ${sortableTh('Client', 'name')}${sortableTh('Business type', 'business_type')}${sortableTh('Contact info', 'email')}${sortableTh('Next deadline', 'deadline')}${sortableTh('Status', 'status')}<th></th></tr></thead><tbody>
-      ${shown.map((c) => `<tr style="${c.active ? '' : 'opacity:.55'}">
+      ${shown
+        .map(
+          (c) => `<tr style="${c.active ? '' : 'opacity:.55'}">
         <td><div class="client-cell"><span class="avatar-sm">${esc(initials(c.name))}</span><div>
           <div class="nm">${esc(c.name)}</div>
-          <div class="sub">${c.parent_name ? '↳ under ' + esc(c.parent_name) : (c.code ? esc(c.code) : 'Top-level client')}</div>
+          <div class="sub">${c.parent_name ? '↳ under ' + esc(c.parent_name) : c.code ? esc(c.code) : 'Top-level client'}</div>
         </div></div></td>
         <td>${c.business_type ? esc(c.business_type) : notSet()}</td>
         <td>${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : notSet()}</td>
@@ -2165,39 +3262,78 @@
           ${!c.parent_id && c.approval === 'APPROVED' ? `<button data-add-file="${c.id}">＋ File</button>` : ''}
           <button data-edit-client="${c.id}">✎ Edit</button>
           <button class="${c.active ? 'danger' : ''}" data-toggle-client="${c.id}" data-active="${c.active ? 0 : 1}">${c.active ? '🗄 Archive' : '↩ Restore'}</button>
-        </div></details></td></tr>`).join('')}
-    </tbody></table>` : `<div class="empty">${clientSearch || clientGroupFilter ? 'No clients match your search.' : 'No clients here.'}</div>`;
+        </div></details></td></tr>`,
+        )
+        .join('')}
+    </tbody></table>`
+      : `<div class="empty">${clientSearch || clientGroupFilter ? 'No clients match your search.' : 'No clients here.'}</div>`;
 
-    const byId = {}; clients.forEach((c) => { byId[c.id] = c; });
-    el.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => {
-      const key = th.dataset.sort;
-      if (clientSort.key === key) clientSort.dir *= -1; else clientSort = { key, dir: 1 };
-      renderClientTable();
-    }));
-    el.querySelectorAll('.rowmenu-list button').forEach((b) => b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')));
-    el.querySelectorAll('[data-add-file]').forEach((b) => b.addEventListener('click', () => openClientModal(null, b.dataset.addFile)));
-    el.querySelectorAll('[data-edit-client]').forEach((b) => b.addEventListener('click', () => openClientModal(byId[b.dataset.editClient])));
-    el.querySelectorAll('[data-toggle-client]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.post(`/clients/${b.dataset.toggleClient}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadClients(); loadLookups(); } catch (e) { toast(e.message, true); }
-    }));
+    const byId = {};
+    clients.forEach((c) => {
+      byId[c.id] = c;
+    });
+    el.querySelectorAll('th.sortable').forEach((th) =>
+      th.addEventListener('click', () => {
+        const key = th.dataset.sort;
+        if (clientSort.key === key) clientSort.dir *= -1;
+        else clientSort = { key, dir: 1 };
+        renderClientTable();
+      }),
+    );
+    el.querySelectorAll('.rowmenu-list button').forEach((b) =>
+      b.addEventListener('click', () => b.closest('details')?.removeAttribute('open')),
+    );
+    el.querySelectorAll('[data-add-file]').forEach((b) =>
+      b.addEventListener('click', () => openClientModal(null, b.dataset.addFile)),
+    );
+    el.querySelectorAll('[data-edit-client]').forEach((b) =>
+      b.addEventListener('click', () => openClientModal(byId[b.dataset.editClient])),
+    );
+    el.querySelectorAll('[data-toggle-client]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        try {
+          await api.post(`/clients/${b.dataset.toggleClient}/active`, { active: Number(b.dataset.active) });
+          toast('Updated');
+          loadClients();
+          loadLookups();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
   }
 
   // Minimal CSV parser (handles quoted fields, commas, and newlines inside quotes).
   function parseCsv(text) {
-    const rows = []; let field = '', row = [], inQ = false;
+    const rows = [];
+    let field = '',
+      row = [],
+      inQ = false;
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       if (inQ) {
-        if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
-        else if (ch === '"') inQ = false;
+        if (ch === '"' && text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else if (ch === '"') inQ = false;
         else field += ch;
       } else if (ch === '"') inQ = true;
-      else if (ch === ',') { row.push(field); field = ''; }
-      else if (ch === '\r') { /* ignore */ }
-      else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-      else field += ch;
+      else if (ch === ',') {
+        row.push(field);
+        field = '';
+      } else if (ch === '\r') {
+        /* ignore */
+      } else if (ch === '\n') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+      } else field += ch;
     }
-    if (field.length || row.length) { row.push(field); rows.push(row); }
+    if (field.length || row.length) {
+      row.push(field);
+      rows.push(row);
+    }
     return rows;
   }
   const RECUR_FREQ = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
@@ -2207,20 +3343,23 @@
     if (!rows.length) return [];
     // Drop a header row if the first cell looks like a header.
     if (/^(title|task)$/i.test(String(rows[0][0] || '').trim())) rows.shift();
-    return rows.map((r) => ({
-      title: String(r[0] || '').trim(),
-      frequency: String(r[1] || '').trim(),
-      description: String(r[2] || '').trim(),
-      owner: String(r[3] || '').trim(),
-      priority: String(r[4] || '').trim(),
-    })).filter((it) => it.title);
+    return rows
+      .map((r) => ({
+        title: String(r[0] || '').trim(),
+        frequency: String(r[1] || '').trim(),
+        description: String(r[2] || '').trim(),
+        owner: String(r[3] || '').trim(),
+        priority: String(r[4] || '').trim(),
+      }))
+      .filter((it) => it.title);
   }
 
   // Admin: bulk-import a task list (e.g. from a spreadsheet) onto one client.
   function openImportTasksModal() {
-    const clientOpts = `<option value="">— Choose a client —</option>`
-      + CLIENTS.map((c) => `<option value="${c.id}">${esc(clientPath(c))}</option>`).join('')
-      + `<option value="__new">＋ New client…</option>`;
+    const clientOpts =
+      `<option value="">— Choose a client —</option>` +
+      CLIENTS.map((c) => `<option value="${c.id}">${esc(clientPath(c))}</option>`).join('') +
+      `<option value="__new">＋ New client…</option>`;
     modal(`<h3>Import a task list</h3>
       <p style="color:var(--slate);margin:0 0 14px;font-size:.88rem;line-height:1.5;">Paste rows or choose a CSV with columns <strong>Title, Frequency, Details, Owner, Priority</strong>. Weekly/Monthly/Quarterly/Yearly become recurring schedules; Daily, “As needed” or blank become one-time tasks. Blank owner uses the default below.</p>
       <div class="form-row"><div class="field"><label>Client</label><select id="biClient">${clientOpts}</select><input id="biNewName" placeholder="New client name" style="display:none;margin-top:8px;"></div>
@@ -2236,11 +3375,17 @@
         ? `${items.length} task(s) — ${recur} recurring schedule(s), ${items.length - recur} one-time.`
         : '';
     };
-    $('#biClient').addEventListener('change', (e) => { $('#biNewName').style.display = e.target.value === '__new' ? 'block' : 'none'; });
+    $('#biClient').addEventListener('change', (e) => {
+      $('#biNewName').style.display = e.target.value === '__new' ? 'block' : 'none';
+    });
     $('#biFile').addEventListener('change', (e) => {
-      const f = e.target.files[0]; if (!f) return;
+      const f = e.target.files[0];
+      if (!f) return;
       const reader = new FileReader();
-      reader.onload = () => { $('#biText').value = String(reader.result || ''); preview(); };
+      reader.onload = () => {
+        $('#biText').value = String(reader.result || '');
+        preview();
+      };
       reader.readAsText(f);
     });
     $('#biText').addEventListener('input', preview);
@@ -2250,16 +3395,24 @@
       if (!items.length) return toast('Add at least one task (Title required)', true);
       const clientSel = $('#biClient').value;
       const payload = { default_assignee_id: Number($('#biOwner').value), items };
-      if (clientSel === '__new') { const nm = $('#biNewName').value.trim(); if (!nm) return toast('Enter the new client name', true); payload.client_name = nm; }
-      else if (clientSel) payload.client_id = Number(clientSel);
+      if (clientSel === '__new') {
+        const nm = $('#biNewName').value.trim();
+        if (!nm) return toast('Enter the new client name', true);
+        payload.client_name = nm;
+      } else if (clientSel) payload.client_id = Number(clientSel);
       else return toast('Choose a client', true);
       $('#mImport').disabled = true;
       try {
         const r = await api.post('/tasks/bulk', payload);
         closeModal();
         toast(`Imported ✓ — ${r.schedulesCreated} recurring, ${r.tasksCreated} one-time`);
-        loadClients(); loadRecurring(); loadLookups();
-      } catch (e) { toast(e.message, true); $('#mImport').disabled = false; }
+        loadClients();
+        loadRecurring();
+        loadLookups();
+      } catch (e) {
+        toast(e.message, true);
+        $('#mImport').disabled = false;
+      }
     });
   }
 
@@ -2274,48 +3427,97 @@
         <div class="field"><label>Stage</label><select id="cStage">${['PROSPECT', 'INTERVIEWED', 'SIGNED'].map((s) => `<option value="${s}" ${(c?.stage || 'PROSPECT') === s ? 'selected' : ''}>${STAGE_LABEL[s]}</option>`).join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Contact email</label><input id="cEmail" type="email" value="${esc(c?.email || '')}" placeholder="e.g. billing@client.com"></div></div>
       <div class="form-row one"><div class="field"><label>Parent client (optional — for a file under a CPA/parent)</label>
-        <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter((x) => !x.parent_id && x.id !== c?.id).map((x) => `<option value="${x.id}" ${selParent == x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
+        <select id="cParent"><option value="">— Top-level client —</option>${ALL_CLIENTS.filter(
+          (x) => !x.parent_id && x.id !== c?.id,
+        )
+          .map((x) => `<option value="${x.id}" ${selParent == x.id ? 'selected' : ''}>${esc(x.name)}</option>`)
+          .join('')}</select></div></div>
       <div class="form-row one"><div class="field"><label>Client address (one line each)</label><textarea id="cBilling" placeholder="Continuum Associates\nHudson County\nJersey City New Jersey\nUnited States (USA)">${esc(c?.billing_address || '')}</textarea></div></div>
       <div class="form-row one"><div class="field"><label>Notes</label><textarea id="cNotes">${esc(c?.notes || '')}</textarea></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create'}</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { name: $('#cName').value, code: $('#cCode').value, business_type: $('#cBizType').value, stage: $('#cStage').value, email: $('#cEmail').value, notes: $('#cNotes').value, parent_id: $('#cParent').value || null, billing_address: $('#cBilling').value };
+      const payload = {
+        name: $('#cName').value,
+        code: $('#cCode').value,
+        business_type: $('#cBizType').value,
+        stage: $('#cStage').value,
+        email: $('#cEmail').value,
+        notes: $('#cNotes').value,
+        parent_id: $('#cParent').value || null,
+        billing_address: $('#cBilling').value,
+      };
       try {
-        if (editing) await api.put(`/clients/${c.id}`, payload); else await api.post('/clients', payload);
-        closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); loadClients(); loadLookups();
-      } catch (e) { toast(e.message, true); }
+        if (editing) await api.put(`/clients/${c.id}`, payload);
+        else await api.post('/clients', payload);
+        closeModal();
+        toast(editing ? 'Saved ✓' : 'Created ✓');
+        loadClients();
+        loadLookups();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
   const FREQ_LABEL = { DAILY: 'Daily', WEEKLY: 'Weekly', MONTHLY: 'Monthly', QUARTERLY: 'Quarterly', YEARLY: 'Yearly' };
   const FREQ_UNIT = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', QUARTERLY: 'quarter', YEARLY: 'year' };
   // "Monthly" when step is 1, otherwise "Every 2 weeks".
-  const freqText = (freq, step) => (Number(step) > 1
-    ? `Every ${step} ${FREQ_UNIT[freq] || 'period'}s`
-    : (FREQ_LABEL[freq] || cap(String(freq || ''))));
+  const freqText = (freq, step) =>
+    Number(step) > 1 ? `Every ${step} ${FREQ_UNIT[freq] || 'period'}s` : FREQ_LABEL[freq] || cap(String(freq || ''));
   async function loadRecurring() {
     try {
       const { recurring } = await api.get('/recurring');
       const el = $('#recTable');
-      el.innerHTML = recurring.length ? `<table><thead><tr><th>Task</th><th>Client</th><th>Assignee</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
-        ${recurring.map((r) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
+      el.innerHTML = recurring.length
+        ? `<table><thead><tr><th>Task</th><th>Client</th><th>Assignee</th><th>Every</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
+        ${recurring
+          .map(
+            (
+              r,
+            ) => `<tr style="${r.active ? '' : 'opacity:.5'}"><td><strong>${esc(r.title)}</strong></td><td>${esc(r.client_name || '—')}</td>
           <td>${esc(r.assignee_name)}</td><td>${esc(freqText(r.frequency, r.step))}</td><td>${fmtDate(r.next_due)}</td>
           <td>${r.active ? badge('approved') : badge('cancelled')}</td>
           <td class="row-actions"><button class="btn btn-ghost btn-sm" data-edit-rec="${r.id}">Edit</button>
             <button class="btn btn-ghost btn-sm" data-toggle-rec="${r.id}" data-active="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Resume'}</button>
-            <button class="btn btn-danger btn-sm" data-del-rec="${r.id}">✕</button></td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No recurring schedules. Add one to auto-create tasks each period.</div>`;
-      const byId = {}; recurring.forEach((r) => { byId[r.id] = r; });
-      el.querySelectorAll('[data-edit-rec]').forEach((b) => b.addEventListener('click', () => openRecurringModal(byId[b.dataset.editRec])));
-      el.querySelectorAll('[data-toggle-rec]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/recurring/${b.dataset.toggleRec}/active`, { active: Number(b.dataset.active) }); toast('Updated'); loadRecurring(); } catch (e) { toast(e.message, true); }
-      }));
-      el.querySelectorAll('[data-del-rec]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm('Delete this schedule? Already-created tasks are kept.')) return;
-        try { await api.del(`/recurring/${b.dataset.delRec}`); toast('Deleted'); loadRecurring(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+            <button class="btn btn-danger btn-sm" data-del-rec="${r.id}">✕</button></td></tr>`,
+          )
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">No recurring schedules. Add one to auto-create tasks each period.</div>`;
+      const byId = {};
+      recurring.forEach((r) => {
+        byId[r.id] = r;
+      });
+      el.querySelectorAll('[data-edit-rec]').forEach((b) =>
+        b.addEventListener('click', () => openRecurringModal(byId[b.dataset.editRec])),
+      );
+      el.querySelectorAll('[data-toggle-rec]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.post(`/recurring/${b.dataset.toggleRec}/active`, { active: Number(b.dataset.active) });
+            toast('Updated');
+            loadRecurring();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+      el.querySelectorAll('[data-del-rec]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('Delete this schedule? Already-created tasks are kept.')) return;
+          try {
+            await api.del(`/recurring/${b.dataset.delRec}`);
+            toast('Deleted');
+            loadRecurring();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   function openRecurringModal(r) {
@@ -2325,7 +3527,12 @@
       <div class="form-row one"><div class="field"><label>Description</label><textarea id="rDesc">${esc(r?.description || '')}</textarea></div></div>
       <div class="form-row"><div class="field"><label>Client</label><select id="rClient">${clientOptions(r?.client_id)}</select></div>
         <div class="field"><label>Assignee</label><select id="rAssignee">${userOptions(r?.assignee_id)}</select></div></div>
-      <div class="form-row"><div class="field"><label>Repeats</label><select id="rFreq">${Object.keys(FREQ_LABEL).map((f) => `<option value="${f}" ${(r?.frequency || 'MONTHLY') === f ? 'selected' : ''}>${FREQ_LABEL[f]}</option>`).join('')}</select></div>
+      <div class="form-row"><div class="field"><label>Repeats</label><select id="rFreq">${Object.keys(FREQ_LABEL)
+        .map(
+          (f) =>
+            `<option value="${f}" ${(r?.frequency || 'MONTHLY') === f ? 'selected' : ''}>${FREQ_LABEL[f]}</option>`,
+        )
+        .join('')}</select></div>
         <div class="field"><label>Repeat every (custom)</label><input type="number" id="rStep" min="1" max="99" value="${r?.step ?? 1}">
           <div id="rFreqHint" style="color:var(--slate);font-size:.78rem;margin-top:4px;"></div></div></div>
       <div class="form-row"><div class="field"><label>Priority</label><select id="rPriority">${['LOW', 'MEDIUM', 'HIGH'].map((p) => `<option value="${p}" ${(r?.priority || 'MEDIUM') === p ? 'selected' : ''}>${cap(p)}</option>`).join('')}</select></div>
@@ -2336,7 +3543,8 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">${editing ? 'Save' : 'Create schedule'}</button></div>`);
     // Live preview of the schedule, e.g. "Creates a task every 2 weeks."
     const updateFreqHint = () => {
-      const f = $('#rFreq').value, s = Math.max(1, Number($('#rStep').value) || 1);
+      const f = $('#rFreq').value,
+        s = Math.max(1, Number($('#rStep').value) || 1);
       $('#rFreqHint').textContent = `Creates a task ${freqText(f, s).toLowerCase()}.`;
     };
     $('#rFreq').addEventListener('change', () => {
@@ -2348,13 +3556,27 @@
     updateFreqHint();
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      const payload = { title: $('#rTitle').value, description: $('#rDesc').value, client_id: $('#rClient').value || null, assignee_id: Number($('#rAssignee').value),
-        frequency: $('#rFreq').value, priority: $('#rPriority').value, next_due: $('#rNext').value, lead_days: Number($('#rLead').value),
-        step: Math.max(1, Number($('#rStep').value) || 1), checklist: $('#rChecklist').value };
+      const payload = {
+        title: $('#rTitle').value,
+        description: $('#rDesc').value,
+        client_id: $('#rClient').value || null,
+        assignee_id: Number($('#rAssignee').value),
+        frequency: $('#rFreq').value,
+        priority: $('#rPriority').value,
+        next_due: $('#rNext').value,
+        lead_days: Number($('#rLead').value),
+        step: Math.max(1, Number($('#rStep').value) || 1),
+        checklist: $('#rChecklist').value,
+      };
       try {
-        if (editing) await api.put(`/recurring/${r.id}`, payload); else await api.post('/recurring', payload);
-        closeModal(); toast(editing ? 'Saved ✓' : 'Schedule created ✓'); loadRecurring();
-      } catch (e) { toast(e.message, true); }
+        if (editing) await api.put(`/recurring/${r.id}`, payload);
+        else await api.post('/recurring', payload);
+        closeModal();
+        toast(editing ? 'Saved ✓' : 'Schedule created ✓');
+        loadRecurring();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -2362,7 +3584,9 @@
   const thisMonthISO = () => todayISO().slice(0, 7);
 
   VIEWS.achievements = async () => {
-    setMain('Achievements', 'Log your wins — daily, weekly, or monthly. Acknowledged achievements earn points that count toward bonuses.',
+    setMain(
+      'Achievements',
+      'Log your wins — daily, weekly, or monthly. Acknowledged achievements earn points that count toward bonuses.',
       `<div class="toolbar"><h2 style="margin:0;color:var(--navy);">My achievements</h2>
          <button class="btn btn-primary" id="logAchBtn">+ Log achievement</button></div>
        <div id="myAch"></div>
@@ -2370,7 +3594,8 @@
          <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Review (admin)</h2>
            <input type="month" id="achMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;"></div>
          <p class="page-sub">Pending achievements from all months stay here until reviewed. The month picker filters acknowledged and declined history only.</p><div id="reviewAch"></div>
-       </div>`);
+       </div>`,
+    );
     $('#logAchBtn').addEventListener('click', openAchievementModal);
     loadMyAchievements();
     if (isAdmin()) {
@@ -2382,17 +3607,34 @@
   async function loadMyAchievements() {
     try {
       const { achievements } = await api.get('/achievements/mine');
-      const el = $('#myAch'); if (!el) return;
-      el.innerHTML = achievements.length ? `<table><thead><tr><th>Date</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
-        ${achievements.map((a) => `<tr><td>${esc(a.date)}</td>
+      const el = $('#myAch');
+      if (!el) return;
+      el.innerHTML = achievements.length
+        ? `<table><thead><tr><th>Date</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
+        ${achievements
+          .map(
+            (a) => `<tr><td>${esc(a.date)}</td>
           <td><strong>${esc(a.title)}</strong>${a.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(a.description)}</div>` : ''}</td>
           <td>${badge(a.status)}</td><td>${a.status === 'ACKNOWLEDGED' ? `<strong>${a.points}</strong>` : '—'}</td>
-          <td>${a.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-del-ach="${a.id}">Delete</button>` : ''}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">Nothing logged yet. Hit a milestone? Log it!</div>`;
-      el.querySelectorAll('[data-del-ach]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.del(`/achievements/${b.dataset.delAch}`); toast('Deleted'); loadMyAchievements(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+          <td>${a.status === 'PENDING' ? `<button class="btn btn-ghost btn-sm" data-del-ach="${a.id}">Delete</button>` : ''}</td></tr>`,
+          )
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">Nothing logged yet. Hit a milestone? Log it!</div>`;
+      el.querySelectorAll('[data-del-ach]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.del(`/achievements/${b.dataset.delAch}`);
+            toast('Deleted');
+            loadMyAchievements();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   function openAchievementModal() {
@@ -2404,10 +3646,18 @@
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       try {
-        await api.post('/achievements', { date: $('#aDate').value, title: $('#aTitle').value, description: $('#aDesc').value });
-        closeModal(); toast('Logged ✓'); loadMyAchievements();
+        await api.post('/achievements', {
+          date: $('#aDate').value,
+          title: $('#aTitle').value,
+          description: $('#aDesc').value,
+        });
+        closeModal();
+        toast('Logged ✓');
+        loadMyAchievements();
         if (isAdmin() && $('#achMonth')) loadReviewAchievements();
-      } catch (e) { toast(e.message, true); }
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -2415,39 +3665,73 @@
     try {
       const m = $('#achMonth').value || thisMonthISO();
       const { achievements } = await api.get(`/achievements/month/${m}?include_pending=1`);
-      const el = $('#reviewAch'); if (!el) return;
-      el.innerHTML = achievements.length ? `<table><thead><tr><th>Date</th><th>Employee</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
-        ${achievements.map((a) => `<tr><td>${esc(a.date)}</td><td>${esc(a.name)}</td>
+      const el = $('#reviewAch');
+      if (!el) return;
+      el.innerHTML = achievements.length
+        ? `<table><thead><tr><th>Date</th><th>Employee</th><th>Achievement</th><th>Status</th><th>Points</th><th></th></tr></thead><tbody>
+        ${achievements
+          .map(
+            (a) => `<tr><td>${esc(a.date)}</td><td>${esc(a.name)}</td>
           <td><strong>${esc(a.title)}</strong>${a.description ? `<div style="color:var(--slate);font-size:.84rem;margin-top:3px;">${esc(a.description)}</div>` : ''}</td>
           <td>${badge(a.status)}</td>
-          <td>${a.status === 'PENDING'
-            ? `<input type="number" min="0" max="100" value="5" data-pts="${a.id}" style="width:64px;padding:6px;border:1px solid var(--line);border-radius:6px;">`
-            : (a.status === 'ACKNOWLEDGED' ? `<strong>${a.points}</strong>` : '—')}</td>
-          <td class="row-actions">${a.status === 'PENDING'
-            ? `<button class="btn btn-primary btn-sm" data-ack="${a.id}">Award</button><button class="btn btn-danger btn-sm" data-decline="${a.id}">Decline</button>`
-            : ''}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">No pending achievements. No reviewed achievements for this month.</div>`;
-      el.querySelectorAll('[data-ack]').forEach((b) => b.addEventListener('click', async () => {
-        const pts = Number(el.querySelector(`[data-pts="${b.dataset.ack}"]`)?.value || 0);
-        try { await api.post(`/achievements/${b.dataset.ack}/review`, { status: 'ACKNOWLEDGED', points: pts }); toast(`Awarded ${pts} pts ✓`); loadReviewAchievements(); loadMyAchievements(); }
-        catch (e) { toast(e.message, true); }
-      }));
-      el.querySelectorAll('[data-decline]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/achievements/${b.dataset.decline}/review`, { status: 'DECLINED' }); toast('Declined'); loadReviewAchievements(); loadMyAchievements(); }
-        catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+          <td>${
+            a.status === 'PENDING'
+              ? `<input type="number" min="0" max="100" value="5" data-pts="${a.id}" style="width:64px;padding:6px;border:1px solid var(--line);border-radius:6px;">`
+              : a.status === 'ACKNOWLEDGED'
+                ? `<strong>${a.points}</strong>`
+                : '—'
+          }</td>
+          <td class="row-actions">${
+            a.status === 'PENDING'
+              ? `<button class="btn btn-primary btn-sm" data-ack="${a.id}">Award</button><button class="btn btn-danger btn-sm" data-decline="${a.id}">Decline</button>`
+              : ''
+          }</td></tr>`,
+          )
+          .join('')}
+      </tbody></table>`
+        : `<div class="empty">No pending achievements. No reviewed achievements for this month.</div>`;
+      el.querySelectorAll('[data-ack]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const pts = Number(el.querySelector(`[data-pts="${b.dataset.ack}"]`)?.value || 0);
+          try {
+            await api.post(`/achievements/${b.dataset.ack}/review`, { status: 'ACKNOWLEDGED', points: pts });
+            toast(`Awarded ${pts} pts ✓`);
+            loadReviewAchievements();
+            loadMyAchievements();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+      el.querySelectorAll('[data-decline]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try {
+            await api.post(`/achievements/${b.dataset.decline}/review`, { status: 'DECLINED' });
+            toast('Declined');
+            loadReviewAchievements();
+            loadMyAchievements();
+          } catch (e) {
+            toast(e.message, true);
+          }
+        }),
+      );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // ---------- KPIs (admin) ----------
   VIEWS.kpi = async () => {
     if (!isAdmin()) return navigate('dashboard');
-    setMain('Monthly KPIs', 'Attendance, output, and achievement points per employee — your bonus worksheet.',
+    setMain(
+      'Monthly KPIs',
+      'Attendance, output, and achievement points per employee — your bonus worksheet.',
       `<div class="toolbar">
          <input type="month" id="kpiMonth" value="${thisMonthISO()}" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;">
          <button class="btn btn-ghost" id="kpiCsvBtn">Export CSV</button></div>
        <div id="kpiTable"></div>
-       <p class="page-sub" id="kpiNote" style="margin-top:14px;">Points come from acknowledged achievements (review them on the Achievements page). Hours exclude breaks; days a person forgot to clock out count only the recorded time.</p>`);
+       <p class="page-sub" id="kpiNote" style="margin-top:14px;">Points come from acknowledged achievements (review them on the Achievements page). Hours exclude breaks; days a person forgot to clock out count only the recorded time.</p>`,
+    );
     $('#kpiMonth').addEventListener('change', loadKpi);
     $('#kpiCsvBtn').addEventListener('click', exportKpiCsv);
     loadKpi();
@@ -2466,53 +3750,109 @@
       if (note) {
         note.innerHTML = `<strong>Punctuality</strong> = clocked in by each employee's own shift start (set on their profile${graceMin ? `, + ${graceMin} min grace` : ''}) on days present. <strong>Tasks on-time</strong> = tasks finished by their due date. Points come from acknowledged achievements. Hours exclude breaks; days a person forgot to clock out count only the recorded time.`;
       }
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
   // Render is separate from the fetch so header-click sorting is instant.
   function renderKpiTable() {
-    const el = $('#kpiTable'); if (!el) return;
+    const el = $('#kpiTable');
+    if (!el) return;
     const rows = [...KPI_ROWS];
     if (kpiSort.key) {
-      const k = kpiSort.key, d = kpiSort.dir;
+      const k = kpiSort.key,
+        d = kpiSort.dir;
       rows.sort((a, b) => {
-        const av = a[k], bv = b[k];
-        if (typeof av === 'string' || typeof bv === 'string') return d * String(av || '').localeCompare(String(bv || ''));
+        const av = a[k],
+          bv = b[k];
+        if (typeof av === 'string' || typeof bv === 'string')
+          return d * String(av || '').localeCompare(String(bv || ''));
         return d * ((av ?? -1) - (bv ?? -1)); // null on-time% sorts below 0
       });
     }
     const COLS = [
-      ['name', 'Employee'], ['daysPresent', 'Days'], ['hoursWorked', 'Hours'], ['punctualPct', 'Punctuality'],
-      ['tasksDone', 'Tasks done'], ['onTimePct', 'Tasks on-time'], ['openTasks', 'Open now'], ['leaveDays', 'Leave days'],
-      ['achievementsAcknowledged', 'Achievements'], ['points', 'Points'],
+      ['name', 'Employee'],
+      ['daysPresent', 'Days'],
+      ['hoursWorked', 'Hours'],
+      ['punctualPct', 'Punctuality'],
+      ['tasksDone', 'Tasks done'],
+      ['onTimePct', 'Tasks on-time'],
+      ['openTasks', 'Open now'],
+      ['leaveDays', 'Leave days'],
+      ['achievementsAcknowledged', 'Achievements'],
+      ['points', 'Points'],
     ];
-    const th = (k, label) => `<th class="th-sort ${kpiSort.key === k ? 'on' : ''}" data-sortk="${k}" title="Sort by ${label}">${label}<span class="si">${kpiSort.key === k ? (kpiSort.dir === 1 ? '▲' : '▼') : '↕'}</span></th>`;
-    const pctCell = (v, naTitle) => v === null ? `<span class="muted-empty" title="${naTitle}">N/A</span>` : v + '%';
-    el.innerHTML = rows.length ? `<table><thead><tr>${COLS.map(([k, l]) => th(k, l)).join('')}</tr></thead><tbody>
-      ${rows.map((r) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong>${r.invalidAttendanceDays || r.employmentWarning ? `<div style="color:var(--danger);">Attendance needs review${r.invalidAttendanceDays ? `: ${r.invalidAttendanceDays} invalid day(s) excluded` : ''}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
+    const th = (k, label) =>
+      `<th class="th-sort ${kpiSort.key === k ? 'on' : ''}" data-sortk="${k}" title="Sort by ${label}">${label}<span class="si">${kpiSort.key === k ? (kpiSort.dir === 1 ? '▲' : '▼') : '↕'}</span></th>`;
+    const pctCell = (v, naTitle) => (v === null ? `<span class="muted-empty" title="${naTitle}">N/A</span>` : v + '%');
+    el.innerHTML = rows.length
+      ? `<table><thead><tr>${COLS.map(([k, l]) => th(k, l)).join('')}</tr></thead><tbody>
+      ${rows
+        .map(
+          (
+            r,
+          ) => `<tr class="${r.points > 0 || r.hoursWorked > KPI_HOURS_HOT ? 'kpi-hot' : ''}"><td><strong>${esc(r.name)}</strong>${r.invalidAttendanceDays || r.employmentWarning ? `<div style="color:var(--danger);">Attendance needs review${r.invalidAttendanceDays ? `: ${r.invalidAttendanceDays} invalid day(s) excluded` : ''}</div>` : ''}<div style="color:var(--slate);font-size:.78rem;">${esc(r.department || '')}</div></td>
         <td>${r.daysPresent}</td><td>${r.hoursWorked}</td>
         <td>${r.punctualPct === null ? '<span class="muted-empty" title="No clock-ins this month">N/A</span>' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}" title="Shift start ${esc(r.shiftStart || '')} · ${r.lateDays} late day${r.lateDays === 1 ? '' : 's'}">${r.punctualPct}%</span>`}</td>
         <td>${r.tasksDone}</td>
         <td>${pctCell(r.onTimePct, 'No tasks with due dates finished this month')}</td><td>${r.openTasks}</td><td>${r.leaveDays}</td>
         <td>${r.achievementsAcknowledged}${r.achievementsPending ? ` <span class="badge b-pending" title="awaiting review">+${r.achievementsPending}</span>` : ''}</td>
-        <td><strong>${r.points}</strong></td></tr>`).join('')}
-    </tbody></table>` : `<div class="empty">No active employees.</div>`;
-    el.querySelectorAll('[data-sortk]').forEach((h) => h.addEventListener('click', () => {
-      const k = h.dataset.sortk;
-      if (kpiSort.key === k) kpiSort.dir = -kpiSort.dir; else kpiSort = { key: k, dir: k === 'name' ? 1 : -1 }; // numbers default high→low
-      renderKpiTable();
-    }));
+        <td><strong>${r.points}</strong></td></tr>`,
+        )
+        .join('')}
+    </tbody></table>`
+      : `<div class="empty">No active employees.</div>`;
+    el.querySelectorAll('[data-sortk]').forEach((h) =>
+      h.addEventListener('click', () => {
+        const k = h.dataset.sortk;
+        if (kpiSort.key === k) kpiSort.dir = -kpiSort.dir;
+        else kpiSort = { key: k, dir: k === 'name' ? 1 : -1 }; // numbers default high→low
+        renderKpiTable();
+      }),
+    );
   }
 
   function exportKpiCsv() {
     if (!KPI_ROWS.length) return toast('Nothing to export', true);
     const m = $('#kpiMonth').value || thisMonthISO();
-    const head = ['Name', 'Department', 'Days Present', 'Hours Worked', 'Punctuality %', 'Late Days', 'Tasks Done', 'Tasks On-Time %', 'Open Tasks', 'Leave Days', 'Achievements', 'Pending Review', 'Points', 'Invalid Attendance Days', 'Employment Warning'];
-    const lines = [head.join(',')].concat(KPI_ROWS.map((r) => [
-      csvCell(r.name), csvCell(r.department || ''),
-      r.daysPresent, r.hoursWorked, r.punctualPct === null ? '' : r.punctualPct, r.lateDays,
-      r.tasksDone, r.onTimePct === null ? '' : r.onTimePct,
-      r.openTasks, r.leaveDays, r.achievementsAcknowledged, r.achievementsPending, r.points, r.invalidAttendanceDays || 0, csvCell(r.employmentWarning || ''),
-    ].join(',')));
+    const head = [
+      'Name',
+      'Department',
+      'Days Present',
+      'Hours Worked',
+      'Punctuality %',
+      'Late Days',
+      'Tasks Done',
+      'Tasks On-Time %',
+      'Open Tasks',
+      'Leave Days',
+      'Achievements',
+      'Pending Review',
+      'Points',
+      'Invalid Attendance Days',
+      'Employment Warning',
+    ];
+    const lines = [head.join(',')].concat(
+      KPI_ROWS.map((r) =>
+        [
+          csvCell(r.name),
+          csvCell(r.department || ''),
+          r.daysPresent,
+          r.hoursWorked,
+          r.punctualPct === null ? '' : r.punctualPct,
+          r.lateDays,
+          r.tasksDone,
+          r.onTimePct === null ? '' : r.onTimePct,
+          r.openTasks,
+          r.leaveDays,
+          r.achievementsAcknowledged,
+          r.achievementsPending,
+          r.points,
+          r.invalidAttendanceDays || 0,
+          csvCell(r.employmentWarning || ''),
+        ].join(','),
+      ),
+    );
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
     a.download = `kpi-${m}.csv`;
@@ -2521,20 +3861,38 @@
   }
 
   // ---------- Reports (admin) ----------
-  const STATUS_CODE = { NOT_EMPLOYED: '—', EMPLOYMENT_UNKNOWN: '?', INVALID: '!', PRESENT: 'P', ABSENT: 'A', LEAVE: 'L', HALF: '½', HOLIDAY: 'H', WEEKEND: 'W', FUTURE: '·' };
-  Object.assign(STATUS_CODE, { HALF_HOLIDAY_PRESENT: '½H/P', HALF_HOLIDAY_ABSENT: '½H/A', HALF_HOLIDAY_LEAVE: '½H/L', HALF_HOLIDAY_WEEKEND: '½H/W' });
+  const STATUS_CODE = {
+    NOT_EMPLOYED: '—',
+    EMPLOYMENT_UNKNOWN: '?',
+    INVALID: '!',
+    PRESENT: 'P',
+    ABSENT: 'A',
+    LEAVE: 'L',
+    HALF: '½',
+    HOLIDAY: 'H',
+    WEEKEND: 'W',
+    FUTURE: '·',
+  };
+  Object.assign(STATUS_CODE, {
+    HALF_HOLIDAY_PRESENT: '½H/P',
+    HALF_HOLIDAY_ABSENT: '½H/A',
+    HALF_HOLIDAY_LEAVE: '½H/L',
+    HALF_HOLIDAY_WEEKEND: '½H/W',
+  });
   const startOfMonthISO = () => todayISO().slice(0, 8) + '01';
 
   VIEWS.reports = async () => {
     if (!isAdmin()) return navigate('dashboard');
     await loadLookups();
     const reportPeople = (await api.get('/users/manage')).users;
-    setMain('Reports', 'Attendance reports for the team. Pick a person and dates, or view the whole-month register.',
+    setMain(
+      'Reports',
+      'Attendance reports for the team. Pick a person and dates, or view the whole-month register.',
       `<div class="section">
          <div class="toolbar"><h2 style="margin:0;color:var(--navy);">Attendance — by employee</h2>
            <button class="btn btn-ghost btn-sm" id="empCsvBtn">Export CSV</button></div>
          <div class="form-row" style="max-width:680px;">
-           <div class="field"><label>Employee</label><select id="repUser">${reportPeople.map(u => `<option value="${u.id}">${esc(u.name)}${u.active ? '' : ' (inactive)'}</option>`).join('')}</select></div>
+           <div class="field"><label>Employee</label><select id="repUser">${reportPeople.map((u) => `<option value="${u.id}">${esc(u.name)}${u.active ? '' : ' (inactive)'}</option>`).join('')}</select></div>
            <div class="field"><label>From</label><input type="date" id="repStart" value="${startOfMonthISO()}"></div>
          </div>
          <div class="form-row" style="max-width:680px;">
@@ -2556,7 +3914,8 @@
          </div>
          <p class="page-sub" style="margin:0 0 12px;">P = present · L = leave · ½ = half-day leave · H = holiday · ½H/P, A, L or W = half-day holiday + remaining half · W = weekend · A = absent · — = outside employment · ? = employment dates need review · ! = invalid punches · · = upcoming</p>
          <div id="regGrid" style="overflow-x:auto;"></div>
-       </div>`);
+       </div>`,
+    );
     $('#repRun').addEventListener('click', loadEmpReport);
     $('#empCsvBtn').addEventListener('click', exportEmpCsv);
     $('#regMonth').addEventListener('change', loadRegister);
@@ -2569,25 +3928,36 @@
   let EMP_REPORT = null;
   async function loadEmpReport() {
     try {
-      const uid = $('#repUser').value, start = $('#repStart').value, end = $('#repEnd').value;
+      const uid = $('#repUser').value,
+        start = $('#repStart').value,
+        end = $('#repEnd').value;
       const data = await api.get(`/reports/attendance?user_id=${uid}&start=${start}&end=${end}`);
       EMP_REPORT = data;
       const t = data.totals;
-      $('#repTotals').innerHTML = `<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));">
+      $('#repTotals').innerHTML =
+        `<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));">
         ${data.needsReview ? '<p style="color:var(--danger);">Review flagged dates before using these totals.</p>' : ''}${statCard('Present', t.present, 'value small')}${statCard('Leave', t.leave, 'value small')}
         ${statCard('Absent', t.absent, 'value small')}${statCard('Holidays', t.holiday, 'value small')}
         ${statCard('Hours worked', fmtMins(t.workedMinutes), 'value small')}</div>`;
-      $('#repTable').innerHTML = `<table class="dense"><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
-        ${data.rows.map((r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
+      $('#repTable').innerHTML =
+        `<table class="dense"><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>First In</th><th>Last Out</th><th>Worked</th><th>Break</th><th></th></tr></thead><tbody>
+        ${data.rows
+          .map(
+            (r) => `<tr><td>${esc(r.day)}</td><td>${esc(r.weekday)}</td>
           <td>${badge(r.status)}${r.attendanceError || r.employmentWarning || r.configWarning ? `<div style="color:var(--danger);">${esc(r.attendanceError || r.employmentWarning || r.configWarning)}</div>` : ''}${r.holidayName ? ` <span style="color:var(--slate);font-size:.8rem;">${esc(r.holidayName)}</span>` : ''}</td>
           <td>${attendanceTime(r.firstIn, r.timezone)}</td>
           <td>${attendanceTime(r.lastOut, r.timezone)}</td>
           <td>${r.workedMinutes ? fmtMins(r.workedMinutes) : '—'}</td><td>${r.breakMinutes ? fmtMins(r.breakMinutes) : '—'}</td>
-          <td>${['FUTURE', 'NOT_EMPLOYED'].includes(r.status) ? '' : `<button class="btn-fix" data-fix-day="${r.day}" title="Correct this day's punches">Fix</button>`}</td></tr>`).join('')}
+          <td>${['FUTURE', 'NOT_EMPLOYED'].includes(r.status) ? '' : `<button class="btn-fix" data-fix-day="${r.day}" title="Correct this day's punches">Fix</button>`}</td></tr>`,
+          )
+          .join('')}
       </tbody></table>`;
-      $('#repTable').querySelectorAll('[data-fix-day]').forEach((b) =>
-        b.addEventListener('click', () => openAttendanceEditor(data.user.id, b.dataset.fixDay)));
-    } catch (e) { toast(e.message, true); }
+      $('#repTable')
+        .querySelectorAll('[data-fix-day]')
+        .forEach((b) => b.addEventListener('click', () => openAttendanceEditor(data.user.id, b.dataset.fixDay)));
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // Admin modal to add/edit/delete an employee's punches for one day.
@@ -2602,29 +3972,48 @@
   async function renderAttendanceEditor(userId, day, onDone, performanceRow, employee) {
     const body = $('#fixBody');
     let data;
-    try { data = await api.get(`/attendance/admin/day?user_id=${userId}&day=${day}`); }
-    catch (e) { return toast(e.message, true); }
-    const typeOpts = (sel) => ['IN', 'OUT', 'BREAK_START', 'BREAK_END']
-      .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`).join('');
+    try {
+      data = await api.get(`/attendance/admin/day?user_id=${userId}&day=${day}`);
+    } catch (e) {
+      return toast(e.message, true);
+    }
+    const typeOpts = (sel) =>
+      ['IN', 'OUT', 'BREAK_START', 'BREAK_END']
+        .map((t) => `<option value="${t}" ${t === sel ? 'selected' : ''}>${cap(t.replace('_', ' '))}</option>`)
+        .join('');
     if (!body?.isConnected) return;
     const target = employee?.role === 'EMPLOYEE' ? { user: employee, day } : null;
     const future = performanceRow?.status === 'FUTURE';
     const explanation = performanceRow?.lateExplanation;
     const existingFullLeave = target && performanceRow?.leaveKind === 'FULL' ? performanceRow.approvedLeave : null;
-    const punchControls = future ? '' : `${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${data.events.length ? `<div class="attendance-punches">
-        ${data.events.map((e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
+    const punchControls = future
+      ? ''
+      : `${data.error ? `<p style="color:var(--danger);" role="alert">${esc(data.error)}</p>` : ''}${
+          data.events.length
+            ? `<div class="attendance-punches">
+        ${data.events
+          .map(
+            (e, i) => `<div class="attendance-punch-row" role="group" aria-label="Punch ${i + 1}">
           <div class="field attendance-punch-type"><label for="fixType${e.id}">Punch type</label><select id="fixType${e.id}" data-etype="${e.id}">${typeOpts(e.type)}</select>
             ${e.break_type ? `<div class="attendance-editor-hint">${esc(BREAK_LABEL[e.break_type])}${e.break_reason ? ' · ' + esc(e.break_reason) : ''}</div>` : ''}</div>
           <div class="field"><label for="fixDate${e.id}">Date</label><input id="fixDate${e.id}" type="date" data-edate="${e.id}" value="${esc(e.event_date)}"></div>
           <div class="field"><label for="fixTime${e.id}">Time</label><input id="fixTime${e.id}" type="time" data-etime="${e.id}" value="${esc(e.time)}"></div>
           <div class="attendance-punch-actions"><button class="btn btn-primary btn-sm" data-esave="${e.id}" aria-label="Save punch ${i + 1}">Save</button><button class="btn btn-danger btn-sm" data-edel="${e.id}" aria-label="Delete punch ${i + 1}">Delete</button></div>
-        </div>`).join('')}
-      </div>` : `<div class="empty attendance-editor-empty">No punches recorded for this day.</div>`}
-      ${performanceRow && (performanceRow.late || performanceRow.lateOverride || data.lateNormal) ? `
+        </div>`,
+          )
+          .join('')}
+      </div>`
+            : `<div class="empty attendance-editor-empty">No punches recorded for this day.</div>`
+        }
+      ${
+        performanceRow && (performanceRow.late || performanceRow.lateOverride || data.lateNormal)
+          ? `
         <div class="attendance-punctuality">
           <div><strong>Punctuality</strong><div class="attendance-editor-hint">${data.lateNormal ? 'This day is treated as Normal by admin override.' : 'This clock-in is currently counted as Late.'}</div></div>
           <button class="btn ${data.lateNormal ? 'btn-ghost' : 'btn-primary'} btn-sm" id="lateNormalBtn">${data.lateNormal ? 'Restore late status' : 'Mark late as normal'}</button>
-        </div>` : ''}
+        </div>`
+          : ''
+      }
       <section class="attendance-add-punch" aria-labelledby="addPunchTitle">
         <h4 id="addPunchTitle">Add a punch</h4>
         <p class="attendance-editor-hint" id="punchDateHint">Use the actual calendar date for overnight punches. Leave the date blank to infer it from the workday. Times use ${esc(data.timezone)}.</p>
@@ -2637,22 +4026,36 @@
       </section>`;
     body.innerHTML = `
       <p class="attendance-editor-summary"><strong>${esc(data.user.name)}</strong> · ${esc(day)} · ${esc(data.timezone)} · Worked ${data.valid === false ? 'Needs review' : fmtMins(data.workedMinutes)} · now <strong>${cap(data.state)}</strong></p>
-      ${explanation ? `<section class="date-explanation" aria-label="Late explanation">
+      ${
+        explanation
+          ? `<section class="date-explanation" aria-label="Late explanation">
         <strong>Late explanation · ${explanation.minutes_late} min</strong> ${badge(explanation.status)}
         <p>${esc(explanation.reason)}</p>
         ${explanation.status === 'RESOLVED' ? `<p>${lateResolutionLabel(explanation)}</p>` : ''}
         ${explanation.status === 'PENDING' ? '<button class="btn btn-primary btn-sm" id="fixApproveLate">Approve explanation</button>' : ''}
-      </section>` : performanceRow?.late ? `<p>Late by ${performanceRow.minutesLate} min</p>` : ''}
-      ${target ? `<section class="date-action-panel" aria-label="Mark this date">
+      </section>`
+          : performanceRow?.late
+            ? `<p>Late by ${performanceRow.minutesLate} min</p>`
+            : ''
+      }
+      ${
+        target
+          ? `<section class="date-action-panel" aria-label="Mark this date">
         <strong>Mark this date</strong>
-        ${existingFullLeave ? '<button class="btn btn-primary btn-sm" id="fixAdjustLeave">Adjust to half day</button>' : `<div class="date-action-tabs">
+        ${
+          existingFullLeave
+            ? '<button class="btn btn-primary btn-sm" id="fixAdjustLeave">Adjust to half day</button>'
+            : `<div class="date-action-tabs">
           <button id="fixWorkedFull" ${future || !data.firstIn || data.fullDay ? 'disabled' : ''}><strong>Full day</strong><span>Excuse lateness</span></button>
           <button id="fixHalfLeave"><strong>Half day</strong><span>0.5 day of leave</span></button>
           <button id="fixShortDay" ${performanceRow?.approvedShortDay ? 'disabled' : ''}><strong>Short day</strong><span>${performanceRow?.approvedShortDay ? 'Already approved' : 'Mark as approved'}</span></button>
           <button id="fixFullLeave"><strong>Leave</strong><span>1 day of leave</span></button>
-        </div>`}
+        </div>`
+        }
         <p id="fixDateError" role="alert"></p>
-      </section>` : ''}
+      </section>`
+          : ''
+      }
       ${target && punchControls ? `<details class="date-punch-details"><summary>Time punches and corrections</summary>${punchControls}</details>` : punchControls}
       <div class="modal-actions"><button class="btn btn-primary" id="fixDone">Done</button></div>`;
 
@@ -2671,41 +4074,85 @@
       toast(message);
       if (onDone) await onDone();
     }
-    $('#fixApproveLate')?.addEventListener('click', event => saveDateAction(event.currentTarget,
-      `/reports/late-explanations/${explanation.id}/approve`, {}, 'Explanation approved'));
-    $('#fixWorkedFull')?.addEventListener('click', event => saveDateAction(event.currentTarget,
-      '/attendance/admin/full-day', { user_id: userId, day }, 'Full day recorded'));
+    $('#fixApproveLate')?.addEventListener('click', (event) =>
+      saveDateAction(
+        event.currentTarget,
+        `/reports/late-explanations/${explanation.id}/approve`,
+        {},
+        'Explanation approved',
+      ),
+    );
+    $('#fixWorkedFull')?.addEventListener('click', (event) =>
+      saveDateAction(event.currentTarget, '/attendance/admin/full-day', { user_id: userId, day }, 'Full day recorded'),
+    );
     $('#fixAdjustLeave')?.addEventListener('click', () => openHalfDayAdjustment(target, existingFullLeave));
     $('#fixFullLeave')?.addEventListener('click', () => openMarkLeaveModal(target));
     $('#fixHalfLeave')?.addEventListener('click', () => openMarkLeaveModal(target, 'HALF'));
-    $('#fixShortDay')?.addEventListener('click', event => saveDateAction(event.currentTarget,
-      '/short-days/admin', { user_id: userId, date: day }, 'Short Day marked'));
+    $('#fixShortDay')?.addEventListener('click', (event) =>
+      saveDateAction(event.currentTarget, '/short-days/admin', { user_id: userId, date: day }, 'Short Day marked'),
+    );
     $('#lateNormalBtn')?.addEventListener('click', async () => {
       try {
         await api.post('/attendance/admin/late-normal', { user_id: userId, day, normal: !data.lateNormal });
         toast(data.lateNormal ? 'Automatic late status restored' : 'Marked as normal ✓');
         if (onDone) await onDone();
         renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
-      } catch (e) { toast(e.message, true); }
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
-    body.querySelectorAll('[data-esave]').forEach((b) => b.addEventListener('click', async () => {
-      const id = b.dataset.esave;
-      try {
-        await api.put(`/attendance/admin/event/${id}`, { type: body.querySelector(`[data-etype="${id}"]`).value, event_date: body.querySelector(`[data-edate="${id}"]`).value, time: body.querySelector(`[data-etime="${id}"]`).value });
-        toast('Saved ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
-      } catch (e) { toast(e.message, true); }
-    }));
-    body.querySelectorAll('[data-edel]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.del(`/attendance/admin/event/${b.dataset.edel}`); toast('Deleted'); renderAttendanceEditor(userId, day, onDone, performanceRow, employee); }
-      catch (e) { toast(e.message, true); }
-    }));
+    body.querySelectorAll('[data-esave]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const id = b.dataset.esave;
+        try {
+          await api.put(`/attendance/admin/event/${id}`, {
+            type: body.querySelector(`[data-etype="${id}"]`).value,
+            event_date: body.querySelector(`[data-edate="${id}"]`).value,
+            time: body.querySelector(`[data-etime="${id}"]`).value,
+          });
+          toast('Saved ✓');
+          renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
+    body.querySelectorAll('[data-edel]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        try {
+          await api.del(`/attendance/admin/event/${b.dataset.edel}`);
+          toast('Deleted');
+          renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
     $('#addPunch')?.addEventListener('click', async () => {
       const time = $('#newTime').value;
       if (!time) return toast('Pick a time', true);
-      try { await api.post('/attendance/admin/event', { user_id: userId, day, type: $('#newType').value, time, event_date: $('#newEventDate').value || undefined }); toast('Added ✓'); renderAttendanceEditor(userId, day, onDone, performanceRow, employee); }
-      catch (e) { toast(e.message, true); }
+      try {
+        await api.post('/attendance/admin/event', {
+          user_id: userId,
+          day,
+          type: $('#newType').value,
+          time,
+          event_date: $('#newEventDate').value || undefined,
+        });
+        toast('Added ✓');
+        renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
-    $('#fixDone').addEventListener('click', () => { closeModal(); if (onDone) onDone(); else { loadEmpReport(); loadRegister(); } });
+    $('#fixDone').addEventListener('click', () => {
+      closeModal();
+      if (onDone) onDone();
+      else {
+        loadEmpReport();
+        loadRegister();
+      }
+    });
   }
 
   function openHalfDayAdjustment(target, leave) {
@@ -2719,7 +4166,8 @@
         <button class="btn btn-primary" id="adjustLeaveSave">Save half-day adjustment</button>
       </div>`);
     $('#adjustLeaveCancel').addEventListener('click', closeModal);
-    const save = $('#adjustLeaveSave'), error = $('#adjustLeaveError');
+    const save = $('#adjustLeaveSave'),
+      error = $('#adjustLeaveError');
     save.addEventListener('click', async () => {
       save.disabled = true;
       error.textContent = '';
@@ -2739,13 +4187,24 @@
   function exportEmpCsv() {
     if (!EMP_REPORT) return toast('Run a report first', true);
     const head = ['Date', 'Day', 'Status', 'First In', 'Last Out', 'Worked (min)', 'Break (min)', 'Review Warning'];
-    const lines = [head.join(',')].concat(EMP_REPORT.rows.map((r) => [
-      r.day, r.weekday, r.status,
-      csvCell(r.firstIn ? attendanceTime(r.firstIn, r.timezone) : ''),
-      csvCell(r.lastOut ? attendanceTime(r.lastOut, r.timezone) : ''),
-      r.workedMinutes, r.breakMinutes, csvCell(r.attendanceError || r.employmentWarning || r.configWarning || ''),
-    ].join(',')));
-    downloadCsv(lines.join('\n'), `attendance-${EMP_REPORT.user.name.replace(/\s+/g, '_')}-${EMP_REPORT.start}_to_${EMP_REPORT.end}.csv`);
+    const lines = [head.join(',')].concat(
+      EMP_REPORT.rows.map((r) =>
+        [
+          r.day,
+          r.weekday,
+          r.status,
+          csvCell(r.firstIn ? attendanceTime(r.firstIn, r.timezone) : ''),
+          csvCell(r.lastOut ? attendanceTime(r.lastOut, r.timezone) : ''),
+          r.workedMinutes,
+          r.breakMinutes,
+          csvCell(r.attendanceError || r.employmentWarning || r.configWarning || ''),
+        ].join(','),
+      ),
+    );
+    downloadCsv(
+      lines.join('\n'),
+      `attendance-${EMP_REPORT.user.name.replace(/\s+/g, '_')}-${EMP_REPORT.start}_to_${EMP_REPORT.end}.csv`,
+    );
   }
 
   let REGISTER = null;
@@ -2754,18 +4213,38 @@
       const month = $('#regMonth').value || thisMonthISO();
       const data = await api.get(`/reports/register?month=${month}`);
       REGISTER = data;
-      const workingSet = {}; (data.workingDays || []).forEach((w) => { workingSet[w.date] = true; });
+      const workingSet = {};
+      (data.workingDays || []).forEach((w) => {
+        workingSet[w.date] = true;
+      });
       $('#regGrid').innerHTML = `<table style="min-width:max-content;"><thead><tr>
           <th style="position:sticky;left:0;background:var(--mist);">Employee</th>
-          ${data.days.map((d) => { const wd = new Date(d + 'T00:00').getDay(); const wknd = (wd === 0 || wd === 6) && !workingSet[d]; return `<th style="text-align:center;padding:8px 6px;${wknd ? 'color:#b6c2cf;' : ''}${workingSet[d] ? 'color:var(--teal-dark);' : ''}">${d.slice(8)}</th>`; }).join('')}
+          ${data.days
+            .map((d) => {
+              const wd = new Date(d + 'T00:00').getDay();
+              const wknd = (wd === 0 || wd === 6) && !workingSet[d];
+              return `<th style="text-align:center;padding:8px 6px;${wknd ? 'color:#b6c2cf;' : ''}${workingSet[d] ? 'color:var(--teal-dark);' : ''}">${d.slice(8)}</th>`;
+            })
+            .join('')}
           <th style="text-align:center;">P</th><th style="text-align:center;">L</th><th style="text-align:center;">A</th></tr></thead><tbody>
-        ${data.users.map((u) => `<tr>
+        ${data.users
+          .map(
+            (u) => `<tr>
           <td style="position:sticky;left:0;background:var(--white);font-weight:600;white-space:nowrap;">${esc(u.name)}</td>
-          ${data.days.map((d) => { const s = u.cells[d]; return `<td style="text-align:center;padding:6px;${regCellStyle(s)}" title="${d}: ${cap(s)}">${STATUS_CODE[s] || ''}</td>`; }).join('')}
-          <td style="text-align:center;font-weight:700;">${u.totals.present}</td><td style="text-align:center;">${u.totals.leave}</td><td style="text-align:center;color:var(--danger);">${u.totals.absent}</td></tr>`).join('')}
+          ${data.days
+            .map((d) => {
+              const s = u.cells[d];
+              return `<td style="text-align:center;padding:6px;${regCellStyle(s)}" title="${d}: ${cap(s)}">${STATUS_CODE[s] || ''}</td>`;
+            })
+            .join('')}
+          <td style="text-align:center;font-weight:700;">${u.totals.present}</td><td style="text-align:center;">${u.totals.leave}</td><td style="text-align:center;color:var(--danger);">${u.totals.absent}</td></tr>`,
+          )
+          .join('')}
       </tbody></table>`;
       renderWorkingDays(data.workingDays || [], month);
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // First Saturday of a yyyy-mm month, as yyyy-mm-dd.
@@ -2775,19 +4254,40 @@
     return d.toLocaleDateString('en-CA');
   }
   function renderWorkingDays(list, month) {
-    const date = $('#wdDate'); if (date) date.value = firstSaturday(month);
-    const el = $('#wdList'); if (!el) return;
-    el.innerHTML = list.map((w) => `<span class="badge b-present" style="display:inline-flex;gap:6px;align-items:center;">${esc(w.date)}
-      <span data-wddel="${w.id}" title="remove" style="cursor:pointer;font-weight:700;">✕</span></span>`).join('');
-    el.querySelectorAll('[data-wddel]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.del(`/workingdays/${b.dataset.wddel}`); toast('Removed'); loadRegister(); loadEmpReport(); } catch (e) { toast(e.message, true); }
-    }));
+    const date = $('#wdDate');
+    if (date) date.value = firstSaturday(month);
+    const el = $('#wdList');
+    if (!el) return;
+    el.innerHTML = list
+      .map(
+        (w) => `<span class="badge b-present" style="display:inline-flex;gap:6px;align-items:center;">${esc(w.date)}
+      <span data-wddel="${w.id}" title="remove" style="cursor:pointer;font-weight:700;">✕</span></span>`,
+      )
+      .join('');
+    el.querySelectorAll('[data-wddel]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        try {
+          await api.del(`/workingdays/${b.dataset.wddel}`);
+          toast('Removed');
+          loadRegister();
+          loadEmpReport();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
   }
   async function addWorkingDay() {
     const date = $('#wdDate').value;
     if (!date) return toast('Pick a date', true);
-    try { await api.post('/workingdays', { date }); toast('Marked as working day ✓'); loadRegister(); loadEmpReport(); }
-    catch (e) { toast(e.message, true); }
+    try {
+      await api.post('/workingdays', { date });
+      toast('Marked as working day ✓');
+      loadRegister();
+      loadEmpReport();
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   function regCellStyle(status) {
@@ -2795,8 +4295,10 @@
     const map = {
       PRESENT: 'background:#dff5ee;color:var(--teal-dark);font-weight:700;',
       ABSENT: 'background:#fdecea;color:var(--danger);font-weight:700;',
-      LEAVE: 'background:#fdf1d8;color:#9a6b00;', HALF: 'background:#fdf1d8;color:#9a6b00;',
-      HOLIDAY: 'background:#e3eefb;color:var(--info);', WEEKEND: 'background:var(--mist);color:#b6c2cf;',
+      LEAVE: 'background:#fdf1d8;color:#9a6b00;',
+      HALF: 'background:#fdf1d8;color:#9a6b00;',
+      HOLIDAY: 'background:#e3eefb;color:var(--info);',
+      WEEKEND: 'background:var(--mist);color:#b6c2cf;',
       FUTURE: 'color:#cdd7e1;',
     };
     return map[status] || '';
@@ -2804,10 +4306,17 @@
 
   function exportRegisterCsv() {
     if (!REGISTER) return toast('Nothing to export', true);
-    const head = ['Employee', 'Department'].concat(REGISTER.days.map((d) => d.slice(8))).concat(['Present', 'Leave', 'Absent']);
-    const lines = [head.join(',')].concat(REGISTER.users.map((u) => [
-      csvCell(u.name), csvCell(u.department || ''),
-    ].concat(REGISTER.days.map((d) => STATUS_CODE[u.cells[d]] || '')).concat([u.totals.present, u.totals.leave, u.totals.absent]).join(',')));
+    const head = ['Employee', 'Department']
+      .concat(REGISTER.days.map((d) => d.slice(8)))
+      .concat(['Present', 'Leave', 'Absent']);
+    const lines = [head.join(',')].concat(
+      REGISTER.users.map((u) =>
+        [csvCell(u.name), csvCell(u.department || '')]
+          .concat(REGISTER.days.map((d) => STATUS_CODE[u.cells[d]] || ''))
+          .concat([u.totals.present, u.totals.leave, u.totals.absent])
+          .join(','),
+      ),
+    );
     downloadCsv(lines.join('\n'), `attendance-register-${REGISTER.month}.csv`);
   }
 
@@ -2822,84 +4331,167 @@
   function downloadCsv(text, filename) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
-    a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   // ---------- Private bonus history ----------
   let bonusMonth = '';
   VIEWS.bonuses = async () => {
     if (!isAdmin()) return;
-    setMain('Bonus history', 'Admin only · Record bonuses already paid and review previous recipients before choosing this month’s employees.', '<div id="bonusContent">Loading…</div>');
+    setMain(
+      'Bonus history',
+      'Admin only · Record bonuses already paid and review previous recipients before choosing this month’s employees.',
+      '<div id="bonusContent">Loading…</div>',
+    );
     try {
       const data = await api.get('/bonuses' + (bonusMonth ? '?month=' + encodeURIComponent(bonusMonth) : ''));
       if (!$('#bonusContent')) return;
       bonusMonth = data.month;
-      const previous = new Date(bonusMonth + '-01T12:00:00'); previous.setMonth(previous.getMonth() - 1);
+      const previous = new Date(bonusMonth + '-01T12:00:00');
+      previous.setMonth(previous.getMonth() - 1);
       const prevMonth = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2, '0');
       previous.setMonth(previous.getMonth() - 1);
       const twoMonthsAgo = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2, '0');
-      const recentLabel = u => u.last_bonus_month === bonusMonth ? 'Already recorded this month' : u.last_bonus_month === prevMonth ? 'Received last month' : u.last_bonus_month === twoMonthsAgo ? 'Received two months ago' : '';
-      $('#bonusContent').innerHTML = `<div class="toolbar"><div class="field"><label for="bonusMonth">Review month</label><input id="bonusMonth" type="month" value="${esc(bonusMonth)}" max="${data.today.slice(0,7)}"></div><button class="btn btn-primary" id="recordBonus">+ Record paid bonus</button></div>
+      const recentLabel = (u) =>
+        u.last_bonus_month === bonusMonth
+          ? 'Already recorded this month'
+          : u.last_bonus_month === prevMonth
+            ? 'Received last month'
+            : u.last_bonus_month === twoMonthsAgo
+              ? 'Received two months ago'
+              : '';
+      $('#bonusContent').innerHTML =
+        `<div class="toolbar"><div class="field"><label for="bonusMonth">Review month</label><input id="bonusMonth" type="month" value="${esc(bonusMonth)}" max="${data.today.slice(0, 7)}"></div><button class="btn btn-primary" id="recordBonus">+ Record paid bonus</button></div>
         <p class="page-sub">Latest bonus and counts are shown through the selected month. Employees with no recorded bonus appear first, then the longest waiting. “No record” does not mean they never received a bonus; add past payments to build the history.</p>
-        <div class="section"><h2>Employee overview</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest bonus month</th><th>Bonuses recorded</th><th>Reminder</th></tr></thead><tbody>${data.employees.map(u => `<tr><td>${esc(u.name)}${u.active ? '' : ' (inactive)'}</td><td>${esc(u.last_bonus_month || 'No record')}</td><td>${u.bonus_count}</td><td>${esc(recentLabel(u))}</td></tr>`).join('')}</tbody></table></div></div>
+        <div class="section"><h2>Employee overview</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Latest bonus month</th><th>Bonuses recorded</th><th>Reminder</th></tr></thead><tbody>${data.employees.map((u) => `<tr><td>${esc(u.name)}${u.active ? '' : ' (inactive)'}</td><td>${esc(u.last_bonus_month || 'No record')}</td><td>${u.bonus_count}</td><td>${esc(recentLabel(u))}</td></tr>`).join('')}</tbody></table></div></div>
         <div class="section"><h2>Payment history</h2><label for="bonusHistoryScope">Show</label> <select id="bonusHistoryScope"><option value="month">Selected month</option><option value="all">All months</option></select><div id="bonusHistory"></div></div>`;
       const renderHistory = () => {
-        const rows = data.history.filter(b => $('#bonusHistoryScope').value === 'all' || b.month === bonusMonth);
-        $('#bonusHistory').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Month</th><th>Employee</th><th>Paid on</th><th>Notes</th><th>Recorded by</th><th>Status</th></tr></thead><tbody>${rows.map(b => `<tr><td>${esc(b.month)}</td><td>${esc(b.name)}</td><td>${esc(fmtDate(b.paid_on))}</td><td>${esc(b.note)}</td><td>${esc(b.recorded_by)}</td><td>${b.voided_ts ? `Voided by ${esc(b.voided_by_name)}: ${esc(b.void_reason)}` : `<button class="btn btn-ghost btn-sm" data-void-bonus="${b.id}">Void incorrect record</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No bonus payments recorded for this period.</div>';
-        document.querySelectorAll('[data-void-bonus]').forEach(button => button.addEventListener('click', () => {
-          modal('<h3>Void incorrect bonus record</h3><p>The original record stays in history. This does not reverse a payment. You can record a corrected entry afterwards.</p><div class="field"><label for="bonusReason">Reason</label><textarea id="bonusReason" maxlength="1000"></textarea></div><div class="modal-actions"><button class="btn btn-ghost" id="bonusCancel">Cancel</button><button class="btn btn-danger" id="bonusVoid">Void record</button></div>');
-          $('#bonusCancel').onclick = closeModal;
-          $('#bonusVoid').onclick = async () => {
-            const btn = $('#bonusVoid'); btn.disabled = true;
-            try { await api.post('/bonuses/' + button.dataset.voidBonus + '/void', { reason: $('#bonusReason').value }); closeModal(); toast('Record voided'); VIEWS.bonuses(); }
-            catch (e) { toast(e.message, true); btn.disabled = false; }
-          };
-        }));
+        const rows = data.history.filter((b) => $('#bonusHistoryScope').value === 'all' || b.month === bonusMonth);
+        $('#bonusHistory').innerHTML = rows.length
+          ? `<div class="table-wrap"><table><thead><tr><th>Month</th><th>Employee</th><th>Paid on</th><th>Notes</th><th>Recorded by</th><th>Status</th></tr></thead><tbody>${rows.map((b) => `<tr><td>${esc(b.month)}</td><td>${esc(b.name)}</td><td>${esc(fmtDate(b.paid_on))}</td><td>${esc(b.note)}</td><td>${esc(b.recorded_by)}</td><td>${b.voided_ts ? `Voided by ${esc(b.voided_by_name)}: ${esc(b.void_reason)}` : `<button class="btn btn-ghost btn-sm" data-void-bonus="${b.id}">Void incorrect record</button>`}</td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty">No bonus payments recorded for this period.</div>';
+        document.querySelectorAll('[data-void-bonus]').forEach((button) =>
+          button.addEventListener('click', () => {
+            modal(
+              '<h3>Void incorrect bonus record</h3><p>The original record stays in history. This does not reverse a payment. You can record a corrected entry afterwards.</p><div class="field"><label for="bonusReason">Reason</label><textarea id="bonusReason" maxlength="1000"></textarea></div><div class="modal-actions"><button class="btn btn-ghost" id="bonusCancel">Cancel</button><button class="btn btn-danger" id="bonusVoid">Void record</button></div>',
+            );
+            $('#bonusCancel').onclick = closeModal;
+            $('#bonusVoid').onclick = async () => {
+              const btn = $('#bonusVoid');
+              btn.disabled = true;
+              try {
+                await api.post('/bonuses/' + button.dataset.voidBonus + '/void', { reason: $('#bonusReason').value });
+                closeModal();
+                toast('Record voided');
+                VIEWS.bonuses();
+              } catch (e) {
+                toast(e.message, true);
+                btn.disabled = false;
+              }
+            };
+          }),
+        );
       };
-      renderHistory(); $('#bonusHistoryScope').onchange = renderHistory;
-      $('#bonusMonth').onchange = e => { if (e.target.value) { bonusMonth = e.target.value; VIEWS.bonuses(); } };
+      renderHistory();
+      $('#bonusHistoryScope').onchange = renderHistory;
+      $('#bonusMonth').onchange = (e) => {
+        if (e.target.value) {
+          bonusMonth = e.target.value;
+          VIEWS.bonuses();
+        }
+      };
       $('#recordBonus').onclick = () => {
-        modal(`<h3>Record paid bonus</h3><p>Select one to three employees. Recent recipients are highlighted for your review; the final choice stays with you.</p><div class="form-row"><div class="field"><label for="bonusFor">Bonus for month</label><input type="month" id="bonusFor" value="${esc(bonusMonth)}" readonly></div><div class="field"><label for="bonusPaid">Actual payment date</label><input type="date" id="bonusPaid" value="${data.today}" max="${data.today}"></div></div><fieldset style="max-height:260px;overflow:auto;"><legend>Recipients</legend>${data.employees.map(u => `<label style="display:block;padding:8px;"><input type="checkbox" name="bonusRecipient" value="${u.id}" ${u.last_bonus_month === bonusMonth ? 'disabled' : ''}> ${esc(u.name)}${u.active ? '' : ' (inactive)'} · Last: ${esc(u.last_bonus_month || 'No record')}${recentLabel(u) ? ` · ${esc(recentLabel(u))}` : ''}</label>`).join('')}</fieldset><div class="field"><label for="bonusNote">Notes (optional)</label><textarea id="bonusNote" maxlength="1000" placeholder="Payment reference or reason for bonus"></textarea></div><div class="modal-actions"><button class="btn btn-ghost" id="bonusCancel">Cancel</button><button class="btn btn-primary" id="bonusSave">Save payment record</button></div>`);
+        modal(
+          `<h3>Record paid bonus</h3><p>Select one to three employees. Recent recipients are highlighted for your review; the final choice stays with you.</p><div class="form-row"><div class="field"><label for="bonusFor">Bonus for month</label><input type="month" id="bonusFor" value="${esc(bonusMonth)}" readonly></div><div class="field"><label for="bonusPaid">Actual payment date</label><input type="date" id="bonusPaid" value="${data.today}" max="${data.today}"></div></div><fieldset style="max-height:260px;overflow:auto;"><legend>Recipients</legend>${data.employees.map((u) => `<label style="display:block;padding:8px;"><input type="checkbox" name="bonusRecipient" value="${u.id}" ${u.last_bonus_month === bonusMonth ? 'disabled' : ''}> ${esc(u.name)}${u.active ? '' : ' (inactive)'} · Last: ${esc(u.last_bonus_month || 'No record')}${recentLabel(u) ? ` · ${esc(recentLabel(u))}` : ''}</label>`).join('')}</fieldset><div class="field"><label for="bonusNote">Notes (optional)</label><textarea id="bonusNote" maxlength="1000" placeholder="Payment reference or reason for bonus"></textarea></div><div class="modal-actions"><button class="btn btn-ghost" id="bonusCancel">Cancel</button><button class="btn btn-primary" id="bonusSave">Save payment record</button></div>`,
+        );
         $('#bonusCancel').onclick = closeModal;
         $('#bonusSave').onclick = async () => {
-          const ids = [...document.querySelectorAll('input[name="bonusRecipient"]:checked')].map(el => Number(el.value));
+          const ids = [...document.querySelectorAll('input[name="bonusRecipient"]:checked')].map((el) =>
+            Number(el.value),
+          );
           if (!ids.length || ids.length > 3) return toast('Choose one to three employees', true);
-          const btn = $('#bonusSave'); btn.disabled = true;
-          try { await api.post('/bonuses', { month: bonusMonth, paid_on: $('#bonusPaid').value, user_ids: ids, note: $('#bonusNote').value }); closeModal(); toast('Bonus payment recorded'); VIEWS.bonuses(); }
-          catch (e) { toast(e.message, true); btn.disabled = false; }
+          const btn = $('#bonusSave');
+          btn.disabled = true;
+          try {
+            await api.post('/bonuses', {
+              month: bonusMonth,
+              paid_on: $('#bonusPaid').value,
+              user_ids: ids,
+              note: $('#bonusNote').value,
+            });
+            closeModal();
+            toast('Bonus payment recorded');
+            VIEWS.bonuses();
+          } catch (e) {
+            toast(e.message, true);
+            btn.disabled = false;
+          }
         };
       };
-    } catch (e) { if ($('#bonusContent')) $('#bonusContent').textContent = 'Unable to load bonus history. Please reopen this page to retry.'; toast(e.message, true); }
+    } catch (e) {
+      if ($('#bonusContent'))
+        $('#bonusContent').textContent = 'Unable to load bonus history. Please reopen this page to retry.';
+      toast(e.message, true);
+    }
   };
 
   // ---------- Calendar / Holidays ----------
-  let calMonth = new Date().getMonth(), calYear = new Date().getFullYear();
+  let calMonth = new Date().getMonth(),
+    calYear = new Date().getFullYear();
   VIEWS.calendar = async () => {
-    setMain('Holiday Calendar', 'Company holidays for the year.',
+    setMain(
+      'Holiday Calendar',
+      'Company holidays for the year.',
       `<div class="admin-only toolbar"><div></div><button class="btn btn-primary" id="addHolidayBtn">+ Add holiday</button></div>
        <div id="calBox"></div>
-       <div class="section" style="margin-top:24px;"><h2>All holidays</h2><div id="holidayList"></div></div>`);
+       <div class="section" style="margin-top:24px;"><h2>All holidays</h2><div id="holidayList"></div></div>`,
+    );
     if (isAdmin()) $('#addHolidayBtn').addEventListener('click', () => openHolidayModal());
     await loadHolidays();
   };
 
   let HOLIDAYS = [];
   async function loadHolidays() {
-    try { HOLIDAYS = (await api.get('/holidays')).holidays; } catch (e) { return toast(e.message, true); }
+    try {
+      HOLIDAYS = (await api.get('/holidays')).holidays;
+    } catch (e) {
+      return toast(e.message, true);
+    }
     renderCalendar();
     const el = $('#holidayList');
-    el.innerHTML = HOLIDAYS.length ? `<table><thead><tr><th>Date</th><th>Holiday</th><th>Type</th><th>Duration</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
-      ${HOLIDAYS.map((h) => `<tr><td>${fmtDate(h.date)} <span style="color:var(--slate)">(${new Date(h.date + 'T00:00').toLocaleDateString(undefined, { weekday: 'short' })})</span></td>
-        <td>${esc(h.name)}</td><td>${badge(h.type)}</td><td>${h.duration === 'HALF' ? 'Half day' : 'Full day'}</td>${isAdmin() ? `<td><button class="btn btn-ghost btn-sm" data-edit-hol="${h.id}">Edit</button> <button class="btn btn-danger btn-sm" data-del-hol="${h.id}" aria-label="Delete holiday">✕</button></td>` : ''}</tr>`).join('')}
-    </tbody></table>` : `<div class="empty">No holidays published yet.</div>`;
-    el.querySelectorAll('[data-edit-hol]').forEach(b => b.addEventListener('click', () => openHolidayModal(HOLIDAYS.find(h => h.id === Number(b.dataset.editHol)))));
-    el.querySelectorAll('[data-del-hol]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api.del(`/holidays/${b.dataset.delHol}`); toast('Removed'); loadHolidays(); } catch (e) { toast(e.message, true); }
-    }));
+    el.innerHTML = HOLIDAYS.length
+      ? `<table><thead><tr><th>Date</th><th>Holiday</th><th>Type</th><th>Duration</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+      ${HOLIDAYS.map(
+        (
+          h,
+        ) => `<tr><td>${fmtDate(h.date)} <span style="color:var(--slate)">(${new Date(h.date + 'T00:00').toLocaleDateString(undefined, { weekday: 'short' })})</span></td>
+        <td>${esc(h.name)}</td><td>${badge(h.type)}</td><td>${h.duration === 'HALF' ? 'Half day' : 'Full day'}</td>${isAdmin() ? `<td><button class="btn btn-ghost btn-sm" data-edit-hol="${h.id}">Edit</button> <button class="btn btn-danger btn-sm" data-del-hol="${h.id}" aria-label="Delete holiday">✕</button></td>` : ''}</tr>`,
+      ).join('')}
+    </tbody></table>`
+      : `<div class="empty">No holidays published yet.</div>`;
+    el.querySelectorAll('[data-edit-hol]').forEach((b) =>
+      b.addEventListener('click', () => openHolidayModal(HOLIDAYS.find((h) => h.id === Number(b.dataset.editHol)))),
+    );
+    el.querySelectorAll('[data-del-hol]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        try {
+          await api.del(`/holidays/${b.dataset.delHol}`);
+          toast('Removed');
+          loadHolidays();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }),
+    );
   }
 
   function renderCalendar() {
-    const map = {}; HOLIDAYS.forEach((h) => { map[h.date] = h; });
+    const map = {};
+    HOLIDAYS.forEach((h) => {
+      map[h.date] = h;
+    });
     const first = new Date(calYear, calMonth, 1);
     const startDow = first.getDay();
     const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
@@ -2915,8 +4507,22 @@
     $('#calBox').innerHTML = `<div class="cal"><div class="cal-head">
       <button class="btn btn-ghost btn-sm" id="calPrev">‹</button><strong style="color:var(--navy)">${monthName}</strong><button class="btn btn-ghost btn-sm" id="calNext">›</button></div>
       <div class="cal-grid">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => `<div class="cal-dow">${d}</div>`).join('')}${cells}</div></div>`;
-    $('#calPrev').addEventListener('click', () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); });
-    $('#calNext').addEventListener('click', () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); });
+    $('#calPrev').addEventListener('click', () => {
+      calMonth--;
+      if (calMonth < 0) {
+        calMonth = 11;
+        calYear--;
+      }
+      renderCalendar();
+    });
+    $('#calNext').addEventListener('click', () => {
+      calMonth++;
+      if (calMonth > 11) {
+        calMonth = 0;
+        calYear++;
+      }
+      renderCalendar();
+    });
   }
 
   function openHolidayModal(holiday = null) {
@@ -2926,11 +4532,26 @@
       <div class="form-row one"><div class="field"><label>Name</label><input id="hName" placeholder="e.g. Diwali"></div></div>
       <div class="form-row one"><div class="field"><label for="hDuration">Duration</label><select id="hDuration"><option value="FULL">Full day</option><option value="HALF">Half day</option></select><p class="page-sub">A half-day holiday leaves half the day as working time.</p></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Publish</button></div>`);
-    if (holiday) { $('#hName').value = holiday.name; $('#hType').value = holiday.type; $('#hDuration').value = holiday.duration || 'FULL'; }
+    if (holiday) {
+      $('#hName').value = holiday.name;
+      $('#hType').value = holiday.type;
+      $('#hDuration').value = holiday.duration || 'FULL';
+    }
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      try { await api.post('/holidays', { date: $('#hDate').value, name: $('#hName').value, type: $('#hType').value, duration: $('#hDuration').value }); closeModal(); toast('Published ✓'); loadHolidays(); }
-      catch (e) { toast(e.message, true); }
+      try {
+        await api.post('/holidays', {
+          date: $('#hDate').value,
+          name: $('#hName').value,
+          type: $('#hType').value,
+          duration: $('#hDuration').value,
+        });
+        closeModal();
+        toast('Published ✓');
+        loadHolidays();
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 
@@ -2938,8 +4559,10 @@
   // ---------- My performance (own KPIs + attendance calendar) ----------
   let myPerfMonth = null; // yyyy-mm being viewed
   let myPerfUserId = ''; // admins only: whose performance to show ('' = own)
-  let EMPLOYEE_RECORDS = [], employeeLeaveVersion = 0, performanceVersion = 0;
-  const selectedEmployee = () => isAdmin() ? EMPLOYEE_RECORDS.find(user => String(user.id) === myPerfUserId) : ME;
+  let EMPLOYEE_RECORDS = [],
+    employeeLeaveVersion = 0,
+    performanceVersion = 0;
+  const selectedEmployee = () => (isAdmin() ? EMPLOYEE_RECORDS.find((user) => String(user.id) === myPerfUserId) : ME);
 
   VIEWS.employees = async () => {
     if (!myPerfMonth) myPerfMonth = thisMonthISO();
@@ -2951,23 +4574,32 @@
       ['employeePersonal', 'Personal information'],
       ...(admin ? [['employeeRequests', 'Requests']] : []),
     ];
-    setMain('Employees', admin ? 'Select an employee to view their records.' : 'View your calendar, leave, salary and profile.',
-      `<div id="employeesRoot"><p role="status">Loading employees…</p></div>`);
+    setMain(
+      'Employees',
+      admin ? 'Select an employee to view their records.' : 'View your calendar, leave, salary and profile.',
+      `<div id="employeesRoot"><p role="status">Loading employees…</p></div>`,
+    );
     const host = $('#employeesRoot');
     try {
       if (admin) {
         const records = (await api.get('/users/manage')).users;
         if (!host.isConnected) return;
         EMPLOYEE_RECORDS = records;
-        if (!selectedEmployee()) myPerfUserId = String((EMPLOYEE_RECORDS.find(user => user.role === 'EMPLOYEE' && user.active) || EMPLOYEE_RECORDS[0])?.id || '');
-      } else { EMPLOYEE_RECORDS = [ME]; myPerfUserId = ''; }
+        if (!selectedEmployee())
+          myPerfUserId = String(
+            (EMPLOYEE_RECORDS.find((user) => user.role === 'EMPLOYEE' && user.active) || EMPLOYEE_RECORDS[0])?.id || '',
+          );
+      } else {
+        EMPLOYEE_RECORDS = [ME];
+        myPerfUserId = '';
+      }
       host.innerHTML = `<div class="toolbar employee-controls">
-        ${admin ? `<div class="field"><label for="perfUser">Employee</label><select id="perfUser">${EMPLOYEE_RECORDS.map(user => `<option value="${user.id}">${esc(user.name)}${user.active ? '' : ' (inactive)'}${user.role === 'ADMIN' ? ' · Admin' : ''}</option>`).join('')}</select></div>` : `<strong>${esc(ME.name)}</strong>`}
+        ${admin ? `<div class="field"><label for="perfUser">Employee</label><select id="perfUser">${EMPLOYEE_RECORDS.map((user) => `<option value="${user.id}">${esc(user.name)}${user.active ? '' : ' (inactive)'}${user.role === 'ADMIN' ? ' · Admin' : ''}</option>`).join('')}</select></div>` : `<strong>${esc(ME.name)}</strong>`}
         <div class="field"><label for="perfMonth">Month</label><input type="month" id="perfMonth" value="${myPerfMonth}"></div>
         <button class="btn btn-ghost" id="employeeRefresh">Refresh</button>
         ${admin ? '<button class="btn btn-primary" id="addEmpBtn">+ Add employee</button>' : ''}</div>
         <div class="employee-section-links" role="tablist" aria-label="Employee sections">
-          ${tabs.map(([id,label]) => `<button type="button" role="tab" id="${id}Tab" aria-controls="${id}" aria-selected="false" tabindex="-1" data-employee-section="${id}">${label}</button>`).join('')}
+          ${tabs.map(([id, label]) => `<button type="button" role="tab" id="${id}Tab" aria-controls="${id}" aria-selected="false" tabindex="-1" data-employee-section="${id}">${label}</button>`).join('')}
         </div>
         <section class="section employee-section" id="employeePerformance" role="tabpanel" tabindex="0" aria-labelledby="employeePerformanceTab" hidden>
           <div class="pcal" id="myCal"></div><details class="employee-summary" id="employeePerformanceSummary"><summary>Monthly performance summary</summary><div class="cards" id="myKpiCards"></div></details>
@@ -2982,15 +4614,24 @@
         <section class="section employee-section" id="employeePersonal" role="tabpanel" tabindex="0" aria-labelledby="employeePersonalTab" hidden>
           <h2>Personal information</h2><div id="employeeProfile"></div>${admin ? '<details class="employee-management"><summary>Manage employees and access</summary><div class="table-wrap" id="empTable"></div></details>' : ''}
         </section>
-        ${admin ? `<section class="section employee-section" id="employeeRequests" role="tabpanel" tabindex="0" aria-labelledby="employeeRequestsTab" hidden>
+        ${
+          admin
+            ? `<section class="section employee-section" id="employeeRequests" role="tabpanel" tabindex="0" aria-labelledby="employeeRequestsTab" hidden>
           <h2>Requests</h2><div id="lateRequests"></div><div class="section leave-table-wrap" id="adminLeaves"></div>
           <details class="employee-team-leaves" id="employeeTeamLeave"><summary>Team leave calendar and balances</summary><div class="section"><h3 id="onLeaveHeading">Upcoming leave</h3><div class="leave-table-wrap" id="onLeave"></div></div><div class="section"><h3>Team leave balances</h3><div class="leave-table-wrap" id="leaveSummary"></div></div></details>
-        </section>` : ''}`;
+        </section>`
+            : ''
+        }`;
       const tabButtons = [...host.querySelectorAll('[role="tab"]')];
       tabButtons.forEach((button, index) => {
         button.addEventListener('click', () => showEmployeeTab(button.dataset.employeeSection));
-        button.addEventListener('keydown', event => {
-          const indices = { ArrowLeft: (index + tabButtons.length - 1) % tabButtons.length, ArrowRight: (index + 1) % tabButtons.length, Home: 0, End: tabButtons.length - 1 };
+        button.addEventListener('keydown', (event) => {
+          const indices = {
+            ArrowLeft: (index + tabButtons.length - 1) % tabButtons.length,
+            ArrowRight: (index + 1) % tabButtons.length,
+            Home: 0,
+            End: tabButtons.length - 1,
+          };
           if (!Object.hasOwn(indices, event.key)) return;
           event.preventDefault();
           const next = tabButtons[indices[event.key]];
@@ -3000,23 +4641,33 @@
       });
       showEmployeeTab(tabs.some(([id]) => id === employeeSection) ? employeeSection : 'employeePerformance', false);
       const summary = $('#employeePerformanceSummary');
-      summary.addEventListener('toggle', () => { if (summary.open) loadPerformanceSummary(); });
-      $('#perfMonth').addEventListener('change', async event => {
+      summary.addEventListener('toggle', () => {
+        if (summary.open) loadPerformanceSummary();
+      });
+      $('#perfMonth').addEventListener('change', async (event) => {
         if (!/^\d{4}-\d{2}$/.test(event.target.value)) return;
-        myPerfMonth = event.target.value; await loadActiveEmployeeTab();
+        myPerfMonth = event.target.value;
+        await loadActiveEmployeeTab();
       });
       $('#employeeRefresh').addEventListener('click', () => VIEWS.employees());
       if (admin) {
         $('#perfUser').value = myPerfUserId;
-        $('#perfUser').addEventListener('change', event => { myPerfUserId = event.target.value; loadEmployeeProfile(); });
+        $('#perfUser').addEventListener('change', (event) => {
+          myPerfUserId = event.target.value;
+          loadEmployeeProfile();
+        });
         $('#addEmpBtn').addEventListener('click', () => openEmployeeModal());
-        $('#employeeSalaryScope').addEventListener('click', () => mountEmployeeSalary($('#employeeSalaryScope').dataset.team !== '1'));
+        $('#employeeSalaryScope').addEventListener('click', () =>
+          mountEmployeeSalary($('#employeeSalaryScope').dataset.team !== '1'),
+        );
         loadEmployees(EMPLOYEE_RECORDS);
         mountTeamLeaves();
         if (employeeSection !== 'employeeRequests') loadLateRequests();
       } else $('#applyBtn').addEventListener('click', openApplyLeave);
       await loadEmployeeProfile();
-    } catch (e) { if (host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
+    } catch (e) {
+      if (host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`;
+    }
   };
 
   function showEmployeeTab(id, load = true) {
@@ -3024,8 +4675,10 @@
     if (!root || !document.getElementById(id)) return;
     const changed = employeeSection !== id;
     employeeSection = id;
-    root.querySelectorAll('[role="tabpanel"]').forEach(panel => { panel.hidden = panel.id !== id; });
-    root.querySelectorAll('[role="tab"]').forEach(tab => {
+    root.querySelectorAll('[role="tabpanel"]').forEach((panel) => {
+      panel.hidden = panel.id !== id;
+    });
+    root.querySelectorAll('[role="tab"]').forEach((tab) => {
       const selected = tab.dataset.employeeSection === id;
       tab.setAttribute('aria-selected', String(selected));
       tab.tabIndex = selected ? 0 : -1;
@@ -3035,12 +4688,20 @@
 
   function loadActiveEmployeeTab() {
     switch (employeeSection) {
-      case 'employeePerformance': return loadMyPerf();
-      case 'employeeLeaves': return loadEmployeeLeaveDetails();
-      case 'employeeSalary': return mountEmployeeSalary($('#employeeSalaryScope')?.dataset.team === '1');
-      case 'employeeRequests': return Promise.all([loadLateRequests(), loadAdminLeaves(),
-        ...($('#employeeTeamLeave')?.open ? [loadOnLeave(), loadLeaveSummary()] : [])]);
-      default: return undefined;
+      case 'employeePerformance':
+        return loadMyPerf();
+      case 'employeeLeaves':
+        return loadEmployeeLeaveDetails();
+      case 'employeeSalary':
+        return mountEmployeeSalary($('#employeeSalaryScope')?.dataset.team === '1');
+      case 'employeeRequests':
+        return Promise.all([
+          loadLateRequests(),
+          loadAdminLeaves(),
+          ...($('#employeeTeamLeave')?.open ? [loadOnLeave(), loadLeaveSummary()] : []),
+        ]);
+      default:
+        return undefined;
     }
   }
 
@@ -3051,63 +4712,121 @@
       const { requests } = await api.get('/reports/late-explanations/pending');
       if (!host.isConnected) return;
       $('#employeeRequestsTab').textContent = requests.length ? `Requests (${requests.length})` : 'Requests';
-      host.innerHTML = `<h3>Late explanations</h3>${requests.length ? `
+      host.innerHTML = `<h3>Late explanations</h3>${
+        requests.length
+          ? `
         <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Late</th><th></th></tr></thead><tbody>
-          ${requests.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(fmtDate(r.day))}</td><td>${r.minutes_late} min</td>
-          <td><button class="btn btn-ghost btn-sm" data-review-late="${r.id}">Review</button></td></tr>`).join('')}
-        </tbody></table></div>` : '<p class="page-sub">No late explanations waiting for review.</p>'}`;
-      host.querySelectorAll('[data-review-late]').forEach(button => button.addEventListener('click', async () => {
-        const request = requests.find(r => r.id === Number(button.dataset.reviewLate));
-        myPerfUserId = String(request.user_id);
-        myPerfMonth = request.day.slice(0, 7);
-        $('#perfUser').value = myPerfUserId;
-        $('#perfMonth').value = myPerfMonth;
-        showEmployeeTab('employeePerformance', false);
-        await loadEmployeeProfile();
-        if (employeeSection === 'employeePerformance' && myPerfUserId === String(request.user_id) && myPerfMonth === request.day.slice(0, 7)) {
-          $('#myCal').querySelector(`[data-fixday="${request.day}"]`)?.click();
-        }
-      }));
-    } catch (e) { if (host.isConnected) host.textContent = e.message; }
+          ${requests
+            .map(
+              (r) => `<tr><td>${esc(r.name)}</td><td>${esc(fmtDate(r.day))}</td><td>${r.minutes_late} min</td>
+          <td><button class="btn btn-ghost btn-sm" data-review-late="${r.id}">Review</button></td></tr>`,
+            )
+            .join('')}
+        </tbody></table></div>`
+          : '<p class="page-sub">No late explanations waiting for review.</p>'
+      }`;
+      host.querySelectorAll('[data-review-late]').forEach((button) =>
+        button.addEventListener('click', async () => {
+          const request = requests.find((r) => r.id === Number(button.dataset.reviewLate));
+          myPerfUserId = String(request.user_id);
+          myPerfMonth = request.day.slice(0, 7);
+          $('#perfUser').value = myPerfUserId;
+          $('#perfMonth').value = myPerfMonth;
+          showEmployeeTab('employeePerformance', false);
+          await loadEmployeeProfile();
+          if (
+            employeeSection === 'employeePerformance' &&
+            myPerfUserId === String(request.user_id) &&
+            myPerfMonth === request.day.slice(0, 7)
+          ) {
+            $('#myCal').querySelector(`[data-fixday="${request.day}"]`)?.click();
+          }
+        }),
+      );
+    } catch (e) {
+      if (host.isConnected) host.textContent = e.message;
+    }
   }
 
   async function mountEmployeeSalary(team = false) {
-    const host = $('#employeeSalaryMount'), user = selectedEmployee();
+    const host = $('#employeeSalaryMount'),
+      user = selectedEmployee();
     if (!host || !user) return;
-    const admin = isAdmin(); team = admin && team;
+    const admin = isAdmin();
+    team = admin && team;
     // Replacing the root also invalidates all outstanding worksheet responses.
     host.innerHTML = '<div id="employeeSalaryRoot"></div>';
     if (admin) {
       $('#employeeSalaryScope').dataset.team = team ? '1' : '0';
       $('#employeeSalaryScope').textContent = team ? 'Show selected employee salary' : 'Show all employee salaries';
     }
-    $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + myPerfMonth;
-    if (!team && user.role === 'ADMIN') { host.innerHTML = '<p class="empty">Admin accounts are outside the employee salary worksheet.</p>'; return; }
-    await window.Salaries.mount($('#employeeSalaryRoot'), { api, month: myPerfMonth, userId: team ? null : user.id, readOnly: !admin, embedded: true,
+    $('#employeeSalaryName').textContent = team
+      ? 'All employees · monthly salary worksheet'
+      : user.name + ' · ' + myPerfMonth;
+    if (!team && user.role === 'ADMIN') {
+      host.innerHTML = '<p class="empty">Admin accounts are outside the employee salary worksheet.</p>';
+      return;
+    }
+    await window.Salaries.mount($('#employeeSalaryRoot'), {
+      api,
+      month: myPerfMonth,
+      userId: team ? null : user.id,
+      readOnly: !admin,
+      embedded: true,
       onManage: () => showEmployeeTab('employeePersonal'),
-      onMonthChange: month => { if (!/^\d{4}-\d{2}$/.test(month)) return; myPerfMonth = month; $('#perfMonth').value = month; $('#employeeSalaryName').textContent = team ? 'All employees · monthly salary worksheet' : user.name + ' · ' + month; } });
+      onMonthChange: (month) => {
+        if (!/^\d{4}-\d{2}$/.test(month)) return;
+        myPerfMonth = month;
+        $('#perfMonth').value = month;
+        $('#employeeSalaryName').textContent = team
+          ? 'All employees · monthly salary worksheet'
+          : user.name + ' · ' + month;
+      },
+    });
   }
 
   async function loadEmployeeProfile() {
-    const user = selectedEmployee(), host = $('#employeeProfile'); if (!user || !host) return;
-    const contact = [['Email', user.email], ['Phone', user.phone], ['Department', user.department], ['Employee code', user.emp_code]];
-    const work = [['Birthday', fmtDate(user.birthday)], ['Role', cap(user.role)], ['Joining date', fmtDate(user.join_date)],
-      ['Last working day', fmtDate(user.exit_date)], ['Shift start', user.shift_start], ['Attendance timezone', user.attendance_timezone || 'Office default'],
+    const user = selectedEmployee(),
+      host = $('#employeeProfile');
+    if (!user || !host) return;
+    const contact = [
+      ['Email', user.email],
+      ['Phone', user.phone],
+      ['Department', user.department],
+      ['Employee code', user.emp_code],
+    ];
+    const work = [
+      ['Birthday', fmtDate(user.birthday)],
+      ['Role', cap(user.role)],
+      ['Joining date', fmtDate(user.join_date)],
+      ['Last working day', fmtDate(user.exit_date)],
+      ['Shift start', user.shift_start],
+      ['Attendance timezone', user.attendance_timezone || 'Office default'],
       ['Workday starts at hour', user.attendance_cutover ?? 'Office default'],
-      ...(isAdmin() ? [['Status', user.active ? 'Active' : 'Inactive'], ['Asana email', user.asana_email]] : [])];
-    const fields = list => `<dl class="employee-info">${list.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? '—') || '—'}</dd></div>`).join('')}</dl>`;
+      ...(isAdmin()
+        ? [
+            ['Status', user.active ? 'Active' : 'Inactive'],
+            ['Asana email', user.asana_email],
+          ]
+        : []),
+    ];
+    const fields = (list) =>
+      `<dl class="employee-info">${list.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? '—') || '—'}</dd></div>`).join('')}</dl>`;
     host.innerHTML = `<h3>${esc(user.name)}${exitTag(user)}</h3>
       <p class="page-sub">${esc(user.title || '')}</p>
       ${fields(contact)}
       <div class="row-actions"><button class="btn btn-primary" id="employeeEditProfile">${isAdmin() ? 'Edit employee' : 'Edit my details'}</button>${isAdmin() ? '<button class="btn btn-ghost" id="employeePassword">Reset password</button>' : ''}</div>
       <details class="employee-summary"><summary>Employment details</summary>${fields(work)}</details>`;
-    $('#employeeEditProfile').addEventListener('click', () => isAdmin() ? openEmployeeModal(user) : openMyProfile());
+    $('#employeeEditProfile').addEventListener('click', () => (isAdmin() ? openEmployeeModal(user) : openMyProfile()));
     $('#employeePassword')?.addEventListener('click', () => openPasswordModal(user));
     await loadActiveEmployeeTab();
   }
 
   async function loadMyPerf() {
-    const current = ++performanceVersion, host = $('#myCal'), month = myPerfMonth, userId = myPerfUserId;
+    const current = ++performanceVersion,
+      host = $('#myCal'),
+      month = myPerfMonth,
+      userId = myPerfUserId;
     if (!host) return;
     host.innerHTML = '<p role="status">Loading calendar…</p>';
     const cards = $('#myKpiCards');
@@ -3117,30 +4836,39 @@
     const who = isAdmin() && userId ? `&user_id=${userId}` : '';
     try {
       const att = await api.get(`/reports/my-attendance?start=${start}&end=${month}-${days}${who}`);
-      if (current !== performanceVersion || !host.isConnected || month !== myPerfMonth || userId !== myPerfUserId) return;
+      if (current !== performanceVersion || !host.isConnected || month !== myPerfMonth || userId !== myPerfUserId)
+        return;
       renderMyCalendar(att);
       if ($('#employeePerformanceSummary')?.open) loadPerformanceSummary();
-    } catch (e) { if (current === performanceVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`; }
+    } catch (e) {
+      if (current === performanceVersion && host.isConnected) host.innerHTML = `<p role="alert">${esc(e.message)}</p>`;
+    }
   }
 
   async function loadPerformanceSummary() {
-    const current = performanceVersion, cards = $('#myKpiCards'), month = myPerfMonth, userId = myPerfUserId;
+    const current = performanceVersion,
+      cards = $('#myKpiCards'),
+      month = myPerfMonth,
+      userId = myPerfUserId;
     if (!cards || cards.dataset.version === String(current)) return;
     cards.dataset.version = String(current);
     cards.innerHTML = '<p role="status">Loading summary…</p>';
     const who = isAdmin() && userId ? `&user_id=${userId}` : '';
     try {
       const kpi = await api.get(`/kpi/me?month=${month}${who}`);
-      if (current !== performanceVersion || !cards.isConnected || month !== myPerfMonth || userId !== myPerfUserId) return;
+      if (current !== performanceVersion || !cards.isConnected || month !== myPerfMonth || userId !== myPerfUserId)
+        return;
       const r = kpi.rows[0];
-      cards.innerHTML = r ? `
+      cards.innerHTML = r
+        ? `
           ${r.invalidAttendanceDays || r.employmentWarning ? '<p style="color:var(--danger);">Attendance needs review; totals may be incomplete.</p>' : ''}
           ${statCard('Days present', r.daysPresent, 'value')}
           ${statCard('Hours worked', r.hoursWorked, 'value')}
           ${statCard('Punctuality', r.punctualPct === null ? '—' : `<span class="${r.punctualPct < 80 ? 'kpi-late' : ''}">${r.punctualPct}%</span>`, 'value')}
           ${statCard('Late days', r.lateDays, 'value')}
           ${statCard('Tasks done', r.tasksDone, 'value')}
-          ${statCard('Points', r.points, 'value')}` : `<div class="empty">No KPI data for this month.</div>`;
+          ${statCard('Points', r.points, 'value')}`
+        : `<div class="empty">No KPI data for this month.</div>`;
     } catch (e) {
       if (current === performanceVersion && cards.isConnected) {
         delete cards.dataset.version;
@@ -3152,8 +4880,12 @@
   // Month grid: each day coloured by what happened — yellow for a late clock-in,
   // dark red for leave, amber for a short day, plus absent / holiday / weekend.
   function renderMyCalendar(att) {
-    const el = $('#myCal'); if (!el) return;
-    const byDay = {}; att.rows.forEach((r) => { byDay[r.day] = r; });
+    const el = $('#myCal');
+    if (!el) return;
+    const byDay = {};
+    att.rows.forEach((r) => {
+      byDay[r.day] = r;
+    });
     const [y, m] = myPerfMonth.split('-').map(Number);
     const first = new Date(y, m - 1, 1);
     const daysInMonth = new Date(y, m, 0).getDate();
@@ -3168,26 +4900,61 @@
     const clickable = (r) => r && r.status !== 'NOT_EMPLOYED' && (r.status !== 'FUTURE' || canRecord);
     const cellFor = (r, dayNum, iso) => {
       if (!r) return `<div class="pcal-cell"><span class="dn">${dayNum}</span></div>`;
-      let cls = 'pcal-ok'; let tag = '';
-      if (r.status === 'FUTURE') { cls = 'pcal-future'; }
-      else if (r.status === 'NOT_EMPLOYED') { cls = 'pcal-future'; tag = 'Not employed'; }
-      else if (r.status === 'EMPLOYMENT_UNKNOWN' || r.status === 'INVALID') { cls = 'pcal-noout'; tag = 'Needs review'; }
-      else if (r.status === 'WEEKEND') { cls = 'pcal-weekend'; tag = 'Weekend'; }
-      else if (r.status === 'HOLIDAY') { cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday'; }
-      else if (r.status.startsWith('HALF_HOLIDAY_')) {
+      let cls = 'pcal-ok';
+      let tag = '';
+      if (r.status === 'FUTURE') {
+        cls = 'pcal-future';
+      } else if (r.status === 'NOT_EMPLOYED') {
+        cls = 'pcal-future';
+        tag = 'Not employed';
+      } else if (r.status === 'EMPLOYMENT_UNKNOWN' || r.status === 'INVALID') {
+        cls = 'pcal-noout';
+        tag = 'Needs review';
+      } else if (r.status === 'WEEKEND') {
+        cls = 'pcal-weekend';
+        tag = 'Weekend';
+      } else if (r.status === 'HOLIDAY') {
+        cls = 'pcal-holiday';
+        tag = r.holidayName || 'Holiday';
+      } else if (r.status.startsWith('HALF_HOLIDAY_')) {
         cls = r.status === 'HALF_HOLIDAY_ABSENT' ? 'pcal-absent' : 'pcal-half';
-        const rest = { HALF_HOLIDAY_PRESENT: 'worked', HALF_HOLIDAY_ABSENT: 'absent', HALF_HOLIDAY_LEAVE: 'leave', HALF_HOLIDAY_WEEKEND: 'weekend' }[r.status];
+        const rest = {
+          HALF_HOLIDAY_PRESENT: 'worked',
+          HALF_HOLIDAY_ABSENT: 'absent',
+          HALF_HOLIDAY_LEAVE: 'leave',
+          HALF_HOLIDAY_WEEKEND: 'weekend',
+        }[r.status];
         tag = `½ holiday · ½ ${rest}${r.short ? ' · short' : ''}${r.noClockOut ? ' · no clock-out' : ''}`;
+      } else if (r.status === 'LEAVE') {
+        cls = 'pcal-leave';
+        tag = 'Leave';
+      } else if (r.status === 'HALF') {
+        cls = 'pcal-half';
+        tag = 'Half day';
+      } else if (r.status === 'ABSENT') {
+        cls = 'pcal-absent';
+        tag = 'Absent';
+      } else if (r.noClockOut) {
+        cls = 'pcal-noout';
+        tag = 'No clock-out';
+      } else if (r.lateOverride) {
+        cls = 'pcal-ok';
+        tag = r.fullDayOverride ? 'Full day' : 'Late excused';
+      } else if (r.late) {
+        cls = 'pcal-late';
+        tag = `Late ${r.minutesLate}m`;
+      } else if (r.short) {
+        cls = 'pcal-short';
+        tag = 'Short day';
       }
-      else if (r.status === 'LEAVE') { cls = 'pcal-leave'; tag = 'Leave'; }
-      else if (r.status === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
-      else if (r.status === 'ABSENT') { cls = 'pcal-absent'; tag = 'Absent'; }
-      else if (r.noClockOut) { cls = 'pcal-noout'; tag = 'No clock-out'; }
-      else if (r.lateOverride) { cls = 'pcal-ok'; tag = r.fullDayOverride ? 'Full day' : 'Late excused'; }
-      else if (r.late) { cls = 'pcal-late'; tag = `Late ${r.minutesLate}m`; }
-      else if (r.short) { cls = 'pcal-short'; tag = 'Short day'; }
-      if (['PRESENT', 'FUTURE'].includes(r.status) && r.leaveKind === 'FULL') { cls = 'pcal-leave'; tag = 'Leave'; }
-      if (r.status === 'FUTURE' && r.leaveKind === 'HALF') { cls = 'pcal-half'; tag = 'Half day'; }
+      if (['PRESENT', 'FUTURE'].includes(r.status) && r.leaveKind === 'FULL') {
+        cls = 'pcal-leave';
+        tag = 'Leave';
+      }
+      if (r.status === 'FUTURE' && r.leaveKind === 'HALF') {
+        cls = 'pcal-half';
+        tag = 'Half day';
+      }
       if (r.leavePay && !['NOT_EMPLOYED', 'EMPLOYMENT_UNKNOWN', 'INVALID'].includes(r.status)) {
         const { paid_days: paid, unpaid_days: unpaid, scheduled_days: scheduled } = r.leavePay;
         if (scheduled > 0) {
@@ -3196,24 +4963,46 @@
           tag = paid && unpaid ? `${paid} paid · ${unpaid} unpaid` : `${unpaid ? 'Unpaid' : 'Paid'} ${label}`;
           if (r.holidayDuration === 'HALF') tag += ' · ½ holiday';
         } else if (r.holidayDuration === 'FULL') {
-          cls = 'pcal-holiday'; tag = r.holidayName || 'Holiday';
+          cls = 'pcal-holiday';
+          tag = r.holidayName || 'Holiday';
         } else {
-          cls = 'pcal-weekend'; tag = 'Weekend';
+          cls = 'pcal-weekend';
+          tag = 'Weekend';
         }
       }
       if (r.approvedShortDay) {
         if (['PRESENT', 'ABSENT', 'FUTURE'].includes(r.status) && !r.late && !r.noClockOut) cls = 'pcal-short';
-        const approved = r.approvedShortMinutes ? `Approved Short Day · ${r.approvedShortMinutes}m` : 'Approved Short Day';
+        const approved = r.approvedShortMinutes
+          ? `Approved Short Day · ${r.approvedShortMinutes}m`
+          : 'Approved Short Day';
         tag = [tag === 'Short day' || tag === 'Absent' ? '' : tag, approved].filter(Boolean).join(' · ');
       }
       if (r.lateExplanation?.status === 'PENDING') tag = [tag, 'Explanation pending'].filter(Boolean).join(' · ');
       const inTime = r.firstIn ? attendanceTime(r.firstIn, r.timezone) : '';
-      const clockLabel = r.firstIn ? new Date(r.firstIn).toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', timeZone: r.timezone || undefined,
-      }) : '';
+      const clockLabel = r.firstIn
+        ? new Date(r.firstIn).toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: r.timezone || undefined,
+          })
+        : '';
       const can = clickable(r);
-      const action = canRecord ? 'click to manage attendance or leave' : isAdmin() ? 'click to fix punches' : 'click to request a correction';
-      const title = [`${iso}`, tag || r.status, inTime ? `in ${inTime}` : '', r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '', r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '', r.lateOverride ? 'punctuality override: normal' : (r.late ? `late by ${r.minutesLate} min` : ''), can ? `— ${action}` : ''].filter(Boolean).join(' · ');
+      const action = canRecord
+        ? 'click to manage attendance or leave'
+        : isAdmin()
+          ? 'click to fix punches'
+          : 'click to request a correction';
+      const title = [
+        `${iso}`,
+        tag || r.status,
+        inTime ? `in ${inTime}` : '',
+        r.workedMinutes ? `worked ${fmtMins(r.workedMinutes)}` : '',
+        r.breakMinutes ? `break ${fmtMins(r.breakMinutes)}` : '',
+        r.lateOverride ? 'punctuality override: normal' : r.late ? `late by ${r.minutesLate} min` : '',
+        can ? `— ${action}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
       return `<div class="pcal-cell ${cls}${iso === todayISOv ? ' pcal-today' : ''}${can ? ' pcal-clickable' : ''}" title="${esc(title)}"${can ? ` data-fixday="${iso}" role="button" tabindex="0"` : ''}>
         <span class="dn">${dayNum}</span>
         ${clockLabel && r.status !== 'WEEKEND' ? `<span class="mins">${esc(clockLabel)}</span>` : ''}
@@ -3265,41 +5054,72 @@
     $('#calNext').addEventListener('click', () => shiftMonth(1));
     // Fix a day straight from the calendar.
     const openDay = (iso) => {
-      if (isAdmin()) openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso], canRecord ? employee : null);
-      else if (byDay[iso]?.lateExplanation || (byDay[iso]?.late && !byDay[iso]?.approvedShortDay && !byDay[iso]?.leaveKind)) openLateExplanation(byDay[iso]);
+      if (isAdmin())
+        openAttendanceEditor(att.user.id, iso, refreshEmployeeLeaveData, byDay[iso], canRecord ? employee : null);
+      else if (
+        byDay[iso]?.lateExplanation ||
+        (byDay[iso]?.late && !byDay[iso]?.approvedShortDay && !byDay[iso]?.leaveKind)
+      )
+        openLateExplanation(byDay[iso]);
       else openPunchRequestModal(iso);
     };
     el.querySelectorAll('[data-fixday]').forEach((c) => {
       c.addEventListener('click', () => openDay(c.dataset.fixday));
-      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDay(c.dataset.fixday); } });
+      c.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openDay(c.dataset.fixday);
+        }
+      });
     });
   }
 
   function lateResolutionLabel(explanation) {
     if (explanation.status !== 'RESOLVED') return '';
-    return { FULL_DAY: 'Marked full day', HALF_DAY: 'Marked half day', SHORT_DAY: 'Marked Short Day', LEAVE: 'Marked leave' }[explanation.resolution] || 'Reviewed';
+    return (
+      {
+        FULL_DAY: 'Marked full day',
+        HALF_DAY: 'Marked half day',
+        SHORT_DAY: 'Marked Short Day',
+        LEAVE: 'Marked leave',
+      }[explanation.resolution] || 'Reviewed'
+    );
   }
 
   function openLateExplanation(row) {
     const explanation = row.lateExplanation;
     modal(`<h3>${esc(fmtDate(row.day))}</h3>
       <p><strong>Late by ${explanation?.minutes_late ?? row.minutesLate} min</strong></p>
-      ${explanation ? `<p>${badge(explanation.status)} ${lateResolutionLabel(explanation)}</p><p class="late-reason">${esc(explanation.reason)}</p>` : `
+      ${
+        explanation
+          ? `<p>${badge(explanation.status)} ${lateResolutionLabel(explanation)}</p><p class="late-reason">${esc(explanation.reason)}</p>`
+          : `
         <div class="field"><label for="lateReason">Why were you late?</label><textarea id="lateReason" maxlength="500" rows="3" placeholder="Enter a brief explanation"></textarea></div>
-        <p role="alert" id="lateReasonError"></p>`}
+        <p role="alert" id="lateReasonError"></p>`
+      }
       <div class="modal-actions">
         <button class="btn btn-ghost" id="latePunchCorrection">Correct a punch</button>
         ${explanation ? '<button class="btn btn-primary" id="lateDone">Done</button>' : '<button class="btn btn-primary" id="lateSend">Submit explanation</button>'}
       </div>`);
     $('#lateDone')?.addEventListener('click', closeModal);
     $('#latePunchCorrection').addEventListener('click', () => openPunchRequestModal(row.day));
-    $('#lateSend')?.addEventListener('click', async event => {
+    $('#lateSend')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
-      const reason = $('#lateReason').value.trim(), error = $('#lateReasonError');
-      if (!reason) { error.textContent = 'Enter a reason before submitting.'; $('#lateReason').focus(); return; }
+      const reason = $('#lateReason').value.trim(),
+        error = $('#lateReasonError');
+      if (!reason) {
+        error.textContent = 'Enter a reason before submitting.';
+        $('#lateReason').focus();
+        return;
+      }
       button.disabled = true;
-      try { await api.post('/reports/late-explanations', { day: row.day, reason }); }
-      catch (e) { error.textContent = e.message; button.disabled = false; return; }
+      try {
+        await api.post('/reports/late-explanations', { day: row.day, reason });
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+        return;
+      }
       if (button.isConnected) closeModal();
       toast('Explanation sent for approval');
       await loadMyPerf();
@@ -3311,16 +5131,20 @@
   function birthdayLine(u) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(u.birthday || ''));
     if (!m) return '';
-    const label = new Date(2000, Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const label = new Date(2000, Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    });
     const t = new Date();
-    const isToday = (t.getMonth() + 1) === Number(m[2]) && t.getDate() === Number(m[3]);
+    const isToday = t.getMonth() + 1 === Number(m[2]) && t.getDate() === Number(m[3]);
     return `<div class="tt" style="font-size:.78rem;${isToday ? 'color:#b8860b;font-weight:700;' : ''}">🎂 ${esc(label)}${isToday ? ' — today!' : ''}</div>`;
   }
 
   // The date a person joined: their set join_date, else the record-creation
   // date as an approximation (flagged with ≈).
   function joinInfo(u) {
-    if (u.join_date && /^\d{4}-\d{2}-\d{2}$/.test(u.join_date)) return { date: new Date(u.join_date + 'T00:00:00'), approx: false };
+    if (u.join_date && /^\d{4}-\d{2}-\d{2}$/.test(u.join_date))
+      return { date: new Date(u.join_date + 'T00:00:00'), approx: false };
     return { date: new Date(u.created_ts || Date.now()), approx: true };
   }
   // "3 yr 2 mo", "5 mo", or "new" for the current month. Counts to the last
@@ -3330,7 +5154,8 @@
     let months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth());
     if (now.getDate() < from.getDate()) months -= 1;
     if (months < 1) return 'joined this month';
-    const y = Math.floor(months / 12), m = months % 12;
+    const y = Math.floor(months / 12),
+      m = months % 12;
     return [y ? `${y} yr` : '', m ? `${m} mo` : ''].filter(Boolean).join(' ');
   }
 
@@ -3338,17 +5163,24 @@
     setMain('Employee Directory', 'The team, oldest to newest by joining date.', `<div id="people"></div>`);
     try {
       const { users } = await api.get('/users');
-      const withJoin = users.map((u) => ({ ...u, _join: joinInfo(u) }))
-        .sort((a, b) => a._join.date - b._join.date); // most senior first
+      const withJoin = users.map((u) => ({ ...u, _join: joinInfo(u) })).sort((a, b) => a._join.date - b._join.date); // most senior first
       // Group by joining year.
       const byYear = {};
-      withJoin.forEach((u) => { const y = u._join.date.getFullYear(); (byYear[y] = byYear[y] || []).push(u); });
+      withJoin.forEach((u) => {
+        const y = u._join.date.getFullYear();
+        (byYear[y] = byYear[y] || []).push(u);
+      });
       const years = Object.keys(byYear).sort((a, b) => a - b);
       const fmtJoin = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
       const el = $('#people');
-      el.innerHTML = users.length ? `<div class="tree">${years.map((y) => `
+      el.innerHTML = users.length
+        ? `<div class="tree">${years
+            .map(
+              (y) => `
         <div class="tree-year">${y} <span class="tree-year-cnt">${byYear[y].length}</span></div>
-        ${byYear[y].map((u) => `<div class="tree-emp">
+        ${byYear[y]
+          .map(
+            (u) => `<div class="tree-emp">
           <div class="avatar">${esc(initials(u.name))}</div>
           <div class="tree-emp-main">
             <div class="nm">${esc(u.name)}${u.role === 'ADMIN' ? ' <span class="badge b-company" style="font-size:.64rem">Admin</span>' : ''}</div>
@@ -3361,16 +5193,24 @@
             <div class="join-tenure">${tenure(u._join.date, u.exit_date ? new Date(u.exit_date + 'T00:00:00') : null)}</div>
             ${u.exit_date ? `<div class="join-tenure" style="background:#fdece9;color:var(--danger);margin-top:3px;">${u.exit_date < todayISO() ? 'Left' : 'Leaving'} ${esc(fmtDate(u.exit_date))}</div>` : ''}
           </div>
-        </div>`).join('')}`).join('')}</div>
+        </div>`,
+          )
+          .join('')}`,
+            )
+            .join('')}</div>
         <p class="page-sub" style="margin-top:14px;">Ordered by joining date, most senior first. “≈” means the joining date isn’t set yet, so the date they were added to the portal is shown — set it in Employees → Personal information.</p>`
         : `<div class="empty">No employees yet.</div>`;
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      toast(e.message, true);
+    }
   };
 
   // ---------- Admin (people management) ----------
   VIEWS.admin = async () => {
     if (!isAdmin()) return navigate('dashboard');
-    setMain('Admin', 'Portal settings, backups and integrations.',
+    setMain(
+      'Admin',
+      'Portal settings, backups and integrations.',
       `<div class="section" style="margin-top:30px;">
          <h2 style="color:var(--navy);">Data &amp; backup</h2>
          <div class="card" style="max-width:640px;">
@@ -3389,60 +5229,93 @@
            <div id="asanaTestResult" style="display:none;margin-top:12px;border-radius:8px;padding:12px;font-size:.88rem;line-height:1.5;"></div>
          </div>
        </div>
-       `);
+       `,
+    );
     $('#backupBtn').addEventListener('click', () => {
       const a = document.createElement('a');
-      a.href = '/api/backup'; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+      a.href = '/api/backup';
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       toast('Backup downloading…');
     });
     $('#emailBackupBtn').addEventListener('click', async () => {
-      const box = $('#emailBackupResult'); const btn = $('#emailBackupBtn');
-      btn.disabled = true; box.style.display = 'block'; box.style.background = 'var(--mist)'; box.style.border = '1px solid var(--line)'; box.style.color = 'var(--slate)';
+      const box = $('#emailBackupResult');
+      const btn = $('#emailBackupBtn');
+      btn.disabled = true;
+      box.style.display = 'block';
+      box.style.background = 'var(--mist)';
+      box.style.border = '1px solid var(--line)';
+      box.style.color = 'var(--slate)';
       box.textContent = 'Sending…';
       try {
         const r = await api.post('/backup/email');
         if (r.ok) {
-          box.style.background = '#eafaf3'; box.style.border = '1px solid #b7e6d4'; box.style.color = 'var(--teal-dark)';
+          box.style.background = '#eafaf3';
+          box.style.border = '1px solid #b7e6d4';
+          box.style.color = 'var(--teal-dark)';
           box.innerHTML = `✅ <strong>Sent.</strong> ${esc(r.message)} Check that inbox — it should have 5 CSVs plus the .db file.`;
         } else {
-          box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+          box.style.background = '#fdece9';
+          box.style.border = '1px solid #f3c6bf';
+          box.style.color = 'var(--danger)';
           box.innerHTML = `⚠️ <strong>Not sent.</strong> ${esc(r.message || r.error || '')}`;
         }
       } catch (e) {
-        box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+        box.style.background = '#fdece9';
+        box.style.border = '1px solid #f3c6bf';
+        box.style.color = 'var(--danger)';
         box.textContent = e.message;
-      } finally { btn.disabled = false; }
+      } finally {
+        btn.disabled = false;
+      }
     });
     $('#asanaTestBtn').addEventListener('click', async () => {
-      const box = $('#asanaTestResult'); const btn = $('#asanaTestBtn');
-      btn.disabled = true; box.style.display = 'block';
-      box.style.background = 'var(--mist)'; box.style.border = '1px solid var(--line)'; box.style.color = 'var(--slate)';
+      const box = $('#asanaTestResult');
+      const btn = $('#asanaTestBtn');
+      btn.disabled = true;
+      box.style.display = 'block';
+      box.style.background = 'var(--mist)';
+      box.style.border = '1px solid var(--line)';
+      box.style.color = 'var(--slate)';
       box.textContent = 'Testing…';
       try {
         const r = await api.post('/asana/test');
         if (r.ok) {
-          box.style.background = '#eafaf3'; box.style.border = '1px solid #b7e6d4'; box.style.color = 'var(--teal-dark)';
+          box.style.background = '#eafaf3';
+          box.style.border = '1px solid #b7e6d4';
+          box.style.color = 'var(--teal-dark)';
           const gaps = (r.unmatched || []).length
             ? `<div style="margin-top:8px;color:#9a6b00;">⚠️ Not matched to an employee: ${r.unmatched.map((u) => `${esc(u.name)} (${u.count})`).join(', ')}. Set their Asana email on the employee's profile.</div>`
             : '<div style="margin-top:6px;color:var(--slate);">Everyone in Asana matched an employee.</div>';
           box.innerHTML = `✅ <strong>Connected.</strong> ${esc(r.message)}${gaps}`;
         } else {
-          box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+          box.style.background = '#fdece9';
+          box.style.border = '1px solid #f3c6bf';
+          box.style.color = 'var(--danger)';
           box.innerHTML = `⚠️ <strong>Not working${r.step ? ` (${esc(r.step)})` : ''}.</strong><br>${esc(r.message || '')}`;
         }
       } catch (e) {
-        box.style.background = '#fdece9'; box.style.border = '1px solid #f3c6bf'; box.style.color = 'var(--danger)';
+        box.style.background = '#fdece9';
+        box.style.border = '1px solid #f3c6bf';
+        box.style.color = 'var(--danger)';
         box.textContent = e.message;
-      } finally { btn.disabled = false; }
+      } finally {
+        btn.disabled = false;
+      }
     });
   };
 
   async function loadEmployees(records) {
     try {
       const users = records || (await api.get('/users/manage')).users;
-      const host = $('#empTable'); if (!host) return;
+      const host = $('#empTable');
+      if (!host) return;
       host.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Dept / Title</th><th>Leaves</th><th>Status</th><th></th></tr></thead><tbody>
-        ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}">
+        ${users
+          .map(
+            (u) => `<tr style="${u.active ? '' : 'opacity:.5'}">
           <td>${u.emp_code ? `<strong>${esc(u.emp_code)}</strong>` : '—'}</td>
           <td>${esc(u.name)}${exitTag(u)}</td><td>${esc(u.email)}</td><td>${badge(u.role)}</td>
           <td>${esc(u.department || '—')}${u.title ? ' · ' + esc(u.title) : ''}</td><td>${u.leave_balance}</td>
@@ -3451,15 +5324,36 @@
             <button class="btn btn-ghost btn-sm" data-edit-emp="${u.id}">Edit</button>
             <button class="btn btn-ghost btn-sm" data-pw-emp="${u.id}">Password</button>
             <button class="btn ${u.active ? 'btn-danger' : 'btn-primary'} btn-sm" data-toggle-emp="${u.id}" data-active="${u.active ? 0 : 1}">${u.active ? 'Disable' : 'Enable'}</button>
-          </td></tr>`).join('')}
+          </td></tr>`,
+          )
+          .join('')}
       </tbody></table>`;
-      const byId = {}; users.forEach((u) => { byId[u.id] = u; });
-      $('#empTable').querySelectorAll('[data-edit-emp]').forEach((b) => b.addEventListener('click', () => openEmployeeModal(byId[b.dataset.editEmp])));
-      $('#empTable').querySelectorAll('[data-pw-emp]').forEach((b) => b.addEventListener('click', () => openPasswordModal(byId[b.dataset.pwEmp])));
-      $('#empTable').querySelectorAll('[data-toggle-emp]').forEach((b) => b.addEventListener('click', async () => {
-        try { await api.post(`/users/${b.dataset.toggleEmp}/active`, { active: Number(b.dataset.active) }); toast('Updated'); VIEWS.employees(); } catch (e) { toast(e.message, true); }
-      }));
-    } catch (e) { toast(e.message, true); }
+      const byId = {};
+      users.forEach((u) => {
+        byId[u.id] = u;
+      });
+      $('#empTable')
+        .querySelectorAll('[data-edit-emp]')
+        .forEach((b) => b.addEventListener('click', () => openEmployeeModal(byId[b.dataset.editEmp])));
+      $('#empTable')
+        .querySelectorAll('[data-pw-emp]')
+        .forEach((b) => b.addEventListener('click', () => openPasswordModal(byId[b.dataset.pwEmp])));
+      $('#empTable')
+        .querySelectorAll('[data-toggle-emp]')
+        .forEach((b) =>
+          b.addEventListener('click', async () => {
+            try {
+              await api.post(`/users/${b.dataset.toggleEmp}/active`, { active: Number(b.dataset.active) });
+              toast('Updated');
+              VIEWS.employees();
+            } catch (e) {
+              toast(e.message, true);
+            }
+          }),
+        );
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   // "Leaving 30 Sep" while they're still working out notice, "Left 30 Sep" after.
@@ -3475,7 +5369,11 @@
     let salary = { rates: [], latest: null, current: null };
     if (editing) {
       const view = document.querySelector('.nav-item.active')?.dataset.view;
-      try { salary = await api.get(`/users/${u.id}/salary`); } catch (e) { return toast(e.message, true); }
+      try {
+        salary = await api.get(`/users/${u.id}/salary`);
+      } catch (e) {
+        return toast(e.message, true);
+      }
       if (view !== document.querySelector('.nav-item.active')?.dataset.view) return;
     }
     const initialGross = salary.latest ? (salary.latest.monthly_gross_paise / 100).toFixed(2) : '';
@@ -3500,7 +5398,7 @@
         <div class="form-row"><div class="field"><label for="eGross">Monthly gross salary (INR)</label><input id="eGross" inputmode="decimal" value="${esc(initialGross)}" placeholder="Not recorded"></div>
           <div class="field"><label for="eSalaryDate">Salary effective from</label><input type="date" id="eSalaryDate" value="${esc(initialSalaryDate)}"></div></div>
         <p class="leave-balance-note">Admin only. Employees can see their own deduction estimate. Unpaid leave uses monthly gross salary ÷ calendar days in the leave month × unpaid days, including 0.5 for a half day. Add an effective date when salary changes; earlier rates and saved estimates are retained.</p>
-        ${salary.rates.length ? `<details><summary>Recorded salary history</summary><div class="leave-table-wrap"><table><thead><tr><th>Effective from</th><th>Monthly gross</th></tr></thead><tbody>${salary.rates.map(rate => `<tr><td>${fmtDate(rate.effective_from)}</td><td>${salaryMoney(rate.monthly_gross_paise)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+        ${salary.rates.length ? `<details><summary>Recorded salary history</summary><div class="leave-table-wrap"><table><thead><tr><th>Effective from</th><th>Monthly gross</th></tr></thead><tbody>${salary.rates.map((rate) => `<tr><td>${fmtDate(rate.effective_from)}</td><td>${salaryMoney(rate.monthly_gross_paise)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       </div>
       <div class="form-row"><div class="field"><label>Leave balance (calculated)</label><input type="number" step="0.5" id="eBal" value="${u?.leave_balance ?? 20}" readonly><div class="leave-balance-note">Annual ceilings: 18 regular + 1 Flexi + 1 birthday / anniversary, less approved paid time. Resets each 1 October. Regular paid leave has a strict 1.5-day monthly limit; unused monthly credit does not accumulate.</div></div>
         ${editing ? '<div class="field"></div>' : '<div class="field"><label>Temp password</label><input id="ePw" placeholder="min 6 chars"></div>'}</div>
@@ -3508,18 +5406,45 @@
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
       if ($('#mSave').disabled) return;
-      const payload = { name: $('#eName').value, email: $('#eEmail').value, emp_code: $('#eCode').value, department: $('#eDept').value, title: $('#eTitle').value, phone: $('#ePhone').value, shift_start: $('#eShift').value, attendance_timezone: $('#eTimezone').value.trim(), attendance_cutover: $('#eCutover').value === '' ? null : Number($('#eCutover').value), join_date: $('#eJoin').value, exit_date: $('#eExit').value, birthday: $('#eBday').value, asana_email: $('#eAsana').value, role: $('#eRole').value, leave_balance: Number($('#eBal').value) };
-      const gross = $('#eGross').value.trim(), effective = $('#eSalaryDate').value;
+      const payload = {
+        name: $('#eName').value,
+        email: $('#eEmail').value,
+        emp_code: $('#eCode').value,
+        department: $('#eDept').value,
+        title: $('#eTitle').value,
+        phone: $('#ePhone').value,
+        shift_start: $('#eShift').value,
+        attendance_timezone: $('#eTimezone').value.trim(),
+        attendance_cutover: $('#eCutover').value === '' ? null : Number($('#eCutover').value),
+        join_date: $('#eJoin').value,
+        exit_date: $('#eExit').value,
+        birthday: $('#eBday').value,
+        asana_email: $('#eAsana').value,
+        role: $('#eRole').value,
+        leave_balance: Number($('#eBal').value),
+      };
+      const gross = $('#eGross').value.trim(),
+        effective = $('#eSalaryDate').value;
       if (gross !== initialGross || (gross && effective !== initialSalaryDate)) {
-        if (!gross && salary.latest) return toast('Enter a salary amount. Earlier salary records cannot be cleared here.', true);
+        if (!gross && salary.latest)
+          return toast('Enter a salary amount. Earlier salary records cannot be cleared here.', true);
         if (gross) payload.salary = { monthly_gross: gross, effective_from: effective, currency: 'INR' };
       }
-      const saveButton = $('#mSave'); saveButton.disabled = true;
+      const saveButton = $('#mSave');
+      saveButton.disabled = true;
       try {
-        const result = editing ? await api.put(`/users/${u.id}`, payload) : await api.post('/users', { ...payload, password: $('#ePw').value });
+        const result = editing
+          ? await api.put(`/users/${u.id}`, payload)
+          : await api.post('/users', { ...payload, password: $('#ePw').value });
         myPerfUserId = String(result.user.id);
-        closeModal(); toast(editing ? 'Saved ✓' : 'Created ✓'); VIEWS.employees();
-      } catch (e) { toast(e.message, true); } finally { saveButton.disabled = false; }
+        closeModal();
+        toast(editing ? 'Saved ✓' : 'Created ✓');
+        VIEWS.employees();
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        saveButton.disabled = false;
+      }
     });
   }
 
@@ -3529,7 +5454,13 @@
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Set password</button></div>`);
     $('#mCancel').addEventListener('click', closeModal);
     $('#mSave').addEventListener('click', async () => {
-      try { await api.post(`/users/${u.id}/password`, { password: $('#npw').value }); closeModal(); toast('Password updated ✓'); } catch (e) { toast(e.message, true); }
+      try {
+        await api.post(`/users/${u.id}/password`, { password: $('#npw').value });
+        closeModal();
+        toast('Password updated ✓');
+      } catch (e) {
+        toast(e.message, true);
+      }
     });
   }
 

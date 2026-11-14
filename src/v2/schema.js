@@ -200,7 +200,9 @@ CREATE TABLE IF NOT EXISTS int_settings (
 `;
 
 function ensure(db) {
-  db.transaction(() => { db.exec(TABLES); }).immediate();
+  db.transaction(() => {
+    db.exec(TABLES);
+  }).immediate();
 }
 
 module.exports = { ensure, TABLES };

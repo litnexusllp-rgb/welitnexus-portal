@@ -17,10 +17,22 @@ router.get('/integrations', requireOwner, (_req, res) => {
     encryptionKey: set('INTEGRATIONS_KEY'),
     adminConsoleRequired: require('../auth').consoleRequired(),
     twoStep: String(process.env.ADMIN_2FA || 'required').toLowerCase() !== 'off',
-    slack: { bot: set('SLACK_BOT_TOKEN'), signingSecret: set('SLACK_SIGNING_SECRET'), eventsUrl: base ? `${base}/api/hooks/slack/events` : null },
-    asana: { token: set('ASANA_TOKEN'), project: set('ASANA_PROJECT_GID'), webhookUrl: base ? `${base}/api/hooks/asana` : null },
+    slack: {
+      bot: set('SLACK_BOT_TOKEN'),
+      signingSecret: set('SLACK_SIGNING_SECRET'),
+      eventsUrl: base ? `${base}/api/hooks/slack/events` : null,
+    },
+    asana: {
+      token: set('ASANA_TOKEN'),
+      project: set('ASANA_PROJECT_GID'),
+      webhookUrl: base ? `${base}/api/hooks/asana` : null,
+    },
     ai: { providers: ai.available(), default: ai.defaultProvider() },
-    calendar: { ...cal.status(), googleRedirect: base ? `${base}/api/calendar/oauth/google/callback` : null, microsoftRedirect: base ? `${base}/api/calendar/oauth/microsoft/callback` : null },
+    calendar: {
+      ...cal.status(),
+      googleRedirect: base ? `${base}/api/calendar/oauth/google/callback` : null,
+      microsoftRedirect: base ? `${base}/api/calendar/oauth/microsoft/callback` : null,
+    },
     email: { smtp: set('SMTP_HOST') && set('SMTP_USER') && set('SMTP_PASS') },
   });
 });

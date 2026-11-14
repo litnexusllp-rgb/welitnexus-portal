@@ -9,10 +9,16 @@ const { db } = require('../db');
 
 const API = process.env.ASANA_API_BASE || 'https://app.asana.com/api/1.0';
 const cfg = () => ({ token: process.env.ASANA_TOKEN || '', project: process.env.ASANA_PROJECT_GID || '' });
-const enabled = () => { const c = cfg(); return Boolean(c.token && c.project); };
+const enabled = () => {
+  const c = cfg();
+  return Boolean(c.token && c.project);
+};
 
 async function request(method, path, data) {
-  if (!enabled()) throw Object.assign(new Error('Asana is not connected. Add ASANA_TOKEN and ASANA_PROJECT_GID in Railway.'), { status: 503 });
+  if (!enabled())
+    throw Object.assign(new Error('Asana is not connected. Add ASANA_TOKEN and ASANA_PROJECT_GID in Railway.'), {
+      status: 503,
+    });
   const res = await fetch(`${API}${path}`, {
     method,
     headers: { Authorization: `Bearer ${cfg().token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -20,7 +26,10 @@ async function request(method, path, data) {
     signal: AbortSignal.timeout(15000),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error('Asana: ' + (body.errors?.[0]?.message || `HTTP ${res.status}`)), { status: res.status === 404 ? 404 : 502 });
+  if (!res.ok)
+    throw Object.assign(new Error('Asana: ' + (body.errors?.[0]?.message || `HTTP ${res.status}`)), {
+      status: res.status === 404 ? 404 : 502,
+    });
   return body.data;
 }
 
@@ -37,13 +46,24 @@ function assigneeFor(userId) {
 const isoDay = (v) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
 
 async function createTask({ name, notes, assigneeId, dueOn, projectGid }) {
-  const title = String(name || '').trim().slice(0, 500);
+  const title = String(name || '')
+    .trim()
+    .slice(0, 500);
   if (!title) throw Object.assign(new Error('Give the task a name'), { status: 400 });
   const task = await request('POST', '/tasks?opt_fields=name,permalink_url,due_on,assignee.name', {
-    name: title, notes: String(notes || '').slice(0, 10000), projects: [projectGid || cfg().project],
-    assignee: assigneeFor(assigneeId), due_on: isoDay(dueOn),
+    name: title,
+    notes: String(notes || '').slice(0, 10000),
+    projects: [projectGid || cfg().project],
+    assignee: assigneeFor(assigneeId),
+    due_on: isoDay(dueOn),
   });
-  return { gid: task.gid, name: task.name, url: task.permalink_url, due_on: task.due_on, assignee: task.assignee?.name || null };
+  return {
+    gid: task.gid,
+    name: task.name,
+    url: task.permalink_url,
+    due_on: task.due_on,
+    assignee: task.assignee?.name || null,
+  };
 }
 
 async function updateTask(gid, { completed, dueOn, assigneeId }) {
@@ -53,12 +73,21 @@ async function updateTask(gid, { completed, dueOn, assigneeId }) {
   if (dueOn !== undefined) data.due_on = isoDay(dueOn) || null;
   if (assigneeId !== undefined) data.assignee = assigneeId ? assigneeFor(assigneeId) : null;
   const t = await request('PUT', `/tasks/${gid}?opt_fields=name,completed,due_on,permalink_url,assignee.name`, data);
-  return { gid: t.gid, name: t.name, completed: t.completed, due_on: t.due_on, url: t.permalink_url, assignee: t.assignee?.name || null };
+  return {
+    gid: t.gid,
+    name: t.name,
+    completed: t.completed,
+    due_on: t.due_on,
+    url: t.permalink_url,
+    assignee: t.assignee?.name || null,
+  };
 }
 
 async function comment(gid, text, author) {
   if (!/^\d+$/.test(String(gid))) throw Object.assign(new Error('Invalid task'), { status: 400 });
-  const body = String(text || '').trim().slice(0, 5000);
+  const body = String(text || '')
+    .trim()
+    .slice(0, 5000);
   if (!body) throw Object.assign(new Error('Write a comment first'), { status: 400 });
   const story = await request('POST', `/tasks/${gid}/stories`, { text: `${body}\n— ${author} (via portal)` });
   return { gid: story.gid };
@@ -75,8 +104,9 @@ function webhookSecret() {
   return row ? require('./crypto').decrypt(row.value) : '';
 }
 function saveWebhookSecret(secret) {
-  db.prepare("INSERT INTO int_settings(key,value,updated_ts) VALUES ('asana_webhook_secret',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_ts=excluded.updated_ts")
-    .run(require('./crypto').encrypt(secret), Date.now());
+  db.prepare(
+    "INSERT INTO int_settings(key,value,updated_ts) VALUES ('asana_webhook_secret',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_ts=excluded.updated_ts",
+  ).run(require('./crypto').encrypt(secret), Date.now());
 }
 function verifyWebhook(rawBody, signature) {
   const secret = webhookSecret();

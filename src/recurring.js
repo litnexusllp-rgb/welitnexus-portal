@@ -15,35 +15,38 @@ function advance(dateStr, frequency, step) {
   const d = DateTime.fromISO(dateStr, { zone: ZONE });
   const n = Math.max(1, step || 1);
   switch (frequency) {
-    case 'DAILY':     return d.plus({ days: n }).toFormat('yyyy-LL-dd');
-    case 'WEEKLY':    return d.plus({ weeks: n }).toFormat('yyyy-LL-dd');
-    case 'QUARTERLY': return d.plus({ months: 3 * n }).toFormat('yyyy-LL-dd');
-    case 'YEARLY':    return d.plus({ years: n }).toFormat('yyyy-LL-dd');
+    case 'DAILY':
+      return d.plus({ days: n }).toFormat('yyyy-LL-dd');
+    case 'WEEKLY':
+      return d.plus({ weeks: n }).toFormat('yyyy-LL-dd');
+    case 'QUARTERLY':
+      return d.plus({ months: 3 * n }).toFormat('yyyy-LL-dd');
+    case 'YEARLY':
+      return d.plus({ years: n }).toFormat('yyyy-LL-dd');
     case 'MONTHLY':
-    default:          return d.plus({ months: n }).toFormat('yyyy-LL-dd');
+    default:
+      return d.plus({ months: n }).toFormat('yyyy-LL-dd');
   }
 }
 
 const activeTemplates = db.prepare(`SELECT * FROM recurring_tasks WHERE active = 1`);
-const existsInstance = db.prepare(
-  `SELECT 1 FROM tasks WHERE recurring_id = ? AND due_date = ? LIMIT 1`
-);
+const existsInstance = db.prepare(`SELECT 1 FROM tasks WHERE recurring_id = ? AND due_date = ? LIMIT 1`);
 const insertTask = db.prepare(
   `INSERT INTO tasks (title, description, assignee_id, assigned_by, priority, status, due_date, client_id, recurring_id, created_ts, updated_ts)
-   VALUES (@title, @description, @assignee_id, @assigned_by, @priority, 'TODO', @due_date, @client_id, @recurring_id, @ts, @ts)`
+   VALUES (@title, @description, @assignee_id, @assigned_by, @priority, 'TODO', @due_date, @client_id, @recurring_id, @ts, @ts)`,
 );
-const advanceTemplate = db.prepare(
-  `UPDATE recurring_tasks SET next_due = ?, last_run_ts = ? WHERE id = ?`
-);
-const insertChecklistItem = db.prepare(
-  `INSERT INTO task_checklist (task_id, text, position) VALUES (?, ?, ?)`
-);
+const advanceTemplate = db.prepare(`UPDATE recurring_tasks SET next_due = ?, last_run_ts = ? WHERE id = ?`);
+const insertChecklistItem = db.prepare(`INSERT INTO task_checklist (task_id, text, position) VALUES (?, ?, ?)`);
 
 // Copy a template's checklist (stored as JSON) onto a freshly created task.
 function copyChecklist(checklistJson, taskId) {
   if (!checklistJson) return;
   let items = [];
-  try { items = JSON.parse(checklistJson); } catch (_e) { return; }
+  try {
+    items = JSON.parse(checklistJson);
+  } catch (_e) {
+    return;
+  }
   if (Array.isArray(items)) items.forEach((text, i) => insertChecklistItem.run(taskId, String(text), i));
 }
 
@@ -54,14 +57,23 @@ function generateDueTasks() {
 
   const run = db.transaction(() => {
     for (const t of activeTemplates.all()) {
-      if (!require('./requestValidation').day(t.next_due) || !Number.isInteger(t.step) || t.step < 1 || !Number.isInteger(t.lead_days) || t.lead_days < 0) {
-        console.error(`Recurring: skipping invalid template ${t.id}`); continue;
+      if (
+        !require('./requestValidation').day(t.next_due) ||
+        !Number.isInteger(t.step) ||
+        t.step < 1 ||
+        !Number.isInteger(t.lead_days) ||
+        t.lead_days < 0
+      ) {
+        console.error(`Recurring: skipping invalid template ${t.id}`);
+        continue;
       }
       let nextDue = t.next_due;
       let guard = 0;
       // Create instances whose due date is within today + lead_days.
       while (guard < MAX_PER_RUN) {
-        const triggerOn = DateTime.fromISO(nextDue, { zone: ZONE }).minus({ days: t.lead_days || 0 }).toFormat('yyyy-LL-dd');
+        const triggerOn = DateTime.fromISO(nextDue, { zone: ZONE })
+          .minus({ days: t.lead_days || 0 })
+          .toFormat('yyyy-LL-dd');
         if (triggerOn > today) break; // not time to create this one yet
         if (!existsInstance.get(t.id, nextDue)) {
           const info = insertTask.run({
@@ -93,12 +105,26 @@ function generateDueTasks() {
 let stopScheduler;
 function startRecurringScheduler() {
   if (stopScheduler) return stopScheduler;
-  try { generateDueTasks(); } catch (e) { console.error('Recurring generate failed:', e.message); }
-  const timer = setInterval(() => {
-    try { generateDueTasks(); } catch (e) { console.error('Recurring generate failed:', e.message); }
-  }, 6 * 60 * 60 * 1000);
+  try {
+    generateDueTasks();
+  } catch (e) {
+    console.error('Recurring generate failed:', e.message);
+  }
+  const timer = setInterval(
+    () => {
+      try {
+        generateDueTasks();
+      } catch (e) {
+        console.error('Recurring generate failed:', e.message);
+      }
+    },
+    6 * 60 * 60 * 1000,
+  );
   timer.unref();
-  stopScheduler = () => { clearInterval(timer); stopScheduler = null; };
+  stopScheduler = () => {
+    clearInterval(timer);
+    stopScheduler = null;
+  };
   return stopScheduler;
 }
 

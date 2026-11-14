@@ -22,30 +22,36 @@ const { employmentStatus } = require('./employment');
 
 const HABIT_DAYS = 14;
 
-const activeEmployees = db.prepare(`SELECT id, name, attendance_timezone, attendance_cutover, active, join_date, exit_date FROM users WHERE active = 1 AND role = 'EMPLOYEE'`);
+const activeEmployees = db.prepare(
+  `SELECT id, name, attendance_timezone, attendance_cutover, active, join_date, exit_date FROM users WHERE active = 1 AND role = 'EMPLOYEE'`,
+);
 const inOnDay = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day = ? LIMIT 1`);
-const inWithinWindow = db.prepare(`SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day >= ? AND day <= ? LIMIT 1`);
+const inWithinWindow = db.prepare(
+  `SELECT 1 FROM events WHERE user_id = ? AND type = 'IN' AND day >= ? AND day <= ? LIMIT 1`,
+);
 const isHolidayOn = db.prepare(`SELECT duration FROM holidays WHERE date = ? LIMIT 1`);
 const isWorkingOverride = db.prepare(`SELECT 1 FROM working_days WHERE date = ? LIMIT 1`);
 const leaveCoveringDay = db.prepare(
-  `SELECT 1 FROM leaves WHERE user_id = ? AND status IN ('PENDING','APPROVED') AND start_date <= ? AND end_date >= ? LIMIT 1`
+  `SELECT 1 FROM leaves WHERE user_id = ? AND status IN ('PENDING','APPROVED') AND start_date <= ? AND end_date >= ? LIMIT 1`,
 );
 const insertPendingLeave = db.prepare(
   `INSERT INTO leaves (user_id, start_date, end_date, kind, reason, status, days, created_ts)
-   VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`
+   VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
 );
 
 // The most recently completed attendance day (yesterday's shift), when run
 // after the cutover. Callers may pass an explicit day for manual runs/tests.
 function lastCompletedAttendanceDay(user) {
-  return DateTime.fromISO(attendanceToday(settings(user)), { zone: ZONE }).minus({ days: 1 }).toFormat('yyyy-LL-dd');
+  return DateTime.fromISO(attendanceToday(settings(user)), { zone: ZONE })
+    .minus({ days: 1 })
+    .toFormat('yyyy-LL-dd');
 }
 
 // Flag no-shows for one attendance day. Returns the number of requests created.
 function flagAbsences(dayStr) {
   if (!dayStr) {
     // Each employee's most recently closed local day may differ from the office.
-    const days = new Set(activeEmployees.all().map(u => lastCompletedAttendanceDay(u)));
+    const days = new Set(activeEmployees.all().map((u) => lastCompletedAttendanceDay(u)));
     return [...days].reduce((n, day) => n + flagAbsences(day), 0);
   }
   const day = dayStr || lastCompletedAttendanceDay();
@@ -66,9 +72,9 @@ function flagAbsences(dayStr) {
     for (const u of activeEmployees.all()) {
       if (day > lastCompletedAttendanceDay(u)) continue;
       if (employmentStatus(u, day)) continue;
-      if (inOnDay.get(u.id, day)) continue;                                   // they were present
-      if (!inWithinWindow.get(u.id, windowStart, day)) continue;             // no clock-in habit
-      if (leaveCoveringDay.get(u.id, day, day)) continue;                    // already on/awaiting leave
+      if (inOnDay.get(u.id, day)) continue; // they were present
+      if (!inWithinWindow.get(u.id, windowStart, day)) continue; // no clock-in habit
+      if (leaveCoveringDay.get(u.id, day, day)) continue; // already on/awaiting leave
       insertPendingLeave.run(u.id, day, day, holiday ? 'HALF' : 'FULL', reason, holiday ? 0.5 : 1, now().toMillis());
       created.push(u.name);
     }
@@ -92,8 +98,15 @@ function flagAbsences(dayStr) {
 let stopScheduler;
 function startAbsenceScheduler() {
   if (stopScheduler) return stopScheduler;
-  let timer, stopped = false, pending = Promise.resolve();
-  stopScheduler = async () => { stopped = true; clearTimeout(timer); await pending; stopScheduler = null; };
+  let timer,
+    stopped = false,
+    pending = Promise.resolve();
+  stopScheduler = async () => {
+    stopped = true;
+    clearTimeout(timer);
+    await pending;
+    stopScheduler = null;
+  };
   if (String(process.env.AUTO_ABSENCE || 'on').toLowerCase() === 'off') {
     console.log('Auto-absence flagging: disabled (AUTO_ABSENCE=off).');
     return;
@@ -106,7 +119,11 @@ function startAbsenceScheduler() {
     let next = n.set({ hour, minute: 0, second: 0, millisecond: 0 });
     if (next <= n) next = next.plus({ days: 1 });
     timer = setTimeout(() => {
-      try { flagAbsences(); } catch (e) { console.error('Auto-absence run failed:', e.message); }
+      try {
+        flagAbsences();
+      } catch (e) {
+        console.error('Auto-absence run failed:', e.message);
+      }
       scheduleNext();
     }, next.toMillis() - n.toMillis()).unref();
     console.log(`Auto-absence flagging scheduled for ${next.toFormat('yyyy-LL-dd HH:mm')} (${ZONE}).`);

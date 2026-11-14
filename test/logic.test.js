@@ -22,19 +22,28 @@ const H = 60 * 60 * 1000;
 const T0 = 1_700_000_000_000;
 
 test('summarize: worked minutes between IN and OUT', () => {
-  const s = summarize([{ type: 'IN', ts: T0 }, { type: 'OUT', ts: T0 + 2 * H }], null);
+  const s = summarize(
+    [
+      { type: 'IN', ts: T0 },
+      { type: 'OUT', ts: T0 + 2 * H },
+    ],
+    null,
+  );
   assert.equal(s.workedMinutes, 120);
   assert.equal(s.breakMinutes, 0);
   assert.equal(s.state, 'OUT');
 });
 
 test('summarize: breaks are excluded from worked time', () => {
-  const s = summarize([
-    { type: 'IN', ts: T0 },
-    { type: 'BREAK_START', ts: T0 + 1 * H },
-    { type: 'BREAK_END', ts: T0 + 1.5 * H },
-    { type: 'OUT', ts: T0 + 3 * H },
-  ], null);
+  const s = summarize(
+    [
+      { type: 'IN', ts: T0 },
+      { type: 'BREAK_START', ts: T0 + 1 * H },
+      { type: 'BREAK_END', ts: T0 + 1.5 * H },
+      { type: 'OUT', ts: T0 + 3 * H },
+    ],
+    null,
+  );
   assert.equal(s.workedMinutes, 150); // 1h before break + 1.5h after
   assert.equal(s.breakMinutes, 30);
 });

@@ -14,7 +14,7 @@ const listBetween = db.prepare(`SELECT * FROM working_days WHERE date >= ? AND d
 const listAll = db.prepare(`SELECT * FROM working_days ORDER BY date`);
 const upsert = db.prepare(
   `INSERT INTO working_days (date, note, created_by, created_ts) VALUES (@date, @note, @created_by, @created_ts)
-   ON CONFLICT(date) DO UPDATE SET note = excluded.note`
+   ON CONFLICT(date) DO UPDATE SET note = excluded.note`,
 );
 const remove = db.prepare(`DELETE FROM working_days WHERE id = ?`);
 
@@ -29,7 +29,12 @@ router.get('/', requireAdmin, (req, res) => {
 router.post('/', requireAdmin, (req, res) => {
   const date = String(req.body.date || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Valid date (yyyy-mm-dd) required' });
-  upsert.run({ date, note: String(req.body.note || '').slice(0, 120), created_by: req.user.id, created_ts: now().toMillis() });
+  upsert.run({
+    date,
+    note: String(req.body.note || '').slice(0, 120),
+    created_by: req.user.id,
+    created_ts: now().toMillis(),
+  });
   res.json({ ok: true });
 });
 

@@ -22,7 +22,10 @@ const cfg = () => ({
   to: process.env.BACKUP_EMAIL_TO || '',
   from: process.env.BACKUP_EMAIL_FROM || process.env.SMTP_USER || '',
 });
-const enabled = () => { const c = cfg(); return !!(c.host && c.user && c.pass && c.to); };
+const enabled = () => {
+  const c = cfg();
+  return !!(c.host && c.user && c.pass && c.to);
+};
 
 // --- CSV building (formula-injection safe) ---
 function cell(v) {
@@ -30,41 +33,108 @@ function cell(v) {
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
 }
-const rowsToCsv = (header, rows) => [header.map(cell).join(','), ...rows.map((r) => r.map(cell).join(','))].join('\r\n');
+const rowsToCsv = (header, rows) =>
+  [header.map(cell).join(','), ...rows.map((r) => r.map(cell).join(','))].join('\r\n');
 const dt = (ts) => (ts ? DateTime.fromMillis(ts).setZone(ZONE).toFormat('yyyy-LL-dd HH:mm') : '');
 
 // Build one CSV per business table. Returns [{ filename, content }].
 function buildCsvAttachments() {
   const out = [];
-  out.push({ filename: 'employees.csv', content: rowsToCsv(
-    ['Code', 'Name', 'Email', 'Role', 'Department', 'Title', 'Phone', 'Shift start', 'Joined', 'Last working day', 'Leave balance', 'Active'],
-    db.prepare(`SELECT emp_code, name, email, role, department, title, phone, shift_start, join_date, exit_date, leave_balance, active FROM users ORDER BY active DESC, name COLLATE NOCASE`).all()
-      .map((u) => [u.emp_code, u.name, u.email, u.role, u.department, u.title, u.phone, u.shift_start, u.join_date, u.exit_date, u.leave_balance, u.active ? 'Yes' : 'No'])) });
+  out.push({
+    filename: 'employees.csv',
+    content: rowsToCsv(
+      [
+        'Code',
+        'Name',
+        'Email',
+        'Role',
+        'Department',
+        'Title',
+        'Phone',
+        'Shift start',
+        'Joined',
+        'Last working day',
+        'Leave balance',
+        'Active',
+      ],
+      db
+        .prepare(
+          `SELECT emp_code, name, email, role, department, title, phone, shift_start, join_date, exit_date, leave_balance, active FROM users ORDER BY active DESC, name COLLATE NOCASE`,
+        )
+        .all()
+        .map((u) => [
+          u.emp_code,
+          u.name,
+          u.email,
+          u.role,
+          u.department,
+          u.title,
+          u.phone,
+          u.shift_start,
+          u.join_date,
+          u.exit_date,
+          u.leave_balance,
+          u.active ? 'Yes' : 'No',
+        ]),
+    ),
+  });
 
-  out.push({ filename: 'attendance.csv', content: rowsToCsv(
-    ['Employee', 'Type', 'Time', 'Attendance day', 'Device'],
-    db.prepare(`SELECT u.name, e.type, e.ts, e.day, e.device FROM events e JOIN users u ON u.id = e.user_id ORDER BY e.ts, e.id`).all()
-      .map((e) => [e.name, e.type, dt(e.ts), e.day, e.device])) });
+  out.push({
+    filename: 'attendance.csv',
+    content: rowsToCsv(
+      ['Employee', 'Type', 'Time', 'Attendance day', 'Device'],
+      db
+        .prepare(
+          `SELECT u.name, e.type, e.ts, e.day, e.device FROM events e JOIN users u ON u.id = e.user_id ORDER BY e.ts, e.id`,
+        )
+        .all()
+        .map((e) => [e.name, e.type, dt(e.ts), e.day, e.device]),
+    ),
+  });
 
-  out.push({ filename: 'leaves.csv', content: rowsToCsv(
-    ['Employee', 'Start', 'End', 'Type', 'Days', 'Status', 'Reason', 'Decided by'],
-    db.prepare(`SELECT u.name, l.start_date, l.end_date, l.kind, l.days, l.status, l.reason, du.name AS decided_by
+  out.push({
+    filename: 'leaves.csv',
+    content: rowsToCsv(
+      ['Employee', 'Start', 'End', 'Type', 'Days', 'Status', 'Reason', 'Decided by'],
+      db
+        .prepare(
+          `SELECT u.name, l.start_date, l.end_date, l.kind, l.days, l.status, l.reason, du.name AS decided_by
                 FROM leaves l JOIN users u ON u.id = l.user_id LEFT JOIN users du ON du.id = l.decided_by
-                ORDER BY l.start_date DESC`).all()
-      .map((l) => [l.name, l.start_date, l.end_date, l.kind, l.days, l.status, l.reason, l.decided_by || ''])) });
+                ORDER BY l.start_date DESC`,
+        )
+        .all()
+        .map((l) => [l.name, l.start_date, l.end_date, l.kind, l.days, l.status, l.reason, l.decided_by || '']),
+    ),
+  });
 
-  out.push({ filename: 'tasks.csv', content: rowsToCsv(
-    ['Title', 'Assignee', 'Client', 'Priority', 'Status', 'Due', 'Created'],
-    db.prepare(`SELECT t.title, a.name AS assignee, c.name AS client, t.priority, t.status, t.due_date, t.created_ts
+  out.push({
+    filename: 'tasks.csv',
+    content: rowsToCsv(
+      ['Title', 'Assignee', 'Client', 'Priority', 'Status', 'Due', 'Created'],
+      db
+        .prepare(
+          `SELECT t.title, a.name AS assignee, c.name AS client, t.priority, t.status, t.due_date, t.created_ts
                 FROM tasks t JOIN users a ON a.id = t.assignee_id LEFT JOIN clients c ON c.id = t.client_id
-                ORDER BY t.created_ts DESC`).all()
-      .map((t) => [t.title, t.assignee, t.client || '', t.priority, t.status, t.due_date, dt(t.created_ts)])) });
+                ORDER BY t.created_ts DESC`,
+        )
+        .all()
+        .map((t) => [t.title, t.assignee, t.client || '', t.priority, t.status, t.due_date, dt(t.created_ts)]),
+    ),
+  });
 
-  out.push({ filename: 'clients.csv', content: rowsToCsv(
-    ['Name', 'Code', 'Business type', 'Stage', 'Email', 'Parent', 'Active'],
-    db.prepare(`SELECT c.name, c.code, c.business_type, c.stage, c.email, p.name AS parent, c.active
-                FROM clients c LEFT JOIN clients p ON p.id = c.parent_id ORDER BY c.name COLLATE NOCASE`).all()
-      .map((c) => [c.name, c.code, c.business_type, c.stage, c.email, c.parent || '', c.active ? 'Yes' : 'No'])) });
+  out.push({
+    filename: 'clients.csv',
+    content: rowsToCsv(
+      ['Name', 'Code', 'Business type', 'Stage', 'Email', 'Parent', 'Active'],
+      db
+        .prepare(
+          `SELECT c.name, c.code, c.business_type, c.stage, c.email, p.name AS parent, c.active
+                FROM clients c LEFT JOIN clients p ON p.id = c.parent_id ORDER BY c.name COLLATE NOCASE`,
+        )
+        .all()
+        .map((c) => [c.name, c.code, c.business_type, c.stage, c.email, c.parent || '', c.active ? 'Yes' : 'No']),
+    ),
+  });
 
   return out;
 }
@@ -73,8 +143,18 @@ function buildCsvAttachments() {
 async function sendBackup(kind = 'Manual', toOverride) {
   const c = cfg();
   const to = toOverride || c.to;
-  if (!c.host || !c.user || !c.pass) return { ok: false, error: 'SMTP not configured', message: 'Set SMTP_HOST, SMTP_USER and SMTP_PASS (and BACKUP_EMAIL_TO) on the server.' };
-  if (!to) return { ok: false, error: 'no recipient', message: 'Set BACKUP_EMAIL_TO to the address that should receive backups.' };
+  if (!c.host || !c.user || !c.pass)
+    return {
+      ok: false,
+      error: 'SMTP not configured',
+      message: 'Set SMTP_HOST, SMTP_USER and SMTP_PASS (and BACKUP_EMAIL_TO) on the server.',
+    };
+  if (!to)
+    return {
+      ok: false,
+      error: 'no recipient',
+      message: 'Set BACKUP_EMAIL_TO to the address that should receive backups.',
+    };
 
   const stamp = now().toFormat('yyyy-LL-dd');
   const attachments = buildCsvAttachments();
@@ -82,25 +162,38 @@ async function sendBackup(kind = 'Manual', toOverride) {
   const path = require('node:path');
   const tmp = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'wln-email-backup-'));
   const snapshot = path.join(tmp, 'portal.db');
-  try { await db.backup(snapshot); }
-  catch (error) { await fs.rm(tmp, { recursive: true, force: true }); throw error; }
+  try {
+    await db.backup(snapshot);
+  } catch (error) {
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw error;
+  }
   attachments.push({ filename: `litnexus-portal-${stamp}.db`, path: snapshot });
 
   const transporter = nodemailer.createTransport({
-    host: c.host, port: c.port, secure: c.port === 465, auth: { user: c.user, pass: c.pass },
+    host: c.host,
+    port: c.port,
+    secure: c.port === 465,
+    auth: { user: c.user, pass: c.pass },
   });
   try {
     await transporter.sendMail({
-      from: c.from, to,
+      from: c.from,
+      to,
       subject: `LIT Nexus portal backup — ${kind} (${stamp})`,
-      text: `Attached is your ${kind.toLowerCase()} LIT Nexus data backup for ${stamp}.\n\n`
-        + `CSV files (open in Excel): employees, attendance, leaves, tasks, clients.\n`
-        + `The .db file is the full database for a complete restore if ever needed.`,
+      text:
+        `Attached is your ${kind.toLowerCase()} LIT Nexus data backup for ${stamp}.\n\n` +
+        `CSV files (open in Excel): employees, attendance, leaves, tasks, clients.\n` +
+        `The .db file is the full database for a complete restore if ever needed.`,
       attachments,
     });
     return { ok: true, to, files: attachments.length, message: `Backup emailed to ${to}.` };
   } catch (e) {
-    return { ok: false, error: e.message, message: 'Email send failed — check the SMTP settings (host/port/user/app password).' };
+    return {
+      ok: false,
+      error: e.message,
+      message: 'Email send failed — check the SMTP settings (host/port/user/app password).',
+    };
   } finally {
     transporter.close();
     await fs.rm(tmp, { recursive: true, force: true });
@@ -112,9 +205,19 @@ async function sendBackup(kind = 'Manual', toOverride) {
 let stopScheduler;
 function startBackupScheduler() {
   if (stopScheduler) return stopScheduler;
-  let timer, stopped = false, pending = Promise.resolve();
-  stopScheduler = async () => { stopped = true; clearTimeout(timer); await pending; stopScheduler = null; };
-  if (!enabled()) { console.log('Backup email: disabled (SMTP not configured).'); return; }
+  let timer,
+    stopped = false,
+    pending = Promise.resolve();
+  stopScheduler = async () => {
+    stopped = true;
+    clearTimeout(timer);
+    await pending;
+    stopScheduler = null;
+  };
+  if (!enabled()) {
+    console.log('Backup email: disabled (SMTP not configured).');
+    return;
+  }
   const hour = Math.min(23, Math.max(0, Number(process.env.BACKUP_EMAIL_HOUR ?? 6)));
   const weeklyDow = Math.min(7, Math.max(1, Number(process.env.BACKUP_WEEKLY_DOW ?? 1))); // 1=Mon..7=Sun
   if (!Number.isInteger(hour)) throw new Error('Scheduler hour must be an integer');
@@ -125,15 +228,25 @@ function startBackupScheduler() {
     if (next <= n) next = next.plus({ days: 1 });
     timer = setTimeout(() => {
       pending = (async () => {
-      try {
-        const d = now();
-        if (d.weekday === weeklyDow) { const r = await sendBackup('Weekly'); console.log('Backup email (weekly):', JSON.stringify(r)); }
-        if (d.day === 1) { const r = await sendBackup('Monthly'); console.log('Backup email (monthly):', JSON.stringify(r)); }
-      } catch (e) { console.error('Backup email run failed:', e.message); }
-      scheduleNext();
+        try {
+          const d = now();
+          if (d.weekday === weeklyDow) {
+            const r = await sendBackup('Weekly');
+            console.log('Backup email (weekly):', JSON.stringify(r));
+          }
+          if (d.day === 1) {
+            const r = await sendBackup('Monthly');
+            console.log('Backup email (monthly):', JSON.stringify(r));
+          }
+        } catch (e) {
+          console.error('Backup email run failed:', e.message);
+        }
+        scheduleNext();
       })();
     }, next.toMillis() - n.toMillis()).unref();
-    console.log(`Backup email scheduled for ${next.toFormat('yyyy-LL-dd HH:mm')} (${ZONE}); weekly on day ${weeklyDow}, monthly on the 1st.`);
+    console.log(
+      `Backup email scheduled for ${next.toFormat('yyyy-LL-dd HH:mm')} (${ZONE}); weekly on day ${weeklyDow}, monthly on the 1st.`,
+    );
   };
   scheduleNext();
   return stopScheduler;

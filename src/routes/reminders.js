@@ -18,14 +18,14 @@ const router = express.Router();
 const WEEKDAY = Math.min(7, Math.max(1, Number(process.env.REMINDER_WEEKDAY ?? 5))); // Friday
 const enabled = () => String(process.env.FRIDAY_REMINDER || 'on').toLowerCase() !== 'off';
 
-const getAck = db.prepare(`SELECT acked_ts FROM reminder_acks WHERE user_id = ? AND kind = ? AND day = ? AND item = ''`);
+const getAck = db.prepare(
+  `SELECT acked_ts FROM reminder_acks WHERE user_id = ? AND kind = ? AND day = ? AND item = ''`,
+);
 const insertAck = db.prepare(
-  `INSERT OR IGNORE INTO reminder_acks (user_id, kind, day, item, acked_ts) VALUES (?, ?, ?, '', ?)`
+  `INSERT OR IGNORE INTO reminder_acks (user_id, kind, day, item, acked_ts) VALUES (?, ?, ?, '', ?)`,
 );
 // Did they log an achievement in the last 7 days? (so we can pre-tick that item)
-const recentAchievement = db.prepare(
-  `SELECT COUNT(*) AS c FROM achievements WHERE user_id = ? AND date >= ?`
-);
+const recentAchievement = db.prepare(`SELECT COUNT(*) AS c FROM achievements WHERE user_id = ? AND date >= ?`);
 
 // Is today (by attendance day, so an overnight Friday shift still counts) the
 // reminder weekday?
@@ -59,9 +59,11 @@ router.post('/friday/ack', requireAuth, (req, res) => {
 
 // ---- Birthdays ----
 const getUserBirthday = db.prepare(`SELECT name, birthday FROM users WHERE id = ?`);
-const getBdayAck = db.prepare(`SELECT 1 FROM reminder_acks WHERE user_id = ? AND kind = 'BIRTHDAY' AND day = ? AND item = ''`);
+const getBdayAck = db.prepare(
+  `SELECT 1 FROM reminder_acks WHERE user_id = ? AND kind = 'BIRTHDAY' AND day = ? AND item = ''`,
+);
 const insertBdayAck = db.prepare(
-  `INSERT OR IGNORE INTO reminder_acks (user_id, kind, day, item, acked_ts) VALUES (?, 'BIRTHDAY', ?, '', ?)`
+  `INSERT OR IGNORE INTO reminder_acks (user_id, kind, day, item, acked_ts) VALUES (?, 'BIRTHDAY', ?, '', ?)`,
 );
 
 // Is it my birthday today, and have I already seen the popup?

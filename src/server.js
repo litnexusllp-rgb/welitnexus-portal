@@ -11,28 +11,29 @@ const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
 const { startBackgroundWorker } = require('./backgroundWorker');
 
-
 const app = express();
 app.set('trust proxy', require('./proxyConfig').trustProxy());
 
 // Security headers. CSP is tuned for this app: inline styles + Google Fonts
 // are used by the frontend, scripts are loaded from same-origin files only.
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'"],
-      frameSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        frameSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
     },
-  },
-  crossOriginEmbedderPolicy: false,
-}));
+    crossOriginEmbedderPolicy: false,
+  }),
+);
 
 app.use(cookieParser());
 app.use(loadUser);
@@ -101,7 +102,8 @@ let backgroundHealth = () => true;
 app.get('/api/health', (_req, res) => {
   try {
     db.prepare('SELECT 1').get();
-    if (!backgroundHealth()) return res.status(503).json({ ok: false, error: 'background worker unavailable', ts: Date.now() });
+    if (!backgroundHealth())
+      return res.status(503).json({ ok: false, error: 'background worker unavailable', ts: Date.now() });
     res.json({ ok: true, ts: Date.now(), revision: process.env.RAILWAY_GIT_COMMIT_SHA || null });
   } catch (_e) {
     res.status(503).json({ ok: false, error: 'database unavailable', ts: Date.now() });
@@ -122,7 +124,14 @@ app.use((err, req, res, _next) => {
   if (res.headersSent) return _next(err);
   const status = Number.isInteger(err.status) && err.status >= 400 && err.status <= 599 ? err.status : 500;
   if (status >= 500) console.error('Unhandled error:', err);
-  res.status(status).json({ error: status < 500 ? (err.type === 'entity.parse.failed' ? 'Invalid JSON body' : err.message) : 'Something went wrong. Please try again.' });
+  res.status(status).json({
+    error:
+      status < 500
+        ? err.type === 'entity.parse.failed'
+          ? 'Invalid JSON body'
+          : err.message
+        : 'Something went wrong. Please try again.',
+  });
 });
 
 async function start() {
@@ -130,10 +139,22 @@ async function start() {
   const stopBackground = startBackgroundWorker();
   backgroundHealth = stopBackground.health || (() => true);
   const PORT = process.env.PORT || 3000;
-  const server = app.listen(PORT, () => console.log(`WeLitNexus portal running on http://localhost:${server.address().port}`));
+  const server = app.listen(PORT, () =>
+    console.log(`WeLitNexus portal running on http://localhost:${server.address().port}`),
+  );
   require('./shutdown').installShutdown({ server, db, stopBackground });
-  server.on('error', async error => { console.error('HTTP startup failed:', error); await stopBackground(); db.close(); process.exitCode = 1; });
+  server.on('error', async (error) => {
+    console.error('HTTP startup failed:', error);
+    await stopBackground();
+    db.close();
+    process.exitCode = 1;
+  });
   return server;
 }
-if (require.main === module) start().catch(error => { console.error('Startup failed:', error); if (db.open) db.close(); process.exitCode = 1; });
+if (require.main === module)
+  start().catch((error) => {
+    console.error('Startup failed:', error);
+    if (db.open) db.close();
+    process.exitCode = 1;
+  });
 module.exports = { app, start };

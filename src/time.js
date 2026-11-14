@@ -48,11 +48,24 @@ function attendanceToday(config = {}) {
 }
 // [startMs, endMs) window for a given attendance date string.
 function attendanceWindow(dateStr) {
-  const s = DateTime.fromISO(dateStr, { zone: ZONE }).set({ hour: ATT_CUTOVER(), minute: 0, second: 0, millisecond: 0 });
+  const s = DateTime.fromISO(dateStr, { zone: ZONE }).set({
+    hour: ATT_CUTOVER(),
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
   return { startMs: s.toMillis(), endMs: s.plus({ days: 1 }).toMillis() };
 }
 
 module.exports = {
-  ZONE, now, todayStr, dayFromTs, inclusiveDays, DateTime,
-  ATT_CUTOVER, attendanceDayFromTs, attendanceToday, attendanceWindow,
+  ZONE,
+  now,
+  todayStr,
+  dayFromTs,
+  inclusiveDays,
+  DateTime,
+  ATT_CUTOVER,
+  attendanceDayFromTs,
+  attendanceToday,
+  attendanceWindow,
 };

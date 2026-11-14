@@ -8,7 +8,7 @@ const router = express.Router();
 
 const listForUser = db.prepare(
   `SELECT id, type, title, body, link_view, read, created_ts
-   FROM notifications WHERE user_id = ? ORDER BY created_ts DESC, id DESC LIMIT 50`
+   FROM notifications WHERE user_id = ? ORDER BY created_ts DESC, id DESC LIMIT 50`,
 );
 const unreadCount = db.prepare(`SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read = 0`);
 const markOneRead = db.prepare(`UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?`);
