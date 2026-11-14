@@ -3,7 +3,7 @@
 const asyncRoute = require('../asyncRoute');
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { DateTime, ZONE, now, todayStr, inclusiveDays } = require('../time');
 const { resolveLateExplanation } = require('../lateExplanations');
 const { employmentStatus } = require('../employment');
@@ -107,15 +107,15 @@ function employeeLeaveHistory(userId, month) {
 // Server-authoritative payment preview; employees can preview only themselves.
 router.post('/preview', requireAuth, (req, res) => {
   const userId = Number(req.body.user_id || req.user.id);
-  if (userId !== req.user.id && req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admins only' });
+  if (userId !== req.user.id && !hasAdminAccess(req)) return res.status(403).json({ error: 'Admins only' });
   const user = getUser.get(userId);
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
     const leave = {
-      ...normalizeLeave(req.body, { allowPast: req.user.role === 'ADMIN', requireReason: false }),
+      ...normalizeLeave(req.body, { allowPast: hasAdminAccess(req), requireReason: false }),
       user_id: userId,
-      status: req.user.role === 'ADMIN' ? 'APPROVED' : 'PENDING',
+      status: hasAdminAccess(req) ? 'APPROVED' : 'PENDING',
     };
     assertAvailable(userId, leave);
     res.json({

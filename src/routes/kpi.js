@@ -7,7 +7,7 @@
 const asyncRoute = require('../asyncRoute');
 const express = require('express');
 const { db } = require('../db');
-const { requireAdmin, requireAuth } = require('../auth');
+const { requireAdmin, requireAuth, hasAdminAccess } = require('../auth');
 const { now, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const asana = require('../asana');
@@ -225,7 +225,7 @@ router.get(
   requireAuth,
   asyncRoute(async (req, res) => {
     const asked = Number(req.query.user_id);
-    const targetId = req.user.role === 'ADMIN' && asked ? asked : req.user.id;
+    const targetId = hasAdminAccess(req) && asked ? asked : req.user.id;
     const data = await buildKpi(req);
     res.json({ ...data, rows: data.rows.filter((r) => r.id === targetId), viewingUserId: targetId });
   }),

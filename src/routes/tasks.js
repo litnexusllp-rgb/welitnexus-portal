@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 const { notify } = require('../notify');
 const { generateDueTasks } = require('../recurring');
@@ -58,7 +58,7 @@ function loadManageableTask(req, res) {
     res.status(404).json({ error: 'Not found' });
     return null;
   }
-  if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
+  if (!hasAdminAccess(req) && task.assignee_id !== req.user.id) {
     res.status(403).json({ error: 'Not your task' });
     return null;
   }
@@ -94,7 +94,7 @@ function withChecklists(tasks) {
 router.post('/', requireAuth, (req, res) => {
   const title = String(req.body.title || '').trim();
   if (!title) return res.status(400).json({ error: 'Title is required' });
-  const admin = req.user.role === 'ADMIN';
+  const admin = hasAdminAccess(req);
   const assignee_id = admin ? Number(req.body.assignee_id) : req.user.id;
   if (!assignee_id) return res.status(400).json({ error: 'Assignee is required' });
   const client_id = req.body.client_id ? Number(req.body.client_id) : null;
@@ -313,7 +313,7 @@ router.post('/:id/status', require('../requestValidation').validateParams, requi
   if (!STATUS.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const task = getTask.get(Number(req.params.id));
   if (!task) return res.status(404).json({ error: 'Not found' });
-  if (req.user.role !== 'ADMIN' && task.assignee_id !== req.user.id) {
+  if (!hasAdminAccess(req) && task.assignee_id !== req.user.id) {
     return res.status(403).json({ error: 'Not your task' });
   }
   if (status === 'DONE' && countOpenItems.get(task.id).c > 0) {

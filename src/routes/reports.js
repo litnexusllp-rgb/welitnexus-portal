@@ -8,7 +8,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAdmin, requireAuth } = require('../auth');
+const { requireAdmin, requireAuth, hasAdminAccess } = require('../auth');
 const { now, attendanceToday, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const { halfHolidayStatus, addAttendanceTotals } = require('../holidayAttendance');
@@ -191,7 +191,7 @@ function buildAttendanceReport(user, req) {
       status,
       leaveKind: leave?.kind || null,
       leavePay: leavePayByDay.get(day) || null,
-      ...(req.user.role === 'ADMIN' && leave
+      ...(hasAdminAccess(req) && leave
         ? { approvedLeave: { id: leave.id, start: leave.start_date, end: leave.end_date } }
         : {}),
       approvedShortDay,
@@ -302,7 +302,7 @@ router.get('/attendance', requireAdmin, (req, res) => {
 router.get('/my-attendance', requireAuth, (req, res) => {
   res.set('Cache-Control', 'no-store');
   const asked = Number(req.query.user_id);
-  const targetId = req.user.role === 'ADMIN' && asked ? asked : req.user.id;
+  const targetId = hasAdminAccess(req) && asked ? asked : req.user.id;
   const user = getUser.get(targetId);
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   const data = buildAttendanceReport(user, req);

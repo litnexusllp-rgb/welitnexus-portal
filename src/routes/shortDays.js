@@ -2,7 +2,7 @@
 
 const router = require('express').Router();
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { DateTime, ZONE, now, todayStr } = require('../time');
 const { EFFECTIVE, calendarFrom, scheduledDays } = require('../leaveCalculation');
 const { balances, syncBalance } = require('../leavePolicy');
@@ -76,7 +76,7 @@ router.get('/', (req, res) => {
   try {
     const id = req.query.user_id === undefined ? req.user.id : Number(req.query.user_id);
     if (!Number.isSafeInteger(id) || id < 1) fail('Choose a valid employee.');
-    if (id !== req.user.id && req.user.role !== 'ADMIN') fail('Admins only', 403);
+    if (id !== req.user.id && !hasAdminAccess(req)) fail('Admins only', 403);
     if (!user(id) || user(id).role !== 'EMPLOYEE') fail('Choose an employee account.', 404);
     const month = req.query.month || todayStr().slice(0, 7);
     if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) fail('Choose a valid month.');

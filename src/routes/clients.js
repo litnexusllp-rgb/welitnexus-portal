@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 
 const router = express.Router();
@@ -63,7 +63,7 @@ router.get('/pending', requireAdmin, (_req, res) => res.json({ clients: listPend
 router.post('/', requireAuth, (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Client name is required' });
-  const admin = req.user.role === 'ADMIN';
+  const admin = hasAdminAccess(req);
   const info = insertClient.run({
     name,
     code: String(req.body.code || '').slice(0, 20),

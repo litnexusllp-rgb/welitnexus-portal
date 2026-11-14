@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 const { generateDueTasks } = require('../recurring');
 
@@ -36,8 +36,8 @@ const listMine = db.prepare(`${SELECT} WHERE r.created_by = ? ORDER BY r.active 
 const getOne = db.prepare(`SELECT * FROM recurring_tasks WHERE id = ?`);
 
 // Admins see/return all schedules; employees only their own.
-const listFor = (req) => (req.user.role === 'ADMIN' ? listAll.all() : listMine.all(req.user.id));
-const canManage = (req, rec) => req.user.role === 'ADMIN' || rec.created_by === req.user.id;
+const listFor = (req) => (hasAdminAccess(req) ? listAll.all() : listMine.all(req.user.id));
+const canManage = (req, rec) => hasAdminAccess(req) || rec.created_by === req.user.id;
 const insertRec = db.prepare(
   `INSERT INTO recurring_tasks (title, description, client_id, assignee_id, priority, frequency, step, lead_days, next_due, checklist_json, active, created_by, created_ts)
    VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, @step, @lead_days, @next_due, @checklist_json, 1, @created_by, @created_ts)`,
@@ -90,7 +90,7 @@ router.get('/mine', requireAuth, (req, res) => res.json({ recurring: listMine.al
 // Create a schedule. Admins assign to anyone; employees create for
 // themselves and must pick a client.
 router.post('/', requireAuth, (req, res) => {
-  const admin = req.user.role === 'ADMIN';
+  const admin = hasAdminAccess(req);
   const r = clean(req.body);
   const error = configError(r);
   if (error) return res.status(400).json({ error });
@@ -113,7 +113,7 @@ router.put('/:id', require('../requestValidation').validateParams, requireAuth, 
   const patch = clean(req.body, existing);
   const error = configError(patch);
   if (error) return res.status(400).json({ error });
-  if (req.user.role !== 'ADMIN') patch.assignee_id = existing.assignee_id; // employees can't reassign
+  if (!hasAdminAccess(req)) patch.assignee_id = existing.assignee_id; // employees can't reassign
   updateRec.run({ id: existing.id, ...patch });
   res.json({ recurring: listFor(req) });
 });

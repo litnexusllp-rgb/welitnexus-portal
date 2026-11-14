@@ -278,8 +278,9 @@ async function fetchIcs(urlString) {
     url = await assertPublicUrl(new URL(res.headers.get('location'), url).toString());
   }
   if (!res.ok) throw fail(`The calendar link answered ${res.status}`, 502);
-  const text = await res.text();
-  if (text.length > 15 * 1024 * 1024) throw fail('That calendar is too large', 502);
+  const text = (await c.readCapped(res, 15 * 1024 * 1024, () => fail('That calendar is too large', 502))).toString(
+    'utf8',
+  );
   if (!/BEGIN:VCALENDAR/i.test(text)) throw fail('That link did not return a calendar (.ics) file', 502);
   return text;
 }
@@ -412,7 +413,7 @@ async function syncSource(src, from, to) {
   }
 }
 
-function portalEvents(user, from, to, { billing } = {}) {
+function portalEvents(user, from, to, { billing, admin = false } = {}) {
   const day = (ms) => DateTime.fromMillis(ms, { zone: ZONE }).toISODate();
   const a = day(from),
     b = day(to);
@@ -424,11 +425,10 @@ function portalEvents(user, from, to, { billing } = {}) {
   const out = [];
   for (const h of db.prepare('SELECT date, name FROM holidays WHERE date BETWEEN ? AND ?').all(a, b))
     out.push({ source: 'portal', kind: 'holiday', uid: 'holiday:' + h.date, title: h.name, ...allDay(h.date) });
-  const leaveSql =
-    user.role === 'ADMIN'
-      ? "SELECT l.*, u.name FROM leaves l JOIN users u ON u.id=l.user_id WHERE l.status='APPROVED' AND l.end_date >= ? AND l.start_date <= ?"
-      : "SELECT l.*, u.name FROM leaves l JOIN users u ON u.id=l.user_id WHERE l.status='APPROVED' AND l.end_date >= ? AND l.start_date <= ? AND l.user_id = " +
-        Number(user.id);
+  const leaveSql = admin
+    ? "SELECT l.*, u.name FROM leaves l JOIN users u ON u.id=l.user_id WHERE l.status='APPROVED' AND l.end_date >= ? AND l.start_date <= ?"
+    : "SELECT l.*, u.name FROM leaves l JOIN users u ON u.id=l.user_id WHERE l.status='APPROVED' AND l.end_date >= ? AND l.start_date <= ? AND l.user_id = " +
+      Number(user.id);
   for (const l of db.prepare(leaveSql).all(a, b)) {
     out.push({
       source: 'portal',
@@ -473,7 +473,7 @@ function portalEvents(user, from, to, { billing } = {}) {
   return out.map((e) => ({ busy: true, location: '', url: '', ...e, color: '#64748B', source_label: 'Portal' }));
 }
 
-async function events(user, from, to, { billing = false, refresh = false } = {}) {
+async function events(user, from, to, { billing = false, admin = false, refresh = false } = {}) {
   const sources = db.prepare('SELECT * FROM int_calendar_sources WHERE user_id=? AND visible=1').all(user.id);
   const stale = sources.filter(
     (s) => refresh || !s.last_sync_ts || Date.now() - s.last_sync_ts > (s.kind === 'ICS' ? 15 : 5) * 60 * 1000,
@@ -503,7 +503,7 @@ async function events(user, from, to, { billing = false, refresh = false } = {})
       source_label: r.source_label,
       read_only: Boolean(r.read_only),
     }))
-    .concat(portalEvents(user, from, to, { billing }));
+    .concat(portalEvents(user, from, to, { billing, admin }));
   return {
     events: list.sort((x, y) => x.start_ts - y.start_ts),
     conflicts: conflicts(list),

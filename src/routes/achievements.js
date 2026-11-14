@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 
 const router = express.Router();
@@ -69,7 +69,7 @@ router.delete('/:id', require('../requestValidation').validateParams, requireAut
   const a = getAch.get(Number(req.params.id));
   if (!a) return res.status(404).json({ error: 'Not found' });
   const ownPending = a.user_id === req.user.id && a.status === 'PENDING';
-  if (!ownPending && req.user.role !== 'ADMIN') {
+  if (!ownPending && !hasAdminAccess(req)) {
     return res.status(403).json({ error: 'Only your own pending achievements can be deleted' });
   }
   deleteAch.run(a.id);

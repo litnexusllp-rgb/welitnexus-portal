@@ -304,9 +304,85 @@ test('admin console: two-step sign-in, roles, people and billing', async (t) => 
     assert.equal(refused.body.code, 'ADMIN_CONSOLE');
     assert.equal((await call(base, plain, 'POST', '/api/backup/email')).status, 403);
     assert.equal((await call(base, owner, 'GET', '/api/backup')).status, 200);
+
+    // Per-employee views follow it too: a password-only admin gets only their
+    // own records back, never the employee they asked for.
+    const staff = (
+      await call(base, owner, 'POST', '/api/users', {
+        name: 'Strict Staff',
+        email: 'strict@example.com',
+        password: 'strict-pass-123',
+        role: 'EMPLOYEE',
+      })
+    ).body.user.id;
+    assert.notEqual((await call(base, plain, 'GET', `/api/kpi/me?user_id=${staff}`)).body.viewingUserId, staff);
+    assert.equal((await call(base, owner, 'GET', `/api/kpi/me?user_id=${staff}`)).body.viewingUserId, staff);
+    const attendance = (who) => call(base, who, 'GET', `/api/reports/my-attendance?user_id=${staff}`);
+    assert.doesNotMatch(JSON.stringify((await attendance(plain)).body), /Strict Staff/);
+    assert.match(JSON.stringify((await attendance(owner)).body), /Strict Staff/);
+    assert.equal((await call(base, plain, 'GET', `/api/short-days?user_id=${staff}`)).status, 403);
+    assert.equal((await call(base, owner, 'GET', `/api/short-days?user_id=${staff}`)).status, 200);
+    const preview = (who) =>
+      call(base, who, 'POST', '/api/leaves/preview', {
+        user_id: staff,
+        start_date: '2026-12-01',
+        end_date: '2026-12-01',
+      });
+    assert.equal((await preview(plain)).status, 403);
   } finally {
     delete process.env.ADMIN_CONSOLE_REQUIRED;
   }
+});
+
+test('admin console: wrong 2-step codes are limited per account, not per sign-in attempt', async (t) => {
+  const base = await boot(t);
+  const row = () =>
+    db
+      .prepare("SELECT t.* FROM int_admin_totp t JOIN users u ON u.id=t.user_id WHERE u.email='partner@example.com'")
+      .get();
+  const secret = c.decrypt(row().secret_enc);
+  const valid = new Set([-1, 0, 1].map((d) => c.hotp(secret, c.currentStep() + d)));
+  let wrong = 0;
+  while (valid.has(String(wrong).padStart(6, '0'))) wrong++;
+  wrong = String(wrong).padStart(6, '0');
+  const attempt = async (code) => {
+    const j = jar();
+    const s1 = await call(base, j, 'POST', '/api/admin/auth/login', {
+      email: 'partner@example.com',
+      password: 'partner-pass-123',
+    });
+    assert.equal(s1.status, 200, JSON.stringify(s1.body));
+    return call(base, j, 'POST', '/api/admin/auth/verify', { challengeId: s1.body.challengeId, code });
+  };
+  const freshCode = () => {
+    db.prepare('UPDATE int_admin_totp SET last_step=0 WHERE user_id=?').run(row().user_id);
+    return c.hotp(secret, c.currentStep());
+  };
+
+  // Two sign-in attempts of five wrong codes each: ten wrong codes in total.
+  for (let i = 0; i < 2; i++) {
+    const j = jar();
+    const s1 = await call(base, j, 'POST', '/api/admin/auth/login', {
+      email: 'partner@example.com',
+      password: 'partner-pass-123',
+    });
+    for (let k = 0; k < 5; k++)
+      assert.equal(
+        (await call(base, j, 'POST', '/api/admin/auth/verify', { challengeId: s1.body.challengeId, code: wrong }))
+          .status,
+        401,
+      );
+  }
+  // A new sign-in attempt does not reset the count: even the right code is refused now.
+  const locked = await attempt(freshCode());
+  assert.equal(locked.status, 429);
+  assert.match(locked.body.error, /Wait 15 minutes/);
+  assert.ok(db.prepare("SELECT 1 FROM int_audit_log WHERE action='admin.2fa_locked'").get());
+
+  // Once the window has passed, the right code works and the count is cleared.
+  db.prepare('UPDATE int_admin_code_failures SET ts = ts - ?').run(16 * 60 * 1000);
+  assert.equal((await attempt(freshCode())).status, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM int_admin_code_failures').get().n, 0);
 });
 
 test('existing tables are untouched by the v2 schema', () => {

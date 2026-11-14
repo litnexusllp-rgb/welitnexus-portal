@@ -5,7 +5,7 @@
 const express = require('express');
 const { db } = require('../db');
 const asyncRoute = require('../asyncRoute');
-const { requireAuth } = require('../auth');
+const { requireAuth, hasAdminAccess } = require('../auth');
 const { adminLevel, audit } = require('../v2/roles');
 const cal = require('../v2/calendar');
 
@@ -115,7 +115,9 @@ router.get(
     const { from, to } = range(req.query);
     res.json(
       await cal.events(req.user, from, to, {
-        billing: Boolean(adminLevel(req.user)),
+        // Same rules as the billing pages and the rest of the admin data.
+        billing: Boolean(adminLevel(req.user) && req.adminConsole),
+        admin: hasAdminAccess(req),
         refresh: req.query.refresh === '1',
       }),
     );
