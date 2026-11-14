@@ -7,7 +7,7 @@
 const express = require('express');
 const { db } = require('../db');
 const asyncRoute = require('../asyncRoute');
-const { requireAuth } = require('../auth');
+const { requireAuth, hasAdminAccess } = require('../auth');
 const { audit, requireOwner, adminLevel } = require('../v2/roles');
 const asanaWrite = require('../v2/asanaWrite');
 const slack = require('../v2/slack');
@@ -15,6 +15,25 @@ const ai = require('../v2/ai');
 
 const tasks = express.Router();
 tasks.use(requireAuth);
+
+// The portal talks to Asana with one shared token that can reach every task,
+// so the portal itself must decide who may change what. Admins may act on any
+// task; everyone else only on tasks assigned to them in the portal's project.
+async function assertCanChangeTask(req, gid) {
+  if (!/^\d+$/.test(String(gid))) throw Object.assign(new Error('Invalid task'), { status: 400 });
+  if (hasAdminAccess(req)) return;
+  if (!asanaWrite.enabled()) throw Object.assign(new Error('Asana is not connected.'), { status: 503 });
+  let mine = false;
+  try {
+    mine = await require('../asana').isAssignedTo(req.user.id, gid);
+  } catch (_e) {
+    throw Object.assign(new Error('Could not check this task with Asana. Please try again shortly.'), { status: 502 });
+  }
+  if (!mine) {
+    audit(req, 'asana.task_change_refused', `asana:${gid}`);
+    throw Object.assign(new Error('You can only change tasks that are assigned to you'), { status: 403 });
+  }
+}
 
 tasks.get('/status', (_req, res) => res.json({ enabled: asanaWrite.enabled() }));
 
@@ -26,7 +45,8 @@ tasks.post(
       notes: req.body.notes,
       assigneeId: req.body.assignee_id || req.user.id,
       dueOn: req.body.due_date,
-      projectGid: req.body.project_gid,
+      // Only admins may file a task into a project other than the portal's own.
+      projectGid: hasAdminAccess(req) ? req.body.project_gid : undefined,
     });
     audit(req, 'asana.task_created', `asana:${t.gid}`, { name: t.name });
     require('../asana')
@@ -39,10 +59,12 @@ tasks.post(
 tasks.post(
   '/:gid/update',
   asyncRoute(async (req, res) => {
+    await assertCanChangeTask(req, req.params.gid);
     const t = await asanaWrite.updateTask(req.params.gid, {
       completed: req.body.completed,
       dueOn: req.body.due_date,
-      assigneeId: req.body.assignee_id,
+      // Reassigning a task to someone else is an admin action.
+      assigneeId: hasAdminAccess(req) ? req.body.assignee_id : undefined,
     });
     audit(req, 'asana.task_updated', `asana:${t.gid}`, { completed: t.completed, due_on: t.due_on });
     require('../asana')
@@ -55,6 +77,7 @@ tasks.post(
 tasks.post(
   '/:gid/comments',
   asyncRoute(async (req, res) => {
+    await assertCanChangeTask(req, req.params.gid);
     res.json(await asanaWrite.comment(req.params.gid, req.body.text, req.user.name));
   }),
 );

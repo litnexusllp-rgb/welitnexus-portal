@@ -129,6 +129,14 @@ function indexByPortalUser(tasks) {
   return { byUser: out, unmatched: [...unmatched.entries()].map(([name, count]) => ({ name, count })) };
 }
 
+// Is this Asana task assigned to this portal user? Used to decide whether an
+// employee may change a task through the shared Asana connection. Only tasks in
+// the configured project that match the user (see the rules above) qualify.
+async function isAssignedTo(userId, gid) {
+  const { byUser } = indexByPortalUser(await allTasks());
+  return (byUser[userId] || []).some((t) => String(t.gid) === String(gid));
+}
+
 // One person's open tasks, soonest due first (no due date last).
 async function myTasks(userId) {
   const { byUser } = indexByPortalUser(await allTasks());
@@ -337,4 +345,4 @@ async function diagnose() {
   }
 }
 
-module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus, adminWork };
+module.exports = { enabled, isAssignedTo, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus, adminWork };
