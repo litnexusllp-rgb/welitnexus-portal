@@ -36,7 +36,7 @@ function audit(req, action, target = '', detail = {}) {
   );
 }
 
-// The admin console requires its own cookie (password + 2-step code) in
+// The admin console requires its own cookie (from signing in at /admin) in
 // addition to the normal session. See src/auth.js loadUser.
 function consoleGuard(levels) {
   return (req, res, next) => {

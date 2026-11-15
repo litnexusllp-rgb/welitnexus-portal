@@ -1,9 +1,10 @@
 'use strict';
 
 // Admin console sign-in: a second login for partners and billing admins.
-// Step 1: email + password. Step 2: a 6-digit code from an authenticator app
-// (Google Authenticator, Microsoft Authenticator, 1Password, Authy...). The
-// first time, step 2 enrols the app and returns one-time backup codes.
+// Email + password. When ADMIN_2FA=required, a second step asks for a 6-digit
+// code from an authenticator app (Google Authenticator, Microsoft
+// Authenticator, 1Password, Authy...); the first time, that step enrols the app
+// and returns one-time backup codes. Off by default.
 
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -17,6 +18,7 @@ const {
   setAdminCookie,
   clearAdminCookie,
   requireAuth,
+  twoStepRequired,
 } = require('../auth');
 const { adminLevel, audit, requireOwner } = require('../v2/roles');
 const c = require('../v2/crypto');
@@ -39,7 +41,7 @@ const MAX_ATTEMPTS = 5; // wrong codes per sign-in attempt
 // keep guessing codes five at a time.
 const ACCOUNT_MAX_FAILURES = 10;
 const ACCOUNT_LOCK_MS = 15 * 60 * 1000;
-const mfaMode = () => (String(process.env.ADMIN_2FA || 'required').toLowerCase() === 'off' ? 'off' : 'required');
+const mfaMode = () => (twoStepRequired() ? 'required' : 'off');
 
 const findByEmail = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1');
 const getUser = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1');

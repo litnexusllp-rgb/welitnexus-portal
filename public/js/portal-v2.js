@@ -1090,11 +1090,12 @@
       <section class="card flush"><div class="table-wrap" id="pplTable"><div class="loading">Loading…</div></div></section>
       <p class="msg-sub">Access levels: <strong>Owner</strong> — everything (partners). <strong>Billing admin</strong> — clients, invoices and billing only. <strong>Employee</strong> — the employee portal.</p>`,
     );
-    let people = [];
+    let people = [],
+      twoStep = false;
     const me = ctx.me();
     async function load() {
       try {
-        people = (await api.get('/admin/people')).people;
+        ({ people, twoStepRequired: twoStep } = await api.get('/admin/people'));
       } catch (e) {
         $('#pplTable').innerHTML = `<div class="err-inline">${esc(e.message)}</div>`;
         return;
@@ -1103,7 +1104,7 @@
         show === 'active' ? p.active : show === 'former' ? !p.active : p.access !== 'EMPLOYEE',
       );
       $('#pplTable').innerHTML = list.length
-        ? `<table class="data"><thead><tr><th>Name</th><th>Access</th><th>2-step</th><th>Department</th><th>Status</th><th class="num">Actions</th></tr></thead><tbody>
+        ? `<table class="data"><thead><tr><th>Name</th><th>Access</th>${twoStep ? '<th>2-step</th>' : ''}<th>Department</th><th>Status</th><th class="num">Actions</th></tr></thead><tbody>
         ${list
           .map(
             (
@@ -1116,7 +1117,7 @@
           ]
             .map(([v, l]) => `<option value="${v}"${p.access === v ? ' selected' : ''}>${l}</option>`)
             .join('')}</select></td>
-          <td>${p.access === 'EMPLOYEE' ? '<span class="msg-sub">—</span>' : p.two_step ? pill(esc, 'On', 's-paid') + (p.id !== me.id ? ` <button class="link-btn" data-reset="${p.id}">Reset</button>` : '') : pill(esc, 'Set up at next sign-in', 's-sent')}</td>
+          ${twoStep ? `<td>${p.access === 'EMPLOYEE' ? '<span class="msg-sub">—</span>' : p.two_step ? pill(esc, 'On', 's-paid') + (p.id !== me.id ? ` <button class="link-btn" data-reset="${p.id}">Reset</button>` : '') : pill(esc, 'Set up at next sign-in', 's-sent')}</td>` : ''}
           <td>${esc(p.department || '—')}</td><td>${p.active ? pill(esc, 'Active', 's-paid') : pill(esc, 'Deactivated', 's-void')}</td>
           <td class="num nowrap">${p.id === me.id ? '<span class="msg-sub">You</span>' : p.active ? `<button class="link-btn danger" data-remove="${p.id}">Remove</button>` : `<button class="link-btn" data-restore="${p.id}">Restore</button> <button class="link-btn danger" data-remove="${p.id}">Delete</button>`}</td></tr>`,
           )
@@ -1285,8 +1286,8 @@
     const code = (v) => (v ? `<code>${esc(v)}</code>` : '<em>set PUBLIC_BASE_URL first</em>');
     $('#intRoot').innerHTML = `<div class="int-grid">
       <section class="card"><h2 class="card-title">Security</h2><ul class="checklist">
-        ${row(s.twoStep, '2-step verification for the admin console', 'ADMIN_2FA (default: required)')}
-        ${row(s.adminConsoleRequired, 'All admin pages require the admin console sign-in', 'ADMIN_CONSOLE_REQUIRED=on — turn on once both partners have set up 2-step')}
+        ${s.twoStep ? row(true, '2-step codes for the admin console', 'ADMIN_2FA=required') : ''}
+        ${row(s.adminConsoleRequired, 'All admin pages require the admin console sign-in', 'ADMIN_CONSOLE_REQUIRED=on')}
         ${row(s.encryptionKey, 'Encryption key for stored sign-ins', 'INTEGRATIONS_KEY (32+ random characters)')}
         ${row(Boolean(s.publicBaseUrl), 'Public address', `PUBLIC_BASE_URL ${s.publicBaseUrl ? '= ' + esc(s.publicBaseUrl) : ''}`)}</ul></section>
       <section class="card"><h2 class="card-title">Slack</h2><ul class="checklist">

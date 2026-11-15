@@ -12,7 +12,7 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'v2-admin-console-test-secret';
 process.env.ADMIN_EMAIL = 'partner@example.com';
 process.env.ADMIN_PASSWORD = 'partner-pass-123';
-delete process.env.ADMIN_2FA;
+process.env.ADMIN_2FA = 'required'; // these tests cover the optional 2-step flow
 delete process.env.SMTP_HOST;
 
 const express = require('express');
@@ -395,4 +395,32 @@ test('existing tables are untouched by the v2 schema', () => {
   assert.doesNotMatch(TABLES, /\b(ALTER|DROP)\b/i);
   for (const m of TABLES.matchAll(/CREATE (?:TABLE|INDEX) IF NOT EXISTS ([a-z_]+)/g))
     assert.match(m[1], /^(int_|idx_int_)/);
+});
+
+test('admin console: by default the password alone opens it, with no 6-digit code', async (t) => {
+  const base = await boot(t);
+  delete process.env.ADMIN_2FA;
+  try {
+    const j = jar();
+    const login = await call(base, j, 'POST', '/api/admin/auth/login', {
+      email: 'partner@example.com',
+      password: 'partner-pass-123',
+    });
+    assert.equal(login.status, 200, JSON.stringify(login.body));
+    assert.equal(login.body.ok, true);
+    assert.equal(login.body.step, undefined);
+    assert.equal(login.body.access.console, true);
+    const people = await call(base, j, 'GET', '/api/admin/people');
+    assert.equal(people.status, 200);
+    assert.equal(people.body.twoStepRequired, false);
+    assert.equal((await call(base, j, 'GET', '/api/admin/auth/status')).body.mode, 'off');
+    // A wrong password is still refused.
+    const wrong = await call(base, jar(), 'POST', '/api/admin/auth/login', {
+      email: 'partner@example.com',
+      password: 'not-the-password',
+    });
+    assert.equal(wrong.status, 401);
+  } finally {
+    process.env.ADMIN_2FA = 'required';
+  }
 });

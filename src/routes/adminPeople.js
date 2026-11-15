@@ -35,7 +35,10 @@ router.get('/', requireOwner, (_req, res) => {
     ORDER BY u.active DESC, u.name COLLATE NOCASE`,
     )
     .all();
-  res.json({ people: rows.map((u) => ({ ...u, access: adminLevel(u) || 'EMPLOYEE', two_step: Boolean(u.two_step) })) });
+  res.json({
+    twoStepRequired: require('../auth').twoStepRequired(),
+    people: rows.map((u) => ({ ...u, access: adminLevel(u) || 'EMPLOYEE', two_step: Boolean(u.two_step) })),
+  });
 });
 
 // Set portal access: OWNER (full admin), BILLING (billing admin) or EMPLOYEE.

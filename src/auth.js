@@ -47,8 +47,8 @@ function clearAuthCookie(res) {
 }
 
 // ---------- Admin console (second login) ----------
-// A separate, short-lived cookie issued only after password + 2-step code at
-// /admin. It is checked IN ADDITION to the normal session cookie.
+// A separate, short-lived cookie issued after signing in at /admin (password,
+// plus a 6-digit code when ADMIN_2FA=required). It is checked IN ADDITION to the normal session cookie.
 const ADMIN_COOKIE = 'wln_admin';
 const ADMIN_TTL_SECONDS = 8 * 60 * 60;
 
@@ -76,6 +76,10 @@ function clearAdminCookie(res) {
 // When ADMIN_CONSOLE_REQUIRED=on, the existing admin-only API routes also
 // require the admin console cookie. Off by default so current admin sessions
 // keep working until both partners have enrolled their 2-step codes.
+// Admin console sign-in asks for a 6-digit authenticator code only when
+// ADMIN_2FA=required (or on). Off by default: the admin password is enough.
+const twoStepRequired = () => ['required', 'on'].includes(String(process.env.ADMIN_2FA || 'off').toLowerCase());
+
 const consoleRequired = () => String(process.env.ADMIN_CONSOLE_REQUIRED || 'off').toLowerCase() === 'on';
 
 const getUserById = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1');
@@ -142,6 +146,7 @@ module.exports = {
   setAdminCookie,
   clearAdminCookie,
   consoleRequired,
+  twoStepRequired,
   hasAdminAccess,
   hashPassword,
   verifyPassword,

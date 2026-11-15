@@ -16,7 +16,7 @@ router.get('/integrations', requireOwner, (_req, res) => {
     publicBaseUrl: base || null,
     encryptionKey: set('INTEGRATIONS_KEY'),
     adminConsoleRequired: require('../auth').consoleRequired(),
-    twoStep: String(process.env.ADMIN_2FA || 'required').toLowerCase() !== 'off',
+    twoStep: require('../auth').twoStepRequired(),
     slack: {
       bot: set('SLACK_BOT_TOKEN'),
       signingSecret: set('SLACK_SIGNING_SECRET'),

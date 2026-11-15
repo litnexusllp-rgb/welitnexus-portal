@@ -354,13 +354,13 @@
       ? 'Admin console for partners and billing.'
       : 'Your workday, all in one place.';
     $('.login-brand-sub').textContent = admin
-      ? 'People, payroll, billing and integrations — protected by 2-step verification.'
+      ? 'People, payroll, billing and integrations.'
       : 'Clock in, request time off, track tasks and download pay stubs.';
     document.title = admin ? 'Admin console sign in · LIT Nexus' : 'Sign in · LIT Nexus Workforce Portal';
     if (admin) resetAdminLogin();
   }
 
-  // ---------- Admin console sign-in (password, then 6-digit code) ----------
+  // ---------- Admin console sign-in (password; a 6-digit code only if ADMIN_2FA=required) ----------
   let adminChallenge = null;
   function resetAdminLogin() {
     adminChallenge = null;
@@ -368,8 +368,8 @@
     $('#adminStep2').hidden = true;
     $('#adminEnroll').hidden = true;
     $('#adminLoginTitle').textContent = 'Partner sign in';
-    $('#adminLoginSub').textContent = 'Restricted to portal administrators. Step 1 of 2.';
-    $('#adminLoginBtn').textContent = 'Continue';
+    $('#adminLoginSub').textContent = 'Restricted to portal administrators.';
+    $('#adminLoginBtn').textContent = 'Sign in';
     $('#adminLoginErr').textContent = '';
     if (ME && ME.email) $('#adminEmail').value = ME.email;
   }
@@ -394,10 +394,10 @@
           $('#adminSecret').textContent = r.secret.replace(/(.{4})/g, '$1 ').trim();
           $('#adminOtpLink').href = r.otpauth;
           $('#adminLoginTitle').textContent = 'Set up 2-step verification';
-          $('#adminLoginSub').textContent = 'One-time setup. Step 2 of 2.';
+          $('#adminLoginSub').textContent = 'One-time setup.';
         } else {
           $('#adminLoginTitle').textContent = 'Verify it\u2019s you';
-          $('#adminLoginSub').textContent = 'Enter the 6-digit code from your authenticator app. Step 2 of 2.';
+          $('#adminLoginSub').textContent = 'Enter the 6-digit code from your authenticator app.';
         }
         btn.textContent = 'Verify & open console';
         $('#adminCode').value = '';
