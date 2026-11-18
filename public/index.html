@@ -87,21 +87,6 @@
     <div class="app" id="app">
       <aside class="sidebar">
         <img src="/img/lit-logo-white.png" alt="LIT Nexus" class="sidebar-logo" />
-        <button class="nav-item bell" id="bellBtn" aria-label="Notifications">
-          <span class="ico"
-            ><svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6" />
-              <path d="M10 20a2 2 0 0 0 4 0" /></svg
-          ></span>
-          Notifications <span class="bell-badge" id="bellBadge" hidden>0</span>
-        </button>
         <button
           class="nav-item admin-drawer-toggle admin-only"
           type="button"
@@ -420,6 +405,21 @@
         <header class="topbar">
           <div class="topbar-title" id="topTitle">Home</div>
           <div class="topbar-spacer"></div>
+          <button class="topbar-bell" id="bellBtn" type="button" aria-label="Notifications" title="Notifications">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6" />
+              <path d="M10 20a2 2 0 0 0 4 0" />
+            </svg>
+            <span class="bell-badge" id="bellBadge" hidden>0</span>
+          </button>
           <a class="console-pill" id="consolePill" href="/admin" hidden>Enter admin console</a>
           <span class="console-pill on" id="consoleOn" hidden>Admin console</span>
           <span class="topbar-user"
