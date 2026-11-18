@@ -62,8 +62,8 @@
         <details class="cal2-setup" id="calSetup">
           <summary>Add a calendar</summary>
           <div class="cal2-connect">
-            <button class="btn btn-ghost btn-sm btn-block" id="calGoogle">Connect Google / Gmail</button>
-            <button class="btn btn-ghost btn-sm btn-block" id="calMs">Connect Outlook / Microsoft 365</button>
+            <button class="btn btn-ghost btn-sm btn-block" id="calGoogle" hidden>Connect Google / Gmail</button>
+            <button class="btn btn-ghost btn-sm btn-block" id="calMs" hidden>Connect Outlook / Microsoft 365</button>
             <button class="btn btn-ghost btn-sm btn-block" id="calIcs">Add calendar link (ICS)</button>
           </div>
           <p class="msg-sub">You don't need to be an admin of an account to connect it. If an organization blocks outside apps, share that calendar to an account you own, or paste its ICS link.</p>
@@ -375,6 +375,16 @@
     $('#calIcs').addEventListener('click', addIcs);
     $('#calGoogle').addEventListener('click', () => connect('google'));
     $('#calMs').addEventListener('click', () => connect('microsoft'));
+    // Google and Microsoft sign-in need settings on the server; until an owner
+    // adds them, offer only the calendar link, which always works.
+    api
+      .get('/calendar/status')
+      .then((s) => {
+        if (!$('#calGoogle')) return;
+        $('#calGoogle').hidden = !s.google;
+        $('#calMs').hidden = !s.microsoft;
+      })
+      .catch(() => {});
     $('#calToday').addEventListener('click', () => {
       anchor = new Date();
       anchor.setHours(0, 0, 0, 0);

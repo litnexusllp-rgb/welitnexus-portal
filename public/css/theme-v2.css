@@ -983,6 +983,9 @@ table.data tr.clickable:focus {
 .cal2-connect .btn-block {
   height: 38px;
 }
+.cal2-connect [hidden] {
+  display: none;
+}
 .cal2-setup > summary {
   cursor: pointer;
   padding: 8px 0;
