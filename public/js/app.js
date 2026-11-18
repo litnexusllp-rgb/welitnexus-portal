@@ -262,6 +262,7 @@
       } else {
         b.hidden = true;
       }
+      $('#bellBtn').setAttribute('aria-label', unread > 0 ? `Notifications, ${unread} unread` : 'Notifications');
     } catch (_e) {
       /* offline / logged out — ignore */
     }

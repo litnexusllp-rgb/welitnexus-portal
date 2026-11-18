@@ -1597,10 +1597,7 @@ body.is-admin .sidebar .admin-drawer-toggle {
   white-space: nowrap;
 }
 
-/* Notification bell (in the sidebar) + unread badge */
-.nav-item.bell {
-  position: relative;
-}
+/* Unread badge on the notification bell (in the top bar) */
 .bell-badge {
   margin-left: auto;
   background: var(--gold);
@@ -2377,7 +2374,7 @@ tr.drag-over td {
   }
   .sidebar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     overflow: visible;
     max-height: none;
     padding: 10px;
@@ -2403,14 +2400,8 @@ tr.drag-over td {
     flex-shrink: 0;
     margin-bottom: 0;
   }
-  .sidebar .bell {
-    grid-area: 1 / 2;
-    gap: 0;
-    padding: 10px;
-    font-size: 0;
-  }
   .nav-account {
-    grid-area: 1 / 3;
+    grid-area: 1 / 2;
   }
   .nav-account-panel {
     position: absolute;
@@ -2425,7 +2416,7 @@ tr.drag-over td {
   }
   body.is-admin .sidebar .admin-drawer-toggle {
     display: flex;
-    grid-area: 1 / 4;
+    grid-area: 1 / 3;
   }
   body.is-admin #adminMenuButton[aria-expanded='false'] ~ :is(#nav, .nav-settings) {
     display: none;
