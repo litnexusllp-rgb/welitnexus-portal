@@ -46,7 +46,7 @@ const eventsForUserBetween = db.prepare(
 const getLateNormalOverride = db.prepare(
   `SELECT ignore_late, full_day FROM attendance_day_overrides WHERE user_id = ? AND day = ?`,
 );
-const { setLateNormalOverride, markFullDay } = require('../lateExplanations');
+const { setLateNormalOverride, markFullDay, resolveLateExplanation } = require('../lateExplanations');
 
 // GET the current attendance-day status for the signed-in user. "day" here is
 // the shift day (cutover-adjusted), so an overnight shift stays one day.
@@ -221,7 +221,10 @@ router.post('/admin/late-normal', requireAdmin, (req, res) => {
   const day = String(req.body.day || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'Valid day required' });
   if (typeof req.body.normal !== 'boolean') return res.status(400).json({ error: 'normal must be true or false' });
-  setLateNormalOverride.run(user.id, day, req.body.normal ? 1 : 0, req.user.id, now().toMillis());
+  db.transaction(() => {
+    setLateNormalOverride.run(user.id, day, req.body.normal ? 1 : 0, req.user.id, now().toMillis());
+    if (req.body.normal) resolveLateExplanation(user.id, day, req.user.id, 'NORMAL');
+  }).immediate();
   res.json({ user_id: user.id, day, lateNormal: req.body.normal });
 });
 
