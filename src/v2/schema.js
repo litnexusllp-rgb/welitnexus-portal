@@ -119,7 +119,8 @@ CREATE TABLE IF NOT EXISTS int_oauth_tokens (
   UNIQUE(user_id, provider, account_email)
 );
 
--- Slack messaging cache. Slack stays the source of truth.
+-- Slack messaging cache. The Messages feature was removed; the table is kept
+-- so existing data is untouched, and nothing writes to it any more.
 CREATE TABLE IF NOT EXISTS int_messages (
   channel_id  TEXT NOT NULL,
   ts          TEXT NOT NULL,
@@ -140,6 +141,7 @@ CREATE TABLE IF NOT EXISTS int_slack_users (
   email       TEXT NOT NULL DEFAULT '',
   updated_ts  INTEGER NOT NULL
 );
+-- No longer used since Messages was removed; kept so existing data is untouched.
 CREATE TABLE IF NOT EXISTS int_channel_links (
   channel_id        TEXT PRIMARY KEY,
   asana_project_gid TEXT NOT NULL DEFAULT '',
@@ -147,7 +149,8 @@ CREATE TABLE IF NOT EXISTS int_channel_links (
   updated_ts        INTEGER NOT NULL
 );
 
--- AI usage (cost and daily limits).
+-- AI usage (cost and daily limits). No longer written since the AI assistant
+-- was removed; kept so existing data is untouched.
 CREATE TABLE IF NOT EXISTS int_ai_usage (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id       INTEGER NOT NULL,

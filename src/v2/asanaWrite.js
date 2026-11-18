@@ -1,7 +1,7 @@
 'use strict';
 
 // Asana write-back. Asana stays the source of truth for tasks; the portal can
-// now create tasks (including from a Slack message), complete them, change
+// now create tasks, complete them, change
 // due dates and comment. Uses the existing ASANA_TOKEN / ASANA_PROJECT_GID.
 
 const crypto = require('node:crypto');
@@ -91,11 +91,6 @@ async function comment(gid, text, author) {
 // Ask Asana to call the portal whenever the project changes.
 const createWebhook = (target) => request('POST', '/webhooks', { resource: cfg().project, target }, 30000);
 
-function projectForChannel(channelId) {
-  const row = db.prepare('SELECT asana_project_gid FROM int_channel_links WHERE channel_id=?').get(channelId);
-  return (row && row.asana_project_gid) || cfg().project;
-}
-
 // Asana webhooks: first request carries X-Hook-Secret (handshake); later ones are signed.
 function webhookSecret() {
   const row = db.prepare("SELECT value FROM int_settings WHERE key='asana_webhook_secret'").get();
@@ -119,7 +114,6 @@ module.exports = {
   updateTask,
   comment,
   createWebhook,
-  projectForChannel,
   verifyWebhook,
   saveWebhookSecret,
 };

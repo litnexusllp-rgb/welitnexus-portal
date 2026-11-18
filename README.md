@@ -40,8 +40,6 @@ every existing record is unchanged.
 | **Access levels** | **Owner** (partners: everything) · **Billing admin** (clients, invoices, billing only) · **Employee**. Existing `ADMIN` users are Owners automatically. |
 | **People & Access** | Add employees, change access, deactivate/restore, reset 2-step (when on), audit log. **Permanent delete** is Owner-only, needs the typed full name, and writes a full backup to `<db folder>/backups/` first. |
 | **Billing & Invoices** | USD or INR invoices, Net terms, tax, live preview, PDF, numbering on send (`INV-2026-001`), email to client, partial payments, void, overdue tracking, fiscal-year (Apr–Mar) summary, top clients, automatic reminders, import completed tasks as lines. |
-| **Messages** | Slack channels inside the portal: read, post (under your name), threads, share files (≤50 MB), live updates, “Create Asana task” from any message. |
-| **AI assistant** | Claude or ChatGPT: summarize a conversation, draft a reply, find tasks, draft invoice notes. Only sees what you can see; IDs, bank and salary figures are redacted; nothing is posted without a click. |
 | **Calendar** | Any number of Google/Gmail and Outlook/Microsoft 365 accounts per person (no admin rights needed on the account), client calendars via ICS links, plus portal holidays, approved time off, birthdays and invoice due dates. Week/Month/Agenda, conflicts, create events with invites. |
 | **Integrations** | Owner page showing what is configured and the exact URLs to paste into Slack, Asana, Google and Microsoft. |
 

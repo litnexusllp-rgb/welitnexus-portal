@@ -1,7 +1,7 @@
 'use strict';
 
-// Limits that protect the server and staff privacy: file-share rate limit,
-// capped downloads, birthday year hidden from colleagues, password minimum.
+// Limits that protect the server and staff privacy: capped downloads,
+// birthday year hidden from colleagues, password minimum.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -38,22 +38,6 @@ test('downloads stop at the size limit instead of loading everything', async () 
   await assert.rejects(readCapped(new Response('x'.repeat(11)), 10, tooLarge), /too large/);
   const declared = new Response('small', { headers: { 'content-length': String(1e9) } });
   await assert.rejects(readCapped(declared, 10, tooLarge), /too large/);
-});
-
-test('file sharing has its own rate limit and rejects unreadable file names', async (t) => {
-  const base = await boot(t);
-  const id = addUser('Uploader', 'uploader@example.com', 'EMPLOYEE', '');
-  const share = () =>
-    fetch(base + '/api/messages/channels/C0000001/files', {
-      method: 'POST',
-      headers: { cookie: `${COOKIE}=${issueToken({ id })}`, 'x-filename': '%E0%A4%A' },
-      body: 'file contents',
-    });
-  const first = await share();
-  assert.equal(first.status, 400);
-  assert.match((await first.json()).error, /file name/);
-  for (let i = 1; i < 30; i++) await share();
-  assert.equal((await share()).status, 429);
 });
 
 test('colleagues see a birthday as day and month only; admins see the full date', async (t) => {

@@ -64,7 +64,7 @@ function harness(hash = '#/myperf', admin = false) {
 }
 test('each sidebar section is a native link with a distinct address', () => {
   const h = harness();
-  assert.equal(h.links.length, 20);
+  assert.equal(h.links.length, 19);
   for (const l of h.links) assert.ok(html.includes(`href="#/${l.dataset.view}"`));
   assert.match(app, /navigate\(viewFromAddress\(\), true\)/);
 });
@@ -154,4 +154,9 @@ test('phone layout never reveals admin-only menu groups to staff', () => {
   const staffGroupRules = css.match(/body:not\(\.is-admin\) #nav \.nav-group[^{]*\{/g) || [];
   assert.ok(staffGroupRules.length > 0);
   for (const rule of staffGroupRules) assert.match(rule, /\.nav-group:not\(\.admin-only\)/);
+});
+
+test('the Messages page is no longer in the menu or the app', () => {
+  assert.doesNotMatch(html, /data-view="messages"/);
+  assert.doesNotMatch(app, /VIEWS\.messages/);
 });

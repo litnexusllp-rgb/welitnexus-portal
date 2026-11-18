@@ -1,4 +1,4 @@
-/* Portal v2 views: Messages (Slack), Calendar (unified), Billing & Invoices,
+/* Portal v2 views: Calendar (unified), Billing & Invoices,
    People & Access, Integrations. Mounted by app.js through window.PortalV2. */
 (function () {
   'use strict';
@@ -23,312 +23,6 @@
   const STATUS = { DRAFT: 's-draft', SENT: 's-sent', OVERDUE: 's-overdue', PAID: 's-paid', VOID: 's-void' };
   const pill = (esc, label, cls) => `<span class="pill ${cls}">${esc(label)}</span>`;
   const empty = (esc, title, body) => `<div class="empty-state"><h3>${esc(title)}</h3><p>${body}</p></div>`;
-
-  // Close streams / timers when the view is left (app.js clears registered intervals on navigation).
-  function whileMounted(ctx, root, cleanup) {
-    // Not registered with app.js on purpose: it must outlive navigation long
-    // enough to notice the view is gone and run the cleanup.
-    const t = setInterval(() => {
-      if (!document.body.contains(root)) {
-        clearInterval(t);
-        cleanup();
-      }
-    }, 1000);
-    return t;
-  }
-
-  // =====================================================================
-  //  MESSAGES (Slack)
-  // =====================================================================
-  async function messages(ctx) {
-    const { api, $, esc, toast } = ctx;
-    ctx.setMain(
-      'Messages',
-      'Conversations from your Slack workspace. Messages you send here post to Slack under your name.',
-      '<div id="msgRoot" class="msg-layout"><div class="loading">Loading conversations…</div></div>',
-    );
-    const root = $('#msgRoot');
-    let data;
-    try {
-      data = await api.get('/messages/channels');
-    } catch (e) {
-      root.innerHTML = empty(esc, 'Messages are unavailable', esc(e.message));
-      return;
-    }
-    if (!data.enabled) {
-      root.innerHTML = empty(
-        esc,
-        'Slack is not connected yet',
-        'An owner can connect Slack from <a href="#/integrations">Admin console › Integrations</a>. Until then, keep using the Slack app as usual.',
-      );
-      return;
-    }
-    if (!data.channels.length) {
-      root.innerHTML = empty(
-        esc,
-        'No shared channels yet',
-        'Channels appear here when you are a member in Slack and the portal app has been added to the channel (type <code>/invite @LIT Portal</code> in Slack).',
-      );
-      return;
-    }
-    let current = data.channels[0].id;
-    let thread = null;
-    let providers = { providers: [], default: null };
-    api
-      .get('/ai/providers')
-      .then((p) => {
-        providers = p;
-        renderAiPanel();
-      })
-      .catch(() => {});
-
-    root.innerHTML = `
-      <aside class="msg-channels card" aria-label="Channels"><div class="msg-head">Channels</div><nav id="msgChanList"></nav></aside>
-      <section class="msg-thread card" aria-live="polite">
-        <header class="msg-thread-head"><div><div class="msg-title" id="msgTitle"></div><div class="msg-sub" id="msgSub"></div></div>
-          <button class="btn btn-ghost btn-sm" id="msgThreadBack" hidden>← Back to channel</button></header>
-        <div class="msg-list" id="msgList"></div>
-        <form class="msg-compose" id="msgForm">
-          <label class="sr-only" for="msgText">Message</label>
-          <textarea id="msgText" rows="2" placeholder="Write a message — posts to Slack"></textarea>
-          <div class="msg-actions">
-            <label class="btn btn-ghost btn-sm file-btn">Attach file<input type="file" id="msgFile" hidden></label>
-            <span id="msgFileName" class="msg-sub"></span>
-            <span class="topbar-spacer"></span>
-            <button type="submit" class="btn btn-navy btn-sm" id="msgSend">Send</button>
-          </div>
-        </form>
-      </section>
-      <aside class="msg-ai card" id="msgAi" aria-label="AI assistant"></aside>`;
-
-    function renderChannels() {
-      $('#msgChanList').innerHTML = data.channels
-        .map(
-          (c) =>
-            `<button type="button" class="msg-chan${c.id === current ? ' on' : ''}" data-ch="${esc(c.id)}"><span>${c.is_private ? '🔒' : '#'} ${esc(c.name)}</span></button>`,
-        )
-        .join('');
-      $('#msgChanList')
-        .querySelectorAll('[data-ch]')
-        .forEach((b) =>
-          b.addEventListener('click', () => {
-            current = b.dataset.ch;
-            thread = null;
-            renderChannels();
-            load();
-          }),
-        );
-    }
-    const chan = () => data.channels.find((c) => c.id === current) || {};
-
-    function msgHtml(m) {
-      const files = (m.files || [])
-        .map(
-          (f) =>
-            `<a class="msg-file" href="/api/messages/files/${esc(f.id)}"><span class="msg-file-type">${esc((f.filetype || 'file').toUpperCase().slice(0, 4))}</span><span>${esc(f.name)}</span></a>`,
-        )
-        .join('');
-      return `<article class="msg" data-ts="${esc(m.ts)}">
-        <span class="avatar avatar-sm">${esc(ctx.initials(m.user_name || '?'))}</span>
-        <div class="msg-body"><div><strong>${esc(m.user_name || 'Slack')}</strong> <span class="msg-sub">${esc(usTime(Number(m.ts) * 1000))}${m.edited ? ' · edited' : ''}</span></div>
-          <div class="msg-text">${esc(m.text).replace(/\n/g, '<br>')}</div>${files}
-          <div class="msg-tools">${!thread && m.reply_count ? `<button type="button" class="link-btn" data-thread="${esc(m.ts)}">${m.reply_count} ${m.reply_count === 1 ? 'reply' : 'replies'}</button>` : ''}
-            ${!thread ? `<button type="button" class="link-btn" data-thread="${esc(m.ts)}">Reply in thread</button>` : ''}
-            <button type="button" class="link-btn" data-task="${esc(m.ts)}">Create Asana task</button></div></div></article>`;
-    }
-
-    async function load() {
-      $('#msgTitle').textContent = (chan().is_private ? '🔒 ' : '# ') + (chan().name || '');
-      $('#msgSub').textContent = thread
-        ? 'Thread'
-        : 'Synced with Slack' + (chan().link && chan().link.asana_project_gid ? ' · linked to an Asana project' : '');
-      $('#msgThreadBack').hidden = !thread;
-      $('#msgList').innerHTML = '<div class="loading">Loading…</div>';
-      try {
-        const h = await api.get(
-          `/messages/channels/${encodeURIComponent(current)}${thread ? '?thread=' + encodeURIComponent(thread) : ''}`,
-        );
-        $('#msgList').innerHTML = h.messages.length
-          ? h.messages.map(msgHtml).join('')
-          : '<div class="msg-sub" style="padding:20px">No messages yet.</div>';
-        wireMessages();
-        $('#msgList').scrollTop = $('#msgList').scrollHeight;
-      } catch (e) {
-        $('#msgList').innerHTML = `<div class="err-inline">${esc(e.message)}</div>`;
-      }
-      renderAiPanel();
-    }
-
-    function wireMessages() {
-      $('#msgList')
-        .querySelectorAll('[data-thread]')
-        .forEach((b) =>
-          b.addEventListener('click', () => {
-            thread = b.dataset.thread;
-            load();
-          }),
-        );
-      $('#msgList')
-        .querySelectorAll('[data-task]')
-        .forEach((b) => b.addEventListener('click', () => taskFromMessage(b.dataset.task)));
-    }
-
-    function taskFromMessage(ts, name = '', due = '') {
-      ctx.modal(`<h3>Create Asana task</h3>
-        <div class="form-row one"><div class="field"><label>Task name</label><input id="tfName" value="${esc(name)}" placeholder="Defaults to the message text"></div></div>
-        <div class="form-row one"><div class="field"><label>Due date</label><input type="date" id="tfDue" value="${esc(due)}"></div></div>
-        <p class="page-sub">Assigned to you in Asana, with a link back to the Slack message. A link to the task is posted in the thread.</p>
-        <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Create task</button></div>`);
-      $('#mCancel').addEventListener('click', ctx.closeModal);
-      $('#mSave').addEventListener('click', async () => {
-        try {
-          const r = await api.post('/asana-tasks/from-message', {
-            channel: current,
-            ts,
-            name: $('#tfName').value || undefined,
-            due_date: $('#tfDue').value || undefined,
-          });
-          ctx.closeModal();
-          toast('Asana task created ✓');
-          if (r.task.url) window.open(r.task.url, '_blank', 'noopener');
-        } catch (e) {
-          toast(e.message, true);
-        }
-      });
-    }
-
-    function renderAiPanel(result) {
-      const box = $('#msgAi');
-      if (!box) return;
-      if (!providers.providers.length) {
-        box.innerHTML = `<div class="msg-head">AI assistant</div><p class="msg-sub">Not set up. An owner can add Claude or ChatGPT in Integrations.</p>`;
-        return;
-      }
-      box.innerHTML = `<div class="msg-head">AI assistant</div>
-        <label class="field-inline">Model <select id="aiProv">${providers.providers.map((p) => `<option value="${esc(p.id)}"${p.id === providers.default ? ' selected' : ''}>${esc(p.label)}</option>`).join('')}</select></label>
-        <div class="ai-buttons"><button class="btn btn-ghost btn-sm" data-ai="summarize_thread">Summarize</button><button class="btn btn-ghost btn-sm" data-ai="draft_reply">Draft reply</button><button class="btn btn-ghost btn-sm" data-ai="suggest_tasks">Find tasks</button></div>
-        <div id="aiOut">${result || '<p class="msg-sub">Uses only this conversation. Nothing is posted without your click.</p>'}</div>`;
-      box.querySelectorAll('[data-ai]').forEach((b) => b.addEventListener('click', () => runAi(b.dataset.ai)));
-    }
-
-    async function runAi(action) {
-      $('#aiOut').innerHTML = '<div class="loading">Thinking…</div>';
-      try {
-        const r = await api.post('/ai/complete', {
-          provider: $('#aiProv').value,
-          action,
-          context: { channel: current, thread_ts: thread || undefined },
-        });
-        const sug = (r.suggestions || [])
-          .map((s, i) =>
-            s.type === 'reply'
-              ? `<div class="ai-sug"><div>${esc(s.text)}</div><button class="btn btn-ghost btn-sm" data-use="${i}">Use as reply</button></div>`
-              : `<div class="ai-sug"><div><strong>Task:</strong> ${esc(s.name)}${s.due_on ? ' · due ' + esc(usDate(s.due_on)) : ''}</div><button class="btn btn-ghost btn-sm" data-mk="${i}">Create in Asana</button></div>`,
-          )
-          .join('');
-        renderAiPanel(`<div class="ai-text">${esc(r.text).replace(/\n/g, '<br>')}</div>${sug}`);
-        $('#msgAi')
-          .querySelectorAll('[data-use]')
-          .forEach((b) =>
-            b.addEventListener('click', () => {
-              $('#msgText').value = r.suggestions[b.dataset.use].text;
-              $('#msgText').focus();
-            }),
-          );
-        $('#msgAi')
-          .querySelectorAll('[data-mk]')
-          .forEach((b) =>
-            b.addEventListener('click', () => {
-              const s = r.suggestions[b.dataset.mk];
-              const last = [...$('#msgList').querySelectorAll('.msg')].pop();
-              if (last) taskFromMessage(last.dataset.ts, s.name, s.due_on || '');
-            }),
-          );
-      } catch (e) {
-        renderAiPanel(`<div class="err-inline">${esc(e.message)}</div>`);
-      }
-    }
-
-    $('#msgThreadBack').addEventListener('click', () => {
-      thread = null;
-      load();
-    });
-    $('#msgFile').addEventListener('change', () => {
-      const f = $('#msgFile').files[0];
-      $('#msgFileName').textContent = f ? `${f.name} (${Math.ceil(f.size / 1024)} KB)` : '';
-    });
-    $('#msgText').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        $('#msgForm').requestSubmit();
-      }
-    });
-    $('#msgForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const text = $('#msgText').value.trim();
-      const file = $('#msgFile').files[0];
-      if (!text && !file) return;
-      $('#msgSend').disabled = true;
-      try {
-        if (file) {
-          if (file.size > 50 * 1024 * 1024) throw new Error('Files must be 50 MB or smaller');
-          const res = await fetch(`/api/messages/channels/${encodeURIComponent(current)}/files`, {
-            method: 'POST',
-            credentials: 'same-origin',
-            body: file,
-            headers: {
-              'Content-Type': 'application/octet-stream',
-              'X-Filename': encodeURIComponent(file.name),
-              'X-Comment': encodeURIComponent(text),
-              ...(thread ? { 'X-Thread-Ts': thread } : {}),
-            },
-          });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(body.error || 'Upload failed');
-          toast('File shared to Slack ✓');
-        } else {
-          await api.post(`/messages/channels/${encodeURIComponent(current)}`, { text, thread_ts: thread || undefined });
-        }
-        $('#msgText').value = '';
-        $('#msgFile').value = '';
-        $('#msgFileName').textContent = '';
-        load();
-      } catch (err) {
-        toast(err.message, true);
-      } finally {
-        $('#msgSend').disabled = false;
-      }
-    });
-
-    // Live updates from Slack.
-    let stream = null;
-    if (window.EventSource) {
-      stream = new EventSource('/api/messages/stream');
-      stream.addEventListener('message', (ev) => {
-        try {
-          const m = JSON.parse(ev.data);
-          if (m.channel !== current || $('#msgList') === null) return;
-          if (thread ? m.thread_ts !== thread : m.thread_ts && m.thread_ts !== m.ts) return;
-          if (m.deleted) {
-            const el = $('#msgList').querySelector(`[data-ts="${CSS.escape(m.ts)}"]`);
-            if (el) el.remove();
-            return;
-          }
-          if ($('#msgList').querySelector(`[data-ts="${CSS.escape(m.ts)}"]`)) return;
-          $('#msgList').insertAdjacentHTML('beforeend', msgHtml(m));
-          wireMessages();
-          $('#msgList').scrollTop = $('#msgList').scrollHeight;
-        } catch (_e) {
-          /* ignore malformed */
-        }
-      });
-    }
-    whileMounted(ctx, root, () => {
-      if (stream) stream.close();
-    });
-    renderChannels();
-    load();
-  }
 
   // =====================================================================
   //  CALENDAR (unified)
@@ -1271,7 +965,7 @@
     const { api, $, esc, toast } = ctx;
     ctx.setMain(
       'Integrations',
-      'Connection status for Slack, Asana, AI and calendars. Secrets are set in Railway and never shown here.',
+      'Connection status for Slack, Asana and calendars. Secrets are set in Railway and never shown here.',
       '<div id="intRoot"><div class="loading">Checking…</div></div>',
     );
     let s;
@@ -1291,25 +985,11 @@
         ${row(s.encryptionKey, 'Encryption key for stored sign-ins', 'INTEGRATIONS_KEY (32+ random characters)')}
         ${row(Boolean(s.publicBaseUrl), 'Public address', `PUBLIC_BASE_URL ${s.publicBaseUrl ? '= ' + esc(s.publicBaseUrl) : ''}`)}</ul></section>
       <section class="card"><h2 class="card-title">Slack</h2><ul class="checklist">
-        ${row(s.slack.bot, 'Bot token', 'SLACK_BOT_TOKEN (already used for attendance alerts)')}
-        ${row(s.slack.signingSecret, 'Signing secret (live messages)', 'SLACK_SIGNING_SECRET')}</ul>
-        <p class="msg-sub">Event Subscriptions › Request URL: ${code(s.slack.eventsUrl)}<br>Bot scopes: channels:read channels:history groups:read groups:history chat:write chat:write.customize files:read files:write users:read users:read.email. Events: message.channels, message.groups.</p></section>
+        ${row(s.slack.bot, 'Bot token', 'SLACK_BOT_TOKEN (attendance alerts and end-of-day reports)')}</ul></section>
       <section class="card"><h2 class="card-title">Asana</h2><ul class="checklist">
         ${row(s.asana.token, 'Access token', 'ASANA_TOKEN')}${row(s.asana.project, 'Project', 'ASANA_PROJECT_GID')}</ul>
         <p class="msg-sub">Live updates webhook: ${code(s.asana.webhookUrl)}</p>
         <button class="btn btn-ghost btn-sm" id="asanaHook" ${s.asana.token && s.publicBaseUrl ? '' : 'disabled'}>Turn on live Asana updates</button></section>
-      <section class="card"><h2 class="card-title">AI assistant</h2><ul class="checklist">
-        ${row(
-          s.ai.providers.some((p) => p.id === 'claude'),
-          'Claude',
-          'ANTHROPIC_API_KEY · optional AI_CLAUDE_MODEL',
-        )}
-        ${row(
-          s.ai.providers.some((p) => p.id === 'openai'),
-          'ChatGPT',
-          'OPENAI_API_KEY · optional AI_OPENAI_MODEL',
-        )}</ul>
-        <p class="msg-sub">Default: ${esc(s.ai.default || 'none')} (AI_DEFAULT_PROVIDER). Salary figures, bank and ID numbers are removed before anything is sent.</p></section>
       <section class="card"><h2 class="card-title">Calendars</h2><ul class="checklist">
         ${row(s.calendar.google, 'Google / Gmail', 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET')}
         ${row(s.calendar.microsoft, 'Outlook / Microsoft 365', 'MS_CLIENT_ID, MS_CLIENT_SECRET, MS_TENANT=common')}</ul>
@@ -1330,5 +1010,5 @@
       });
   }
 
-  window.PortalV2 = { messages, schedule, billing, access, integrations, _money: money, _usDate: usDate };
+  window.PortalV2 = { schedule, billing, access, integrations, _money: money, _usDate: usDate };
 })();

@@ -742,7 +742,6 @@
       isAdmin,
       onInterval: (timer) => dashTimers.push(timer),
     });
-  VIEWS.messages = v2('messages');
   VIEWS.schedule = v2('schedule');
   VIEWS.billing = v2('billing');
   VIEWS.access = v2('access');

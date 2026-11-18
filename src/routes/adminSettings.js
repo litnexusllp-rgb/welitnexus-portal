@@ -4,7 +4,6 @@
 
 const express = require('express');
 const { requireOwner } = require('../v2/roles');
-const ai = require('../v2/ai');
 const cal = require('../v2/calendar');
 
 const router = express.Router();
@@ -17,17 +16,12 @@ router.get('/integrations', requireOwner, (_req, res) => {
     encryptionKey: set('INTEGRATIONS_KEY'),
     adminConsoleRequired: require('../auth').consoleRequired(),
     twoStep: require('../auth').twoStepRequired(),
-    slack: {
-      bot: set('SLACK_BOT_TOKEN'),
-      signingSecret: set('SLACK_SIGNING_SECRET'),
-      eventsUrl: base ? `${base}/api/hooks/slack/events` : null,
-    },
+    slack: { bot: set('SLACK_BOT_TOKEN') },
     asana: {
       token: set('ASANA_TOKEN'),
       project: set('ASANA_PROJECT_GID'),
       webhookUrl: base ? `${base}/api/hooks/asana` : null,
     },
-    ai: { providers: ai.available(), default: ai.defaultProvider() },
     calendar: {
       ...cal.status(),
       googleRedirect: base ? `${base}/api/calendar/oauth/google/callback` : null,

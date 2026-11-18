@@ -37,7 +37,7 @@ app.use(
 
 app.use(cookieParser());
 app.use(loadUser);
-// Raw-body endpoints (signed Slack/Asana webhooks, file uploads) come before
+// Raw-body endpoints (the signed Asana webhook) come before
 // the JSON parser so signatures can be verified on the exact bytes received.
 app.use('/api', require('./routes/hooks'));
 app.use(express.json({ limit: '100kb' }));
@@ -86,14 +86,12 @@ app.use('/api/asana-review', require('./routes/asanaReview'));
 app.use('/api/operations', require('./routes/operations'));
 app.use('/api/eod', require('./routes/eod'));
 
-// Portal v2: admin console, billing, messaging, tasks, AI, calendar.
+// Portal v2: admin console, billing, Asana tasks, calendar.
 app.use('/api/admin/auth', require('./routes/adminAuth'));
 app.use('/api/admin/people', require('./routes/adminPeople'));
 app.use('/api/admin/billing', require('./routes/billing'));
 app.use('/api/admin', require('./routes/adminSettings'));
-app.use('/api/messages', require('./routes/messages'));
 app.use('/api/asana-tasks', require('./routes/workspace').tasks);
-app.use('/api/ai', require('./routes/workspace').ai);
 app.use('/api/calendar', require('./routes/calendar'));
 
 // Health check for uptime monitors: confirms the server AND the database

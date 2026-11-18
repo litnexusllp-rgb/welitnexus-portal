@@ -1,17 +1,13 @@
 'use strict';
 
-// Asana write-back and the AI assistant.
-//   /api/asana-tasks/...   create / update / comment / from Slack message
-//   /api/ai/...            Claude or ChatGPT, permission-aware context
+// Asana write-back: /api/asana-tasks/... create, update and comment.
 
 const express = require('express');
 const { db } = require('../db');
 const asyncRoute = require('../asyncRoute');
 const { requireAuth, hasAdminAccess } = require('../auth');
-const { audit, requireOwner, adminLevel } = require('../v2/roles');
+const { audit, requireOwner } = require('../v2/roles');
 const asanaWrite = require('../v2/asanaWrite');
-const slack = require('../v2/slack');
-const ai = require('../v2/ai');
 
 const tasks = express.Router();
 tasks.use(requireAuth);
@@ -82,44 +78,6 @@ tasks.post(
   }),
 );
 
-// Turn a Slack message into an Asana task, and post the link back in the thread.
-tasks.post(
-  '/from-message',
-  asyncRoute(async (req, res) => {
-    const channel = String(req.body.channel || ''),
-      ts = String(req.body.ts || '');
-    if (!/^[CG][A-Z0-9]{6,}$/.test(channel) || !/^\d{10}\.\d{6}$/.test(ts))
-      return res.status(400).json({ error: 'Invalid message' });
-    await slack.assertMember(req.user, channel);
-    const cached = db.prepare('SELECT text FROM int_messages WHERE channel_id=? AND ts=?').get(channel, ts);
-    let permalink = '';
-    try {
-      permalink = (await slack.call('chat.getPermalink', { channel, message_ts: ts }, { json: false })).permalink;
-    } catch (_e) {
-      /* optional */
-    }
-    const t = await asanaWrite.createTask({
-      name: req.body.name || (cached?.text || 'Follow up').split('\n')[0].slice(0, 120),
-      notes: `${cached?.text || ''}\n\nFrom Slack: ${permalink}`.trim(),
-      assigneeId: req.body.assignee_id || req.user.id,
-      dueOn: req.body.due_date,
-      projectGid: asanaWrite.projectForChannel(channel),
-    });
-    try {
-      await slack.post(
-        req.user,
-        channel,
-        `Created Asana task: <${t.url}|${t.name}>${t.due_on ? ` · due ${t.due_on}` : ''}`,
-        ts,
-      );
-    } catch (_e) {
-      /* task still created */
-    }
-    audit(req, 'asana.task_from_message', `asana:${t.gid}`, { channel, ts });
-    res.json({ task: t });
-  }),
-);
-
 // OWNER: register an Asana webhook so changes appear in the portal immediately.
 tasks.post(
   '/webhook/setup',
@@ -137,51 +95,4 @@ tasks.post(
   }),
 );
 
-// ---------- AI ----------
-const aiRouter = express.Router();
-aiRouter.use(requireAuth);
-
-aiRouter.get('/providers', (_req, res) => res.json({ providers: ai.available(), default: ai.defaultProvider() }));
-
-async function contextFor(req, ctx = {}) {
-  if (ctx.channel) {
-    const h = await slack.history(req.user, String(ctx.channel), {
-      thread: ctx.thread_ts ? String(ctx.thread_ts) : undefined,
-    });
-    return h.messages
-      .slice(-60)
-      .map(
-        (m) => `${m.user_name}: ${m.text}${m.files.length ? ` [files: ${m.files.map((f) => f.name).join(', ')}]` : ''}`,
-      )
-      .join('\n');
-  }
-  if (ctx.invoice_id) {
-    if (!adminLevel(req.user) || !req.adminConsole)
-      throw Object.assign(new Error('Admin console access required'), { status: 403 });
-    const lines = db
-      .prepare('SELECT description, quantity FROM int_invoice_lines WHERE invoice_id=? ORDER BY position')
-      .all(Number(ctx.invoice_id));
-    const client = db
-      .prepare('SELECT c.name FROM int_invoices i JOIN clients c ON c.id=i.client_id WHERE i.id=?')
-      .get(Number(ctx.invoice_id));
-    return `Client: ${client?.name || ''}\n` + lines.map((l) => `- ${l.description} (qty ${l.quantity})`).join('\n');
-  }
-  return '';
-}
-
-aiRouter.post(
-  '/complete',
-  asyncRoute(async (req, res) => {
-    const context = await contextFor(req, req.body.context || {});
-    const out = await ai.complete({
-      user: req.user,
-      provider: req.body.provider,
-      action: String(req.body.action || ''),
-      context,
-      prompt: req.body.prompt,
-    });
-    res.json(out);
-  }),
-);
-
-module.exports = { tasks, ai: aiRouter };
+module.exports = { tasks };
