@@ -11,7 +11,7 @@ const listHolidays = db.prepare(`SELECT * FROM holidays ORDER BY date ASC`);
 const upsertHoliday = db.prepare(
   `INSERT INTO holidays (date, name, type, duration, created_by, created_ts)
    VALUES (@date, @name, @type, @duration, @created_by, @created_ts)
-   ON CONFLICT(date) DO UPDATE SET name = excluded.name, type = excluded.type, duration = excluded.duration`
+   ON CONFLICT(date) DO UPDATE SET name = excluded.name, type = excluded.type, duration = excluded.duration`,
 );
 const deleteHoliday = db.prepare(`DELETE FROM holidays WHERE id = ?`);
 
@@ -21,11 +21,14 @@ router.get('/', requireAuth, (_req, res) => res.json({ holidays: listHolidays.al
 // ADMIN: publish / update a holiday.
 router.post('/', requireAdmin, (req, res) => {
   const date = String(req.body.date || '');
-  const name = String(req.body.name || '').trim().slice(0, 120);
+  const name = String(req.body.name || '')
+    .trim()
+    .slice(0, 120);
   const duration = String(req.body.duration || 'FULL').toUpperCase();
   if (!['FULL', 'HALF'].includes(duration)) return res.status(400).json({ error: 'Choose full day or half day' });
   const type = ['PUBLIC', 'OPTIONAL', 'COMPANY'].includes(String(req.body.type || '').toUpperCase())
-    ? String(req.body.type).toUpperCase() : 'PUBLIC';
+    ? String(req.body.type).toUpperCase()
+    : 'PUBLIC';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !DateTime.fromISO(date).isValid || !name) {
     return res.status(400).json({ error: 'Valid date (yyyy-mm-dd) and name required' });
   }

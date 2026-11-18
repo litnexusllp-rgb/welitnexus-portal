@@ -11,8 +11,10 @@ function addAttendanceTotals(totals, status, workedMinutes = 0) {
     totals.holiday = (totals.holiday || 0) + 0.5;
     const key = status.slice('HALF_HOLIDAY_'.length).toLowerCase();
     totals[key] = (totals[key] || 0) + 0.5;
-  } else if (status === 'HALF') { totals.present += 0.5; totals.leave += 0.5; }
-  else {
+  } else if (status === 'HALF') {
+    totals.present += 0.5;
+    totals.leave += 0.5;
+  } else {
     const key = status.toLowerCase();
     if (['present', 'leave', 'absent', 'holiday', 'weekend'].includes(key)) totals[key] = (totals[key] || 0) + 1;
   }

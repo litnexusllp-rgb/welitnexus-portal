@@ -26,6 +26,35 @@ httpOnly cookie; passwords are bcrypt-hashed.
 
 ---
 
+## Portal v2 (redesign + admin console)
+
+A full visual redesign (US enterprise style) plus new features. **All existing
+data is preserved**: v2 only adds new tables prefixed `int_`; it never alters,
+renames or deletes an existing table or column. Run
+`node scripts/verify-upgrade.js <copy-of-portal.db>` before deploying to prove
+every existing record is unchanged.
+
+| Area | What it does |
+|------|--------------|
+| **Two sign-ins** | Employee portal at `/`. Admin console at `/admin` with the admin's password (optional 6-digit authenticator code with `ADMIN_2FA=required`, enrolled on first sign-in, 10 backup codes). Separate 8-hour admin cookie. |
+| **Access levels** | **Owner** (partners: everything) · **Billing admin** (clients, invoices, billing only) · **Employee**. Existing `ADMIN` users are Owners automatically. |
+| **People & Access** | Add employees, change access, deactivate/restore, reset 2-step (when on), audit log. **Permanent delete** is Owner-only, needs the typed full name, and writes a full backup to `<db folder>/backups/` first. |
+| **Billing & Invoices** | USD or INR invoices, Net terms, tax, live preview, PDF, numbering on send (`INV-2026-001`), email to client, partial payments, void, overdue tracking, fiscal-year (Apr–Mar) summary, top clients, automatic reminders, import completed tasks as lines. |
+| **Calendar** | Any number of Google/Gmail and Outlook/Microsoft 365 accounts per person (no admin rights needed on the account), client calendars via ICS links, plus portal holidays, approved time off, birthdays and invoice due dates. Week/Month/Agenda, conflicts, create events with invites. |
+| **Integrations** | Owner page showing what is configured and the exact URLs to paste into Slack, Asana, Google and Microsoft. |
+
+New settings are listed at the end of `.env.example`. None are required: a
+feature without settings shows “not connected yet” and everything else works.
+
+### Recommended rollout
+1. Download a backup (Settings › Backup, or `/api/backup`).
+2. Run `node scripts/verify-upgrade.js` on a copy of that backup — it must print PASS.
+3. Deploy. Both partners sign in once at `/admin` to check the admin console works.
+4. Set `ADMIN_CONSOLE_REQUIRED=on` so every admin page requires the admin console.
+5. Add integrations one at a time (Slack, AI, calendars) from the Integrations page.
+
+---
+
 ## Run locally
 
 ```bash

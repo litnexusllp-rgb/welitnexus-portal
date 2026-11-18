@@ -6,13 +6,14 @@
 
 const VALID = {
   INVALID: [],
-  OUT:   ['IN'],
-  IN:    ['OUT', 'BREAK_START'],
+  OUT: ['IN'],
+  IN: ['OUT', 'BREAK_START'],
   BREAK: ['BREAK_END', 'OUT'],
 };
 
 function validateEvents(events) {
-  let state = 'OUT'; let previous = -Infinity;
+  let state = 'OUT';
+  let previous = -Infinity;
   for (const e of events) {
     if (!Number.isSafeInteger(e.ts) || e.ts <= previous) return 'Punch times must be valid and strictly increasing.';
     if (!VALID[state].includes(e.type)) return `Cannot ${e.type} while ${state}. Correct the complete punch sequence.`;
@@ -28,7 +29,16 @@ function validateEvents(events) {
 //         accruing time forever; the open interval is simply dropped.
 function summarize(events, liveTs) {
   const error = validateEvents(events);
-  if (error) return { state: 'INVALID', valid: false, error, workedMinutes: null, breakMinutes: null, firstIn: null, lastOut: null };
+  if (error)
+    return {
+      state: 'INVALID',
+      valid: false,
+      error,
+      workedMinutes: null,
+      breakMinutes: null,
+      firstIn: null,
+      lastOut: null,
+    };
   let state = 'OUT';
   let workedMs = 0;
   let breakMs = 0;
@@ -39,7 +49,10 @@ function summarize(events, liveTs) {
 
   for (const e of events) {
     if (e.type === 'IN') {
-      if (state === 'OUT') { lastIn = e.ts; if (firstIn === null) firstIn = e.ts; }
+      if (state === 'OUT') {
+        lastIn = e.ts;
+        if (firstIn === null) firstIn = e.ts;
+      }
       state = 'IN';
     } else if (e.type === 'OUT') {
       if (state === 'IN' && lastIn !== null) workedMs += e.ts - lastIn;

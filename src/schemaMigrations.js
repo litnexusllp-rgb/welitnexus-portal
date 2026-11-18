@@ -17,9 +17,10 @@ function applyColumnMigrations(db, statements) {
       const [, table, column] = match;
       const version = index + 1;
       const previous = read.get(version);
-      const exists = db.pragma(`table_info(${table})`).some(c => c.name === column);
+      const exists = db.pragma(`table_info(${table})`).some((c) => c.name === column);
       if (previous) {
-        if (previous.statement !== statement || !exists) throw new Error(`Schema migration ${version} does not match the database`);
+        if (previous.statement !== statement || !exists)
+          throw new Error(`Schema migration ${version} does not match the database`);
         return;
       }
       if (!exists) db.exec(statement);

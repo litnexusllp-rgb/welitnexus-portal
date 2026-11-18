@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 
 const router = express.Router();
@@ -20,46 +20,44 @@ const ACHIEVEMENT_CATEGORIES = new Set([
 
 const insertAch = db.prepare(
   `INSERT INTO achievements (user_id, date, category, title, description, created_ts)
-   VALUES (?, ?, ?, ?, ?, ?)`
+   VALUES (?, ?, ?, ?, ?, ?)`,
 );
-const getAch = db.prepare(
-  `SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id WHERE a.id = ?`
-);
-const mine = db.prepare(
-  `SELECT * FROM achievements WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 200`
-);
+const getAch = db.prepare(`SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id WHERE a.id = ?`);
+const mine = db.prepare(`SELECT * FROM achievements WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 200`);
 const forMonth = db.prepare(
   `SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id
-   WHERE a.date >= ? AND a.date <= ? ORDER BY a.status = 'PENDING' DESC, a.date DESC`
+   WHERE a.date >= ? AND a.date <= ? ORDER BY a.status = 'PENDING' DESC, a.date DESC`,
 );
 // The review queue spans every month; the month picker filters reviewed history only.
 const forReview = db.prepare(
   `SELECT a.*, u.name FROM achievements a JOIN users u ON u.id = a.user_id
    WHERE a.status = 'PENDING' OR (a.date >= ? AND a.date <= ?)
-   ORDER BY a.status = 'PENDING' DESC, a.date DESC, a.id DESC`
+   ORDER BY a.status = 'PENDING' DESC, a.date DESC, a.id DESC`,
 );
 const review = db.prepare(
-  `UPDATE achievements SET status = ?, points = ?, reviewed_by = ?, reviewed_ts = ? WHERE id = ?`
+  `UPDATE achievements SET status = ?, points = ?, reviewed_by = ?, reviewed_ts = ? WHERE id = ?`,
 );
 const deleteAch = db.prepare(`DELETE FROM achievements WHERE id = ?`);
 
 // Log an achievement (any signed-in user, for themselves).
 router.post('/', requireAuth, (req, res) => {
-  const title = String(req.body.title || '').trim().slice(0, 200);
+  const title = String(req.body.title || '')
+    .trim()
+    .slice(0, 200);
   const date = String(req.body.date || '');
-  const description = String(req.body.description || '').trim().slice(0, 1000);
-  const rawCategory = String(req.body.category || '').trim().toUpperCase();
+  const description = String(req.body.description || '')
+    .trim()
+    .slice(0, 1000);
+  const rawCategory = String(req.body.category || '')
+    .trim()
+    .toUpperCase();
   if (!title || !description || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !rawCategory) {
     return res.status(400).json({ error: 'Date, category, achievement and details are all required' });
   }
   if (!ACHIEVEMENT_CATEGORIES.has(rawCategory)) {
     return res.status(400).json({ error: 'Please select a valid achievement category' });
   }
-  const info = insertAch.run(
-    req.user.id, date, rawCategory, title,
-    description,
-    now().toMillis()
-  );
+  const info = insertAch.run(req.user.id, date, rawCategory, title, description, now().toMillis());
   res.json({ achievement: getAch.get(info.lastInsertRowid) });
 });
 
@@ -71,7 +69,7 @@ router.delete('/:id', require('../requestValidation').validateParams, requireAut
   const a = getAch.get(Number(req.params.id));
   if (!a) return res.status(404).json({ error: 'Not found' });
   const ownPending = a.user_id === req.user.id && a.status === 'PENDING';
-  if (!ownPending && req.user.role !== 'ADMIN') {
+  if (!ownPending && !hasAdminAccess(req)) {
     return res.status(403).json({ error: 'Only your own pending achievements can be deleted' });
   }
   deleteAch.run(a.id);

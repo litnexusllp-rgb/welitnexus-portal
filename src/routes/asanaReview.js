@@ -1,10 +1,25 @@
 'use strict';
-const router=require('express').Router();
-const {requireAdmin}=require('../auth');
-const {db}=require('../db');
-const review=require('../asanaReview').createReview({db});
+const router = require('express').Router();
+const { requireAdmin } = require('../auth');
+const { db } = require('../db');
+const review = require('../asanaReview').createReview({ db });
 router.use(requireAdmin);
-router.use((_req,res,next)=>{res.set('Cache-Control','no-store');next();});
-router.get('/',(req,res)=>{try{res.json(review.read(req.query));}catch(e){res.status(e.status||500).json({error:e.status?e.message:'Could not read the report.'});}});
-router.post('/refresh',(req,res)=>{try{res.status(202).json(review.start(req.body));}catch(e){res.status(e.status||500).json({error:e.status?e.message:'Could not refresh the report.'});}});
-module.exports=router;
+router.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+router.get('/', (req, res) => {
+  try {
+    res.json(review.read(req.query));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not read the report.' });
+  }
+});
+router.post('/refresh', (req, res) => {
+  try {
+    res.status(202).json(review.start(req.body));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not refresh the report.' });
+  }
+});
+module.exports = router;

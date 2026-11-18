@@ -52,16 +52,20 @@
 
     const save = document.getElementById('mSave');
     if (save) {
-      save.addEventListener('click', (event) => {
-        const required = [date, document.getElementById('aCategory'), title, desc];
-        const missing = required.find((field) => field && !String(field.value || '').trim());
-        if (missing) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          missing.reportValidity();
-          missing.focus();
-        }
-      }, true);
+      save.addEventListener(
+        'click',
+        (event) => {
+          const required = [date, document.getElementById('aCategory'), title, desc];
+          const missing = required.find((field) => field && !String(field.value || '').trim());
+          if (missing) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            missing.reportValidity();
+            missing.focus();
+          }
+        },
+        true,
+      );
     }
   }
 
@@ -72,7 +76,8 @@
     th.textContent = text;
     th.dataset.achievementCategory = '1';
     const anchor = row.children[afterIndex];
-    if (anchor?.nextSibling) row.insertBefore(th, anchor.nextSibling); else row.appendChild(th);
+    if (anchor?.nextSibling) row.insertBefore(th, anchor.nextSibling);
+    else row.appendChild(th);
   }
 
   function insertCategoryCells(hostId, rows, afterIndex) {
@@ -86,7 +91,8 @@
       td.dataset.achievementCategory = '1';
       td.innerHTML = `<span class="badge">${categoryLabel(rows[index]?.category)}</span>`;
       const anchor = tr.children[afterIndex];
-      if (anchor?.nextSibling) tr.insertBefore(td, anchor.nextSibling); else tr.appendChild(td);
+      if (anchor?.nextSibling) tr.insertBefore(td, anchor.nextSibling);
+      else tr.appendChild(td);
     });
   }
 

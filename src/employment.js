@@ -1,6 +1,7 @@
 'use strict';
 const { DateTime, ZONE } = require('./time');
-const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && DateTime.fromISO(value, { zone: ZONE }).isValid;
+const validDate = (value) =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && DateTime.fromISO(value, { zone: ZONE }).isValid;
 function employmentError(join, exit) {
   if (join && !validDate(join)) return 'Enter a valid joining date.';
   if (exit && !validDate(exit)) return 'Enter a valid last working day.';
@@ -14,6 +15,8 @@ function employmentStatus(user, day) {
   return null;
 }
 function overlapsEmployment(user, start, end) {
-  return (!validDate(user.join_date) || user.join_date <= end) && (!validDate(user.exit_date) || user.exit_date >= start);
+  return (
+    (!validDate(user.join_date) || user.join_date <= end) && (!validDate(user.exit_date) || user.exit_date >= start)
+  );
 }
 module.exports = { employmentError, employmentStatus, overlapsEmployment };

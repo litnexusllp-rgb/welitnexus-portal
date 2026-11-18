@@ -14,7 +14,9 @@ const eventsSince = db.prepare(`SELECT user_id, type, ts, day FROM events WHERE 
 router.get('/', requireAdmin, (_req, res) => {
   // --- Attendance trend: last 30 attendance days ---
   const days = Number(30);
-  const startDay = now().minus({ days: days - 1 }).toFormat('yyyy-LL-dd');
+  const startDay = now()
+    .minus({ days: days - 1 })
+    .toFormat('yyyy-LL-dd');
   const today = attendanceToday();
   const byUserDay = {};
   for (const e of eventsSince.all(startDay)) {
@@ -31,7 +33,9 @@ router.get('/', requireAdmin, (_req, res) => {
   }
   const attendance = [];
   for (let i = 0; i < days; i++) {
-    const day = now().minus({ days: days - 1 - i }).toFormat('yyyy-LL-dd');
+    const day = now()
+      .minus({ days: days - 1 - i })
+      .toFormat('yyyy-LL-dd');
     const d = perDay[day] || { present: 0, minutes: 0 };
     attendance.push({ day, present: d.present, hours: Math.round(d.minutes / 6) / 10 });
   }

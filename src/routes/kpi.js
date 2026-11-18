@@ -4,9 +4,10 @@
 // decide bonuses: attendance, hours, task throughput & punctuality, leave
 // taken, and acknowledged achievement points.
 
+const asyncRoute = require('../asyncRoute');
 const express = require('express');
 const { db } = require('../db');
-const { requireAdmin, requireAuth } = require('../auth');
+const { requireAdmin, requireAuth, hasAdminAccess } = require('../auth');
 const { now, dayFromTs, DateTime, ZONE } = require('../time');
 const { summarize } = require('../compute');
 const asana = require('../asana');
@@ -30,26 +31,26 @@ function shiftStartOf(hhmm) {
 const fmtHHmm = (s) => (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
 
 const activeUsers = db.prepare(
-  `SELECT id, name, department, title, shift_start, attendance_timezone, attendance_cutover, leave_balance, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`
+  `SELECT id, name, department, title, shift_start, attendance_timezone, attendance_cutover, leave_balance, active, join_date, exit_date FROM users ORDER BY name COLLATE NOCASE`,
 );
 const eventsBetween = db.prepare(
-  `SELECT user_id, type, ts, day FROM events WHERE day >= ? AND day <= ? ORDER BY user_id, ts, id`
+  `SELECT user_id, type, ts, day FROM events WHERE day >= ? AND day <= ? ORDER BY user_id, ts, id`,
 );
 const doneTasksBetween = db.prepare(
-  `SELECT assignee_id, due_date, updated_ts FROM tasks WHERE status = 'DONE' AND updated_ts >= ? AND updated_ts <= ?`
+  `SELECT assignee_id, due_date, updated_ts FROM tasks WHERE status = 'DONE' AND updated_ts >= ? AND updated_ts <= ?`,
 );
 const openTasksNow = db.prepare(
-  `SELECT assignee_id, COUNT(*) AS c FROM tasks WHERE status != 'DONE' GROUP BY assignee_id`
+  `SELECT assignee_id, COUNT(*) AS c FROM tasks WHERE status != 'DONE' GROUP BY assignee_id`,
 );
 const approvedLeaves = db.prepare(
   `SELECT user_id, start_date, end_date, kind FROM leaves
-   WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`
+   WHERE status = 'APPROVED' AND start_date <= ? AND end_date >= ?`,
 );
 const lateNormalOverridesBetween = db.prepare(
-  `SELECT user_id, day FROM attendance_day_overrides WHERE ignore_late = 1 AND day >= ? AND day <= ?`
+  `SELECT user_id, day FROM attendance_day_overrides WHERE ignore_late = 1 AND day >= ? AND day <= ?`,
 );
 const achievementsBetween = db.prepare(
-  `SELECT user_id, status, points FROM achievements WHERE date >= ? AND date <= ?`
+  `SELECT user_id, status, points FROM achievements WHERE date >= ? AND date <= ?`,
 );
 
 // Inclusive day overlap between [aStart,aEnd] and [bStart,bEnd] (ISO strings).
@@ -71,8 +72,8 @@ async function buildKpi(req) {
   const endMs = DateTime.fromISO(end, { zone: ZONE }).endOf('day').toMillis();
 
   // Each active user's shift start (parsed once) for the punctuality check.
-  const users = activeUsers.all().filter(u => overlapsEmployment(u, start, end));
-  const userById = new Map(users.map(u => [String(u.id), u]));
+  const users = activeUsers.all().filter((u) => overlapsEmployment(u, start, end));
+  const userById = new Map(users.map((u) => [String(u.id), u]));
   const invalidDays = {};
   const userShift = {};
   for (const u of users) userShift[u.id] = shiftStartOf(u.shift_start);
@@ -85,7 +86,12 @@ async function buildKpi(req) {
   }
   // Approved leave dates are excluded from punctuality.
   const leaveDates = new Set();
-  const halfHolidays = new Set(db.prepare("SELECT date FROM holidays WHERE duration='HALF' AND date>=? AND date<=?").all(start, end).map(h => h.date));
+  const halfHolidays = new Set(
+    db
+      .prepare("SELECT date FROM holidays WHERE duration='HALF' AND date>=? AND date<=?")
+      .all(start, end)
+      .map((h) => h.date),
+  );
   const lateNormalDays = new Set(lateNormalOverridesBetween.all(start, end).map((r) => `${r.user_id}|${r.day}`));
   for (const l of approvedLeaves.all(end, start)) {
     if (l.kind === 'HALF') {
@@ -105,7 +111,10 @@ async function buildKpi(req) {
     const employee = userById.get(uid);
     if (!employee || employmentStatus(employee, day) === 'NOT_EMPLOYED') continue;
     const s = summarize(byUserDay[k], liveForDay(employee, day));
-    if (s.valid === false) { invalidDays[uid] = (invalidDays[uid] || 0) + 1; continue; }
+    if (s.valid === false) {
+      invalidDays[uid] = (invalidDays[uid] || 0) + 1;
+      continue;
+    }
     const a = (attendance[uid] = attendance[uid] || { days: 0, minutes: 0, present: 0, onTime: 0 });
     a.days += halfHolidays.has(day) ? 0.5 : 1;
     a.minutes += s.workedMinutes;
@@ -163,7 +172,10 @@ async function buildKpi(req) {
   for (const a of achievementsBetween.all(start, end)) {
     const r = (ach[a.user_id] = ach[a.user_id] || { logged: 0, acknowledged: 0, points: 0, pending: 0 });
     r.logged += 1;
-    if (a.status === 'ACKNOWLEDGED') { r.acknowledged += 1; r.points += a.points; }
+    if (a.status === 'ACKNOWLEDGED') {
+      r.acknowledged += 1;
+      r.points += a.points;
+    }
     if (a.status === 'PENDING') r.pending += 1;
   }
 
@@ -200,15 +212,23 @@ async function buildKpi(req) {
 }
 
 // ADMIN: the whole-team bonus worksheet.
-router.get('/', requireAdmin, require('../asyncRoute')(async (req, res) => res.json(await buildKpi(req))));
+router.get(
+  '/',
+  requireAdmin,
+  asyncRoute(async (req, res) => res.json(await buildKpi(req))),
+);
 
 // One person's KPI row. Employees always get their own; admins may pass
 // ?user_id= to review any employee.
-router.get('/me', requireAuth, require('../asyncRoute')(async (req, res) => {
-  const asked = Number(req.query.user_id);
-  const targetId = (req.user.role === 'ADMIN' && asked) ? asked : req.user.id;
-  const data = await buildKpi(req);
-  res.json({ ...data, rows: data.rows.filter((r) => r.id === targetId), viewingUserId: targetId });
-}));
+router.get(
+  '/me',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const asked = Number(req.query.user_id);
+    const targetId = hasAdminAccess(req) && asked ? asked : req.user.id;
+    const data = await buildKpi(req);
+    res.json({ ...data, rows: data.rows.filter((r) => r.id === targetId), viewingUserId: targetId });
+  }),
+);
 
 module.exports = router;

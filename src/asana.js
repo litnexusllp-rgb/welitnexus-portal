@@ -26,11 +26,12 @@ const cfg = () => ({
   token: process.env.ASANA_TOKEN || '',
   project: process.env.ASANA_PROJECT_GID || '',
 });
-const enabled = () => { const c = cfg(); return !!(c.token && c.project); };
+const enabled = () => {
+  const c = cfg();
+  return !!(c.token && c.project);
+};
 
-const activeUsers = db.prepare(
-  `SELECT id, name, email, asana_email FROM users WHERE active = 1`
-);
+const activeUsers = db.prepare(`SELECT id, name, email, asana_email FROM users WHERE active = 1`);
 
 let cache = { at: 0, tasks: null };
 let inFlight = null;
@@ -38,11 +39,15 @@ let retryAt = 0;
 let lastError = null;
 
 async function apiGet(path) {
-  const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${cfg().token}` }, signal: AbortSignal.timeout(15000) });
+  const res = await fetch(`${API}${path}`, {
+    headers: { Authorization: `Bearer ${cfg().token}` },
+    signal: AbortSignal.timeout(15000),
+  });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = (body && body.errors && body.errors[0] && body.errors[0].message) || `HTTP ${res.status}`;
-    const err = new Error(msg); err.status = res.status;
+    const err = new Error(msg);
+    err.status = res.status;
     if (res.status === 429) err.retryMs = Math.max(60000, (Number(res.headers.get('retry-after')) || 60) * 1000);
     throw err;
   }
@@ -56,10 +61,12 @@ async function allTasks(force = false) {
   if (inFlight) return inFlight;
   if (Date.now() < retryAt) throw new Error(lastError || 'Asana temporarily unavailable');
   inFlight = (async () => {
-    const fields = 'name,completed,completed_at,due_on,due_at,modified_at,permalink_url,assignee.gid,assignee.name,assignee.email';
+    const fields =
+      'name,completed,completed_at,due_on,due_at,modified_at,permalink_url,assignee.gid,assignee.name,assignee.email';
     const base = `/tasks?project=${encodeURIComponent(cfg().project)}&opt_fields=${fields}&limit=100&completed_since=1970-01-01T00%3A00%3A00Z`;
     let path = base;
-    const out = new Map(); const offsets = new Set();
+    const out = new Map();
+    const offsets = new Set();
     for (let page = 0; path; page++) {
       if (page >= 1000) throw new Error('Asana pagination exceeded safety limit; results are incomplete');
       const body = await apiGet(path);
@@ -72,38 +79,67 @@ async function allTasks(force = false) {
       path = offset ? base + '&offset=' + encodeURIComponent(offset) : null;
     }
     cache = { at: Date.now(), tasks: [...out.values()] };
-    lastError = null; retryAt = 0;
+    lastError = null;
+    retryAt = 0;
     return cache.tasks;
   })();
-  try { return await inFlight; }
-  catch (e) { lastError = e.message; retryAt = Date.now() + (e.retryMs || 60000); throw e; }
-  finally { inFlight = null; }
+  try {
+    return await inFlight;
+  } catch (e) {
+    lastError = e.message;
+    retryAt = Date.now() + (e.retryMs || 60000);
+    throw e;
+  } finally {
+    inFlight = null;
+  }
 }
 
 function syncStatus() {
   return { project: cfg().project, lastSuccessAt: cache.at || null, lastError, retryAt: retryAt || null };
 }
 
-// portal user id -> [asana task], using the matching rules described above.
-function indexByPortalUser(tasks) {
-  const users = activeUsers.all();
-  const byEmail = new Map(); const byName = new Map();
-  for (const u of users) {
-    if (u.asana_email) byEmail.set(String(u.asana_email).toLowerCase(), u.id);
-    if (u.email) byEmail.set(String(u.email).toLowerCase(), u.id);
-    if (u.name) byName.set(String(u.name).trim().toLowerCase(), u.id);
+// Returns a lookup from an Asana assignee to the matching portal employee
+// (or undefined), using the matching rules described at the top of this file.
+function portalUserMatcher() {
+  const byEmail = new Map();
+  const byName = new Map();
+  const key = (v) =>
+    String(v || '')
+      .trim()
+      .toLowerCase();
+  for (const u of activeUsers.all()) {
+    if (u.asana_email) byEmail.set(key(u.asana_email), u);
+    if (u.email) byEmail.set(key(u.email), u);
+    if (u.name) byName.set(key(u.name), u);
   }
+  return (assignee) => byEmail.get(String(assignee.email || '').toLowerCase()) || byName.get(key(assignee.name));
+}
+
+// portal user id -> [asana task].
+function indexByPortalUser(tasks) {
+  const match = portalUserMatcher();
   const out = {};
   const unmatched = new Map(); // asana name -> count, so admins can spot gaps
   for (const t of tasks) {
     const a = t.assignee;
     if (!a) continue;
-    const uid = byEmail.get(String(a.email || '').toLowerCase())
-      || byName.get(String(a.name || '').trim().toLowerCase());
-    if (!uid) { unmatched.set(a.name || '(unnamed)', (unmatched.get(a.name || '(unnamed)') || 0) + 1); continue; }
-    (out[uid] = out[uid] || []).push(t);
+    const user = match(a);
+    if (!user) {
+      const name = a.name || '(unnamed)';
+      unmatched.set(name, (unmatched.get(name) || 0) + 1);
+      continue;
+    }
+    (out[user.id] ||= []).push(t);
   }
   return { byUser: out, unmatched: [...unmatched.entries()].map(([name, count]) => ({ name, count })) };
+}
+
+// Is this Asana task assigned to this portal user? Used to decide whether an
+// employee may change a task through the shared Asana connection. Only tasks in
+// the configured project that match the user (see the rules above) qualify.
+async function isAssignedTo(userId, gid) {
+  const { byUser } = indexByPortalUser(await allTasks());
+  return (byUser[userId] || []).some((t) => String(t.gid) === String(gid));
 }
 
 // One person's open tasks, soonest due first (no due date last).
@@ -111,9 +147,13 @@ async function myTasks(userId) {
   const { byUser } = indexByPortalUser(await allTasks());
   return (byUser[userId] || [])
     .filter((t) => !t.completed)
-    .sort((a, b) => (a.due_on ? 0 : 1) - (b.due_on ? 0 : 1) || String(a.due_on || '').localeCompare(String(b.due_on || '')))
+    .sort(
+      (a, b) => (a.due_on ? 0 : 1) - (b.due_on ? 0 : 1) || String(a.due_on || '').localeCompare(String(b.due_on || '')),
+    )
     .map((t) => ({
-      gid: t.gid, name: t.name || '(untitled)', due_on: t.due_on || '',
+      gid: t.gid,
+      name: t.name || '(untitled)',
+      due_on: t.due_on || '',
       url: t.permalink_url || '',
       overdue: !!(t.due_on && t.due_on < todayStr()),
     }));
@@ -124,29 +164,36 @@ async function myTasks(userId) {
 // "Unassigned" group, which is usually what needs attention first.
 async function teamTasks() {
   const tasks = await allTasks();
-  const users = activeUsers.all();
-  const byEmail = new Map(); const byName = new Map();
-  for (const u of users) {
-    if (u.asana_email) byEmail.set(String(u.asana_email).toLowerCase(), u);
-    if (u.email) byEmail.set(String(u.email).toLowerCase(), u);
-    if (u.name) byName.set(String(u.name).trim().toLowerCase(), u);
-  }
+  const match = portalUserMatcher();
   const today = todayStr();
   const groups = new Map(); // key -> { name, matched, tasks[] }
   for (const t of tasks) {
     if (t.completed) continue; // pending only
     const a = t.assignee;
-    let key; let name; let matched = false;
-    if (!a) { key = '__unassigned'; name = 'Unassigned'; }
-    else {
-      const u = byEmail.get(String(a.email || '').toLowerCase()) || byName.get(String(a.name || '').trim().toLowerCase());
-      if (u) { key = `u${u.id}`; name = u.name; matched = true; }
-      else { key = `x${a.gid}`; name = `${a.name || 'Unknown'} (not linked to an employee)`; }
+    let key;
+    let name;
+    let matched = false;
+    if (!a) {
+      key = '__unassigned';
+      name = 'Unassigned';
+    } else {
+      const u = match(a);
+      if (u) {
+        key = `u${u.id}`;
+        name = u.name;
+        matched = true;
+      } else {
+        key = `x${a.gid}`;
+        name = `${a.name || 'Unknown'} (not linked to an employee)`;
+      }
     }
     if (!groups.has(key)) groups.set(key, { key, name, matched, tasks: [] });
     groups.get(key).tasks.push({
-      gid: t.gid, name: t.name || '(untitled)', due_on: t.due_on || '',
-      url: t.permalink_url || '', overdue: !!(t.due_on && t.due_on < today),
+      gid: t.gid,
+      name: t.name || '(untitled)',
+      due_on: t.due_on || '',
+      url: t.permalink_url || '',
+      overdue: !!(t.due_on && t.due_on < today),
     });
   }
   const out = [...groups.values()].map((g) => {
@@ -154,8 +201,13 @@ async function teamTasks() {
     return { ...g, total: g.tasks.length, overdue: g.tasks.filter((t) => t.overdue).length };
   });
   // Most overdue first, then most loaded; unassigned/unlinked to the bottom.
-  out.sort((a, b) => (a.key.startsWith('u') ? 0 : 1) - (b.key.startsWith('u') ? 0 : 1)
-    || b.overdue - a.overdue || b.total - a.total || a.name.localeCompare(b.name));
+  out.sort(
+    (a, b) =>
+      (a.key.startsWith('u') ? 0 : 1) - (b.key.startsWith('u') ? 0 : 1) ||
+      b.overdue - a.overdue ||
+      b.total - a.total ||
+      a.name.localeCompare(b.name),
+  );
   return {
     groups: out,
     totalPending: out.reduce((n, g) => n + g.total, 0),
@@ -193,7 +245,8 @@ let adminWorkFlight = null;
 let adminWorkRetryAt = 0;
 async function adminWork() {
   if (!cfg().token) throw new Error('Asana is not configured');
-  if (adminWorkCache.tasks && Date.now() - adminWorkCache.at < CACHE_MS) return { ...adminWorkCache, scope: 'Abhey and Saurav · all accessible Asana projects' };
+  if (adminWorkCache.tasks && Date.now() - adminWorkCache.at < CACHE_MS)
+    return { ...adminWorkCache, scope: 'Abhey and Saurav · all accessible Asana projects' };
   if (adminWorkFlight) return adminWorkFlight;
   if (Date.now() < adminWorkRetryAt) throw new Error('Asana temporarily unavailable. Please retry shortly.');
   adminWorkFlight = (async () => {
@@ -201,36 +254,63 @@ async function adminWork() {
     const fields = 'name,completed,due_on,due_at,assignee.gid,assignee.name,projects.name';
     for (const user of ADMIN_WORK_USERS) {
       const base = `/tasks?workspace=${ADMIN_WORK_WORKSPACE}&assignee=${user}&completed_since=now&limit=100&opt_fields=${fields}`;
-      let path = base; const seen = new Set();
+      let path = base;
+      const seen = new Set();
       for (let page = 0; path; page++) {
         if (page >= 1000) throw new Error('Admin work pagination exceeded safety limit');
         const body = await apiGet(path);
         if (!Array.isArray(body.data)) throw new Error('Invalid Asana response');
-        for (const t of body.data) if (!t.completed && ADMIN_WORK_USERS.includes(t.assignee?.gid)) {
-          tasks.set(t.gid, { gid:t.gid,name:t.name || '(Untitled task)',due_on:t.due_on || '',
-            overdue:!!t.due_on && t.due_on<todayStr(),assignee:t.assignee.name,
-            projects:(t.projects || []).map(p=>p.name).filter(Boolean),
-            url:`https://app.asana.com/0/0/${encodeURIComponent(t.gid)}` });
-        }
+        for (const t of body.data)
+          if (!t.completed && ADMIN_WORK_USERS.includes(t.assignee?.gid)) {
+            tasks.set(t.gid, {
+              gid: t.gid,
+              name: t.name || '(Untitled task)',
+              due_on: t.due_on || '',
+              overdue: !!t.due_on && t.due_on < todayStr(),
+              assignee: t.assignee.name,
+              projects: (t.projects || []).map((p) => p.name).filter(Boolean),
+              url: `https://app.asana.com/0/0/${encodeURIComponent(t.gid)}`,
+            });
+          }
         const offset = body.next_page?.offset;
         if (body.next_page && (!offset || seen.has(offset))) throw new Error('Incomplete Asana pagination');
         if (offset) seen.add(offset);
         path = offset ? base + '&offset=' + encodeURIComponent(offset) : null;
       }
     }
-    adminWorkCache = { at:Date.now(),tasks:[...tasks.values()].sort((a,b)=>Number(b.overdue)-Number(a.overdue)||String(a.due_on||'9999').localeCompare(b.due_on||'9999')) };
-    return { ...adminWorkCache, scope:'Abhey and Saurav · all accessible Asana projects' };
+    adminWorkCache = {
+      at: Date.now(),
+      tasks: [...tasks.values()].sort(
+        (a, b) => Number(b.overdue) - Number(a.overdue) || String(a.due_on || '9999').localeCompare(b.due_on || '9999'),
+      ),
+    };
+    return { ...adminWorkCache, scope: 'Abhey and Saurav · all accessible Asana projects' };
   })();
-  try { return await adminWorkFlight; }
-  catch (e) { adminWorkRetryAt=Date.now()+(e.retryMs||60000);throw e; }
-  finally { adminWorkFlight=null; }
+  try {
+    return await adminWorkFlight;
+  } catch (e) {
+    adminWorkRetryAt = Date.now() + (e.retryMs || 60000);
+    throw e;
+  } finally {
+    adminWorkFlight = null;
+  }
 }
 
 // Admin diagnostic: is the connection working, and who isn't matching?
 async function diagnose() {
   const c = cfg();
-  if (!c.token) return { ok: false, step: 'token', message: 'ASANA_TOKEN is not set on the server. Add it in Railway and redeploy.' };
-  if (!c.project) return { ok: false, step: 'project', message: 'ASANA_PROJECT_GID is not set. Use the number from your Asana project URL.' };
+  if (!c.token)
+    return {
+      ok: false,
+      step: 'token',
+      message: 'ASANA_TOKEN is not set on the server. Add it in Railway and redeploy.',
+    };
+  if (!c.project)
+    return {
+      ok: false,
+      step: 'project',
+      message: 'ASANA_PROJECT_GID is not set. Use the number from your Asana project URL.',
+    };
   try {
     const me = await apiGet('/users/me?opt_fields=name');
     const tasks = await allTasks(true);
@@ -245,12 +325,28 @@ async function diagnose() {
       message: `Connected as ${me.data && me.data.name}. Read ${tasks.length} task(s); matched ${matchedUsers} employee(s).`,
     };
   } catch (e) {
-    const hint = e.status === 401 ? 'The Asana token is wrong or expired — create a new Personal Access Token and update ASANA_TOKEN.'
-      : e.status === 403 ? 'That token cannot see this project. Check the token owner has access to it.'
-        : e.status === 404 ? 'Project not found — check ASANA_PROJECT_GID matches the number in your Asana project URL.'
-          : `Asana error: ${e.message}`;
+    const hint =
+      e.status === 401
+        ? 'The Asana token is wrong or expired — create a new Personal Access Token and update ASANA_TOKEN.'
+        : e.status === 403
+          ? 'That token cannot see this project. Check the token owner has access to it.'
+          : e.status === 404
+            ? 'Project not found — check ASANA_PROJECT_GID matches the number in your Asana project URL.'
+            : `Asana error: ${e.message}`;
     return { ok: false, step: 'api', error: e.message, message: hint };
   }
 }
 
-module.exports = { enabled, myTasks, teamTasks, kpiTaskStats, diagnose, allTasks, syncStatus, adminWork };
+module.exports = {
+  API,
+  cfg,
+  enabled,
+  isAssignedTo,
+  myTasks,
+  teamTasks,
+  kpiTaskStats,
+  diagnose,
+  allTasks,
+  syncStatus,
+  adminWork,
+};

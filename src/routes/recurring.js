@@ -2,17 +2,27 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 const { generateDueTasks } = require('../recurring');
 
 const router = express.Router();
 const { validateReferences } = require('../requestValidation');
 router.use(requireAuth);
-router.use((req, res, next) => { const error = validateReferences(req.body, db); if (error) return res.status(400).json({ error }); next(); });
+router.use((req, res, next) => {
+  const error = validateReferences(req.body, db);
+  if (error) return res.status(400).json({ error });
+  next();
+});
 
 function configError(r) {
-  return !r.title || !require('../requestValidation').day(r.next_due) || !Number.isInteger(r.step) || !Number.isInteger(r.lead_days) || r.lead_days < 0 ? 'A title, valid first due date, and whole-number recurrence settings are required' : null;
+  return !r.title ||
+    !require('../requestValidation').day(r.next_due) ||
+    !Number.isInteger(r.step) ||
+    !Number.isInteger(r.lead_days) ||
+    r.lead_days < 0
+    ? 'A title, valid first due date, and whole-number recurrence settings are required'
+    : null;
 }
 const FREQ = ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'];
 const PRI = ['LOW', 'MEDIUM', 'HIGH'];
@@ -26,15 +36,15 @@ const listMine = db.prepare(`${SELECT} WHERE r.created_by = ? ORDER BY r.active 
 const getOne = db.prepare(`SELECT * FROM recurring_tasks WHERE id = ?`);
 
 // Admins see/return all schedules; employees only their own.
-const listFor = (req) => (req.user.role === 'ADMIN' ? listAll.all() : listMine.all(req.user.id));
-const canManage = (req, rec) => req.user.role === 'ADMIN' || rec.created_by === req.user.id;
+const listFor = (req) => (hasAdminAccess(req) ? listAll.all() : listMine.all(req.user.id));
+const canManage = (req, rec) => hasAdminAccess(req) || rec.created_by === req.user.id;
 const insertRec = db.prepare(
   `INSERT INTO recurring_tasks (title, description, client_id, assignee_id, priority, frequency, step, lead_days, next_due, checklist_json, active, created_by, created_ts)
-   VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, @step, @lead_days, @next_due, @checklist_json, 1, @created_by, @created_ts)`
+   VALUES (@title, @description, @client_id, @assignee_id, @priority, @frequency, @step, @lead_days, @next_due, @checklist_json, 1, @created_by, @created_ts)`,
 );
 const updateRec = db.prepare(
   `UPDATE recurring_tasks SET title=@title, description=@description, client_id=@client_id, assignee_id=@assignee_id,
-   priority=@priority, frequency=@frequency, step=@step, lead_days=@lead_days, next_due=@next_due, checklist_json=@checklist_json WHERE id=@id`
+   priority=@priority, frequency=@frequency, step=@step, lead_days=@lead_days, next_due=@next_due, checklist_json=@checklist_json WHERE id=@id`,
 );
 const setActive = db.prepare(`UPDATE recurring_tasks SET active = ? WHERE id = ?`);
 const delRec = db.prepare(`DELETE FROM recurring_tasks WHERE id = ?`);
@@ -43,16 +53,22 @@ function clean(body, existing) {
   return {
     title: String(body.title ?? existing?.title ?? '').trim(),
     description: String(body.description ?? existing?.description ?? '').slice(0, 2000),
-    client_id: body.client_id === undefined
-      ? (existing?.client_id ?? null)
-      : (body.client_id ? Number(body.client_id) : null),
+    client_id:
+      body.client_id === undefined ? (existing?.client_id ?? null) : body.client_id ? Number(body.client_id) : null,
     assignee_id: Number(body.assignee_id ?? existing?.assignee_id),
-    priority: PRI.includes(String(body.priority || '').toUpperCase()) ? String(body.priority).toUpperCase() : (existing?.priority || 'MEDIUM'),
-    frequency: FREQ.includes(String(body.frequency || '').toUpperCase()) ? String(body.frequency).toUpperCase() : (existing?.frequency || 'MONTHLY'),
+    priority: PRI.includes(String(body.priority || '').toUpperCase())
+      ? String(body.priority).toUpperCase()
+      : existing?.priority || 'MEDIUM',
+    frequency: FREQ.includes(String(body.frequency || '').toUpperCase())
+      ? String(body.frequency).toUpperCase()
+      : existing?.frequency || 'MONTHLY',
     step: Math.max(1, Math.min(99, Number(body.step ?? existing?.step ?? 1) || 1)), // "every N periods"
     lead_days: Math.max(0, Number(body.lead_days ?? existing?.lead_days ?? 7)),
     next_due: String(body.next_due ?? existing?.next_due ?? ''),
-    checklist_json: body.checklist !== undefined ? JSON.stringify(parseChecklistLines(body.checklist)) : (existing?.checklist_json ?? ''),
+    checklist_json:
+      body.checklist !== undefined
+        ? JSON.stringify(parseChecklistLines(body.checklist))
+        : (existing?.checklist_json ?? ''),
   };
 }
 
@@ -61,7 +77,10 @@ function parseChecklistLines(input) {
   let lines = [];
   if (Array.isArray(input)) lines = input;
   else if (typeof input === 'string') lines = input.split('\n');
-  return lines.map((s) => String(s).trim()).filter(Boolean).slice(0, 30);
+  return lines
+    .map((s) => String(s).trim())
+    .filter(Boolean)
+    .slice(0, 30);
 }
 
 // ADMIN: all schedules. Employees use /mine.
@@ -71,9 +90,10 @@ router.get('/mine', requireAuth, (req, res) => res.json({ recurring: listMine.al
 // Create a schedule. Admins assign to anyone; employees create for
 // themselves and must pick a client.
 router.post('/', requireAuth, (req, res) => {
-  const admin = req.user.role === 'ADMIN';
+  const admin = hasAdminAccess(req);
   const r = clean(req.body);
-  const error = configError(r); if (error) return res.status(400).json({ error });
+  const error = configError(r);
+  if (error) return res.status(400).json({ error });
   if (!admin) {
     r.assignee_id = req.user.id;
     if (!r.client_id) return res.status(400).json({ error: 'Please choose a client' });
@@ -91,8 +111,9 @@ router.put('/:id', require('../requestValidation').validateParams, requireAuth, 
   if (!existing) return res.status(404).json({ error: 'Not found' });
   if (!canManage(req, existing)) return res.status(403).json({ error: 'Not your schedule' });
   const patch = clean(req.body, existing);
-  const error = configError(patch); if (error) return res.status(400).json({ error });
-  if (req.user.role !== 'ADMIN') patch.assignee_id = existing.assignee_id; // employees can't reassign
+  const error = configError(patch);
+  if (error) return res.status(400).json({ error });
+  if (!hasAdminAccess(req)) patch.assignee_id = existing.assignee_id; // employees can't reassign
   updateRec.run({ id: existing.id, ...patch });
   res.json({ recurring: listFor(req) });
 });

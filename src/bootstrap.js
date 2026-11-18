@@ -24,14 +24,16 @@ async function bootstrapAdmin() {
 
   const passwordHash = await hashPasswordAsync(password);
   // Another process may have bootstrapped during hashing.
-  const created = db.transaction(() => {
-    if (db.prepare('SELECT COUNT(*) AS c FROM users').get().c) return false;
-    db.prepare(
-    `INSERT INTO users (name, email, password_hash, role, department, title, leave_balance, active, created_ts)
-     VALUES (?, ?, ?, 'ADMIN', 'Leadership', 'Partner', 20, 1, ?)`
-    ).run(name, email, passwordHash, now().toMillis());
-    return true;
-  }).immediate();
+  const created = db
+    .transaction(() => {
+      if (db.prepare('SELECT COUNT(*) AS c FROM users').get().c) return false;
+      db.prepare(
+        `INSERT INTO users (name, email, password_hash, role, department, title, leave_balance, active, created_ts)
+     VALUES (?, ?, ?, 'ADMIN', 'Leadership', 'Partner', 20, 1, ?)`,
+      ).run(name, email, passwordHash, now().toMillis());
+      return true;
+    })
+    .immediate();
 
   if (created) console.log(`Bootstrap: created first admin ${email}. Log in and change the password.`);
 }

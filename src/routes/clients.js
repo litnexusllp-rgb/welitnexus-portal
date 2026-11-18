@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { db } = require('../db');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hasAdminAccess } = require('../auth');
 const { now } = require('../time');
 
 const router = express.Router();
@@ -12,31 +12,32 @@ const FAMILY_ORDER = `ORDER BY COALESCE(p.name, c.name) COLLATE NOCASE, (c.paren
 // Dropdown source: only approved + active clients are usable for tasks.
 const listActive = db.prepare(
   `SELECT c.*, p.name AS parent_name FROM clients c LEFT JOIN clients p ON p.id = c.parent_id
-   WHERE c.active = 1 AND c.approval = 'APPROVED' ${FAMILY_ORDER}`
+   WHERE c.active = 1 AND c.approval = 'APPROVED' ${FAMILY_ORDER}`,
 );
 const listAll = db.prepare(
   `SELECT c.*, u.name AS created_by_name, p.name AS parent_name
    FROM clients c LEFT JOIN users u ON u.id = c.created_by LEFT JOIN clients p ON p.id = c.parent_id
-   ORDER BY (c.approval = 'PENDING') DESC, c.active DESC, COALESCE(p.name, c.name) COLLATE NOCASE, (c.parent_id IS NOT NULL), c.name COLLATE NOCASE`
+   ORDER BY (c.approval = 'PENDING') DESC, c.active DESC, COALESCE(p.name, c.name) COLLATE NOCASE, (c.parent_id IS NOT NULL), c.name COLLATE NOCASE`,
 );
 const listPending = db.prepare(
   `SELECT c.*, u.name AS created_by_name, p.name AS parent_name
    FROM clients c LEFT JOIN users u ON u.id = c.created_by LEFT JOIN clients p ON p.id = c.parent_id
-   WHERE c.approval = 'PENDING' ORDER BY c.created_ts ASC`
+   WHERE c.approval = 'PENDING' ORDER BY c.created_ts ASC`,
 );
 const getOne = db.prepare(`SELECT * FROM clients WHERE id = ?`);
 const insertClient = db.prepare(
   `INSERT INTO clients (name, code, business_type, stage, notes, billing_address, email, approval, created_by, parent_id, active, created_ts)
-   VALUES (@name, @code, @business_type, @stage, @notes, @billing_address, @email, @approval, @created_by, @parent_id, 1, @created_ts)`
+   VALUES (@name, @code, @business_type, @stage, @notes, @billing_address, @email, @approval, @created_by, @parent_id, 1, @created_ts)`,
 );
 const updateClient = db.prepare(
-  `UPDATE clients SET name=@name, code=@code, business_type=@business_type, stage=@stage, notes=@notes, billing_address=@billing_address, email=@email, parent_id=@parent_id WHERE id=@id`
+  `UPDATE clients SET name=@name, code=@code, business_type=@business_type, stage=@stage, notes=@notes, billing_address=@billing_address, email=@email, parent_id=@parent_id WHERE id=@id`,
 );
 const setActive = db.prepare(`UPDATE clients SET active = ? WHERE id = ?`);
 const setApproval = db.prepare(`UPDATE clients SET approval = ? WHERE id = ?`);
 
 const STAGES = ['PROSPECT', 'INTERVIEWED', 'SIGNED'];
-const cleanStage = (v, fallback) => (STAGES.includes(String(v || '').toUpperCase()) ? String(v).toUpperCase() : fallback);
+const cleanStage = (v, fallback) =>
+  STAGES.includes(String(v || '').toUpperCase()) ? String(v).toUpperCase() : fallback;
 
 // Resolve a parent_id from the request. Must be an existing top-level client
 // (no grandparents — keep the hierarchy two levels) and not the client itself.
@@ -62,7 +63,7 @@ router.get('/pending', requireAdmin, (_req, res) => res.json({ clients: listPend
 router.post('/', requireAuth, (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Client name is required' });
-  const admin = req.user.role === 'ADMIN';
+  const admin = hasAdminAccess(req);
   const info = insertClient.run({
     name,
     code: String(req.body.code || '').slice(0, 20),
@@ -70,7 +71,9 @@ router.post('/', requireAuth, (req, res) => {
     stage: cleanStage(req.body.stage, 'PROSPECT'),
     notes: String(req.body.notes || '').slice(0, 500),
     billing_address: String(req.body.billing_address || '').slice(0, 500),
-    email: String(req.body.email || '').trim().slice(0, 160),
+    email: String(req.body.email || '')
+      .trim()
+      .slice(0, 160),
     approval: admin ? 'APPROVED' : 'PENDING',
     created_by: req.user.id,
     parent_id: resolveParent(req.body.parent_id, null),
@@ -82,7 +85,8 @@ router.post('/', requireAuth, (req, res) => {
 // ADMIN: approve or reject a proposed client.
 router.post('/:id/approval', require('../requestValidation').validateParams, requireAdmin, (req, res) => {
   const decision = String(req.body.decision || '').toUpperCase();
-  if (!['APPROVED', 'REJECTED'].includes(decision)) return res.status(400).json({ error: 'decision must be APPROVED or REJECTED' });
+  if (!['APPROVED', 'REJECTED'].includes(decision))
+    return res.status(400).json({ error: 'decision must be APPROVED or REJECTED' });
   const c = getOne.get(Number(req.params.id));
   if (!c) return res.status(404).json({ error: 'Not found' });
   setApproval.run(decision, c.id);
@@ -100,7 +104,9 @@ router.put('/:id', require('../requestValidation').validateParams, requireAdmin,
     stage: cleanStage(req.body.stage, c.stage || 'PROSPECT'),
     notes: String(req.body.notes ?? c.notes),
     billing_address: String(req.body.billing_address ?? c.billing_address ?? '').slice(0, 500),
-    email: String(req.body.email ?? c.email ?? '').trim().slice(0, 160),
+    email: String(req.body.email ?? c.email ?? '')
+      .trim()
+      .slice(0, 160),
     parent_id: req.body.parent_id === undefined ? c.parent_id : resolveParent(req.body.parent_id, c.id),
   });
   res.json({ client: getOne.get(c.id) });

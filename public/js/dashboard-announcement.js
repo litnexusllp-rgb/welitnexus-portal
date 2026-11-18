@@ -2,28 +2,43 @@
 (function () {
   'use strict';
 
-  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const dateLabel = (date) => new Date(date + 'T00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const esc = (value) =>
+    String(value ?? '').replace(
+      /[&<>"']/g,
+      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+    );
+  const dateLabel = (date) =>
+    new Date(date + 'T00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   const clockState = { OFF: 'Ready to clock in', IN: 'Clocked in', BREAK: 'On break', OUT: 'Clocked out' };
   const minutes = (value) => `${Math.floor(value / 60)}h ${value % 60}m`;
 
   function taskList(data, fromAsana) {
     if (!data) return '<p class="dash-muted" role="status">Tasks are unavailable. Open Tasks to retry.</p>';
     const today = new Date().toLocaleDateString('en-CA');
-    const tasks = data.tasks.filter(t => t.status !== 'DONE').map(t => ({
-      title: fromAsana ? t.name : t.title,
-      due: fromAsana ? t.due_on : t.due_date,
-    })).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999')).slice(0, 3);
+    const tasks = data.tasks
+      .filter((t) => t.status !== 'DONE')
+      .map((t) => ({
+        title: fromAsana ? t.name : t.title,
+        due: fromAsana ? t.due_on : t.due_date,
+      }))
+      .sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'))
+      .slice(0, 3);
     if (!tasks.length) return '<p class="dash-muted">You have no open tasks.</p>';
-    return `<ul class="dash-task-list">${tasks.map(t => {
-      const overdue = t.due && t.due < today;
-      const due = !t.due ? 'No due date' : t.due === today ? 'Due today' : `${overdue ? 'Overdue' : 'Due'} ${dateLabel(t.due)}`;
-      return `<li><span>${esc(t.title)}</span><span class="dash-due${overdue ? ' dash-overdue' : ''}">${esc(due)}</span></li>`;
-    }).join('')}</ul>`;
+    return `<ul class="dash-task-list">${tasks
+      .map((t) => {
+        const overdue = t.due && t.due < today;
+        const due = !t.due
+          ? 'No due date'
+          : t.due === today
+            ? 'Due today'
+            : `${overdue ? 'Overdue' : 'Due'} ${dateLabel(t.due)}`;
+        return `<li><span>${esc(t.title)}</span><span class="dash-due${overdue ? ' dash-overdue' : ''}">${esc(due)}</span></li>`;
+      })
+      .join('')}</ul>`;
   }
 
   function staffMarkup(status, tasks, fromAsana, announcements) {
-    const notice = announcements?.announcements.find(a => Number(a.pinned) === 1) || announcements?.announcements[0];
+    const notice = announcements?.announcements.find((a) => Number(a.pinned) === 1) || announcements?.announcements[0];
     const state = status?.state === 'OUT' && status.firstIn == null ? 'OFF' : status?.state;
     return `
       <div class="dash-overview-grid">
@@ -38,10 +53,66 @@
           ${taskList(tasks, fromAsana)}
         </section>
       </div>
-      ${notice ? `<section class="dash-card dash-notice">
+      ${
+        notice
+          ? `<section class="dash-card dash-notice">
         <div class="dash-card-heading"><h2>${Number(notice.pinned) === 1 ? 'Pinned notice' : 'Latest notice'}</h2><a href="#/noticeboard">Notice board</a></div>
         <p>${esc(notice.title)}</p>
-      </section>` : ''}`;
+      </section>`
+          : ''
+      }`;
+  }
+
+  // Employees expected at work today who have not clocked in. People on
+  // approved leave are listed apart; partners (admins) are not tracked here.
+  function notInYet(today) {
+    const all = today?.people || [];
+    const staff = all.filter((p) => p.role === 'EMPLOYEE' && p.employed !== false);
+    const missing = staff.filter((p) => p.state === 'OFF' && p.scheduled !== 0);
+    const expected = missing
+      .filter((p) => !p.leave)
+      .sort(
+        (a, b) =>
+          Number(b.late) - Number(a.late) ||
+          (a.shiftStartTs || Infinity) - (b.shiftStartTs || Infinity) ||
+          String(a.name).localeCompare(String(b.name)),
+      );
+    return { expected, onLeave: missing.filter((p) => p.leave), workday: staff.some((p) => p.scheduled > 0) };
+  }
+
+  function shiftTime(person, officeZone) {
+    if (!person.shiftStartTs) return person.shiftStart || '';
+    const zone = person.timezone || officeZone;
+    try {
+      return new Date(person.shiftStartTs).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: zone || undefined,
+        ...(zone && officeZone && zone !== officeZone ? { timeZoneName: 'short' } : {}),
+      });
+    } catch (_e) {
+      return person.shiftStart || '';
+    }
+  }
+
+  function notInMarkup(today) {
+    if (!today?.people) return '';
+    const { expected, onLeave, workday } = notInYet(today);
+    if (!workday) return '<p class="dash-muted">No work is scheduled today.</p>';
+    const list = expected.length
+      ? `<ul class="dash-task-list">${expected
+          .map(
+            (p) =>
+              `<li><span>${esc(p.name)}</span><span class="dash-due${p.late ? ' dash-overdue' : ''}">${p.late ? 'Late · ' : ''}shift ${esc(shiftTime(p, today.officeZone))}</span></li>`,
+          )
+          .join('')}</ul>`
+      : '<p class="dash-muted">Everyone expected today has clocked in.</p>';
+    const leave = onLeave.length
+      ? `<p class="dash-muted">On leave today: ${onLeave
+          .map((p) => esc(p.name) + (p.leave === 'HALF' ? ' (half day)' : ''))
+          .join(', ')}</p>`
+      : '';
+    return `<h3 class="dash-subhead">Not in yet</h3>${list}${leave}`;
   }
 
   function adminMarkup(approvals, today) {
@@ -49,9 +120,24 @@
       ['Late explanations', approvals?.late, '#/late-requests'],
       ['Leave requests', approvals?.leave, '#/late-requests'],
       ['Punch corrections', approvals?.punch, '#/clock'],
-    ].map(([label, count, url]) =>
-      `<a class="dash-metric" href="${url}"><strong>${count ?? '—'}</strong><span>${label}</span></a>`).join('');
-    const states = [['Working', 'IN'], ['On break', 'BREAK'], ['Clocked out', 'OUT'], ['Not clocked in', 'OFF']];
+    ]
+      .map(
+        ([label, count, url]) =>
+          `<a class="dash-metric" href="${url}"><strong>${count ?? '—'}</strong><span>${label}</span></a>`,
+      )
+      .join('');
+    const states = [
+      ['Working', 'IN'],
+      ['On break', 'BREAK'],
+      ['Clocked out', 'OUT'],
+      ['Not in yet', 'NOT_IN'],
+    ];
+    const count = (state) =>
+      !today?.people
+        ? '—'
+        : state === 'NOT_IN'
+          ? notInYet(today).expected.length
+          : today.people.filter((p) => p.state === state).length;
     return `
       <section class="dash-card">
         <div class="dash-card-heading"><h2>Needs attention</h2><a href="#/operations">Open Operations</a></div>
@@ -60,8 +146,13 @@
       </section>
       <section class="dash-card">
         <div class="dash-card-heading"><h2>Team today</h2><a href="#/clock">Open Clock</a></div>
-        <div class="dash-metrics">${states.map(([label, state]) =>
-          `<div class="dash-metric"><strong data-team-count="${state}">${today?.people ? today.people.filter(p => p.state === state).length : '—'}</strong><span>${label}</span></div>`).join('')}</div>
+        <div class="dash-metrics">${states
+          .map(
+            ([label, state]) =>
+              `<div class="dash-metric"><strong data-team-count="${state}">${count(state)}</strong><span>${label}</span></div>`,
+          )
+          .join('')}</div>
+        <div class="dash-not-in" id="dashNotIn">${notInMarkup(today)}</div>
         <details class="dash-team-details" id="dashTeamDetails">
           <summary>Live attendance and corrections</summary>
           <div id="dashAdmin"></div>
@@ -70,9 +161,18 @@
   }
 
   async function renderDashboard(root, { read, admin, openTeam }) {
-    const safe = async (path) => { try { return await read(path); } catch (_e) { return null; } };
+    const safe = async (path) => {
+      try {
+        return await read(path);
+      } catch (_e) {
+        return null;
+      }
+    };
     if (admin) {
-      const [approvals, today] = await Promise.all([safe('/operations/dashboard-approvals'), safe('/attendance/today')]);
+      const [approvals, today] = await Promise.all([
+        safe('/operations/dashboard-approvals'),
+        safe('/attendance/today'),
+      ]);
       if (!root.isConnected) return;
       root.innerHTML = adminMarkup(approvals, today);
       const details = root.querySelector('#dashTeamDetails');
@@ -90,7 +190,9 @@
           : { fromAsana: false, tasks: await safe('/tasks/mine') };
       })();
       const [status, announcements, { tasks, fromAsana }] = await Promise.all([
-        safe('/attendance/status'), safe('/announcements'), work,
+        safe('/attendance/status'),
+        safe('/announcements'),
+        work,
       ]);
       if (!root.isConnected) return;
       root.innerHTML = staffMarkup(status, tasks, fromAsana, announcements);
@@ -98,5 +200,5 @@
     root.removeAttribute('aria-busy');
   }
 
-  window.Dashboard = { render: renderDashboard };
+  window.Dashboard = { render: renderDashboard, notInYet, notInMarkup };
 })();

@@ -11,31 +11,36 @@ const { loadUser } = require('./auth');
 const { bootstrapAdmin } = require('./bootstrap');
 const { startBackgroundWorker } = require('./backgroundWorker');
 
-
 const app = express();
 app.set('trust proxy', require('./proxyConfig').trustProxy());
 
 // Security headers. CSP is tuned for this app: inline styles + Google Fonts
 // are used by the frontend, scripts are loaded from same-origin files only.
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        frameSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
     },
-  },
-  crossOriginEmbedderPolicy: false,
-}));
+    crossOriginEmbedderPolicy: false,
+  }),
+);
 
-app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use(loadUser);
+// Raw-body endpoints (the signed Asana webhook) come before
+// the JSON parser so signatures can be verified on the exact bytes received.
+app.use('/api', require('./routes/hooks'));
+app.use(express.json({ limit: '100kb' }));
 
 // Generous throttle on mutating API calls (reads are unrestricted). Blunts
 // abuse/runaway scripts without getting in the way of normal use. Login has
@@ -81,15 +86,24 @@ app.use('/api/asana-review', require('./routes/asanaReview'));
 app.use('/api/operations', require('./routes/operations'));
 app.use('/api/eod', require('./routes/eod'));
 
+// Portal v2: admin console, billing, Asana tasks, calendar.
+app.use('/api/admin/auth', require('./routes/adminAuth'));
+app.use('/api/admin/people', require('./routes/adminPeople'));
+app.use('/api/admin/billing', require('./routes/billing'));
+app.use('/api/admin', require('./routes/adminSettings'));
+app.use('/api/asana-tasks', require('./routes/workspace').tasks);
+app.use('/api/calendar', require('./routes/calendar'));
+
 // Health check for uptime monitors: confirms the server AND the database
 // respond. Returns 503 if the DB is unreachable so monitors flag it as down.
 let backgroundHealth = () => true;
 app.get('/api/health', (_req, res) => {
   try {
     db.prepare('SELECT 1').get();
-    if (!backgroundHealth()) return res.status(503).json({ ok: false, error: 'background worker unavailable', ts: Date.now() });
+    if (!backgroundHealth())
+      return res.status(503).json({ ok: false, error: 'background worker unavailable', ts: Date.now() });
     res.json({ ok: true, ts: Date.now(), revision: process.env.RAILWAY_GIT_COMMIT_SHA || null });
-  } catch (e) {
+  } catch (_e) {
     res.status(503).json({ ok: false, error: 'database unavailable', ts: Date.now() });
   }
 });
@@ -104,12 +118,18 @@ app.get('*', (req, res, next) => {
 });
 
 // Global error handler — keep API responses JSON and never leak stack traces.
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
   if (res.headersSent) return _next(err);
   const status = Number.isInteger(err.status) && err.status >= 400 && err.status <= 599 ? err.status : 500;
   if (status >= 500) console.error('Unhandled error:', err);
-  res.status(status).json({ error: status < 500 ? (err.type === 'entity.parse.failed' ? 'Invalid JSON body' : err.message) : 'Something went wrong. Please try again.' });
+  res.status(status).json({
+    error:
+      status < 500
+        ? err.type === 'entity.parse.failed'
+          ? 'Invalid JSON body'
+          : err.message
+        : 'Something went wrong. Please try again.',
+  });
 });
 
 async function start() {
@@ -117,10 +137,22 @@ async function start() {
   const stopBackground = startBackgroundWorker();
   backgroundHealth = stopBackground.health || (() => true);
   const PORT = process.env.PORT || 3000;
-  const server = app.listen(PORT, () => console.log(`WeLitNexus portal running on http://localhost:${server.address().port}`));
+  const server = app.listen(PORT, () =>
+    console.log(`WeLitNexus portal running on http://localhost:${server.address().port}`),
+  );
   require('./shutdown').installShutdown({ server, db, stopBackground });
-  server.on('error', async error => { console.error('HTTP startup failed:', error); await stopBackground(); db.close(); process.exitCode = 1; });
+  server.on('error', async (error) => {
+    console.error('HTTP startup failed:', error);
+    await stopBackground();
+    db.close();
+    process.exitCode = 1;
+  });
   return server;
 }
-if (require.main === module) start().catch(error => { console.error('Startup failed:', error); if (db.open) db.close(); process.exitCode = 1; });
+if (require.main === module)
+  start().catch((error) => {
+    console.error('Startup failed:', error);
+    if (db.open) db.close();
+    process.exitCode = 1;
+  });
 module.exports = { app, start };
