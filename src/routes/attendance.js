@@ -3,7 +3,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
-const { now, DateTime, attendanceToday } = require('../time');
+const { now, DateTime, attendanceToday, ZONE } = require('../time');
 const { day: validDay } = require('../requestValidation');
 const { calendarFrom, scheduledDays } = require('../leaveCalculation');
 const { employmentStatus } = require('../employment');
@@ -19,6 +19,7 @@ const {
   liveForDay,
   wallTime,
   withTimes,
+  shiftInstant,
 } = require('../attendanceSession');
 const router = express.Router();
 
@@ -122,13 +123,25 @@ router.get('/timesheet', requireAuth, (req, res) => {
   res.json({ start, end, days });
 });
 
-// ADMIN: who is in today, with live state.
+// ADMIN: who is in today, with live state. For people who have not clocked
+// in, it also says whether they are expected today (workday, employed, not on
+// leave), when their shift starts, and whether they are now late.
 const activeUsers = db.prepare(`SELECT * FROM users WHERE active = 1 ORDER BY name`);
+const approvedLeaveOn = db.prepare(
+  "SELECT kind FROM leaves WHERE user_id=? AND status='APPROVED' AND start_date<=? AND end_date>=? ORDER BY kind='FULL' DESC LIMIT 1",
+);
+const SHIFT_GRACE_MIN = Math.max(0, Number(process.env.SHIFT_GRACE_MIN ?? 15));
 
 router.get('/today', requireAdmin, (req, res) => {
   const day = attendanceToday(); // current shift day, not calendar day
+  const calendar = calendarFrom(db);
+  const nowTs = now().toMillis();
   const people = activeUsers.all().map((u) => {
     const session = currentSession(u);
+    const shiftStartTs = shiftInstant(session.day, session);
+    const leave = approvedLeaveOn.get(u.id, session.day, session.day)?.kind || null;
+    const scheduled = scheduledDays(session.day, calendar);
+    const employed = employmentStatus(u, session.day) !== 'NOT_EMPLOYED';
     const events = session.events;
     const s = session;
     // Device of the most recent punch that recorded one (their latest session).
@@ -148,9 +161,24 @@ router.get('/today', requireAdmin, (req, res) => {
       firstIn: s.firstIn,
       lastOut: s.lastOut,
       device: lastWithDevice ? lastWithDevice.device : '',
+      role: u.role,
+      shiftStart: session.shift_start,
+      shiftStartTs,
+      leave,
+      scheduled,
+      employed,
+      late: Boolean(
+        !events.length &&
+          u.role === 'EMPLOYEE' &&
+          employed &&
+          scheduled > 0 &&
+          !leave &&
+          shiftStartTs &&
+          nowTs > shiftStartTs + SHIFT_GRACE_MIN * 60000,
+      ),
     };
   });
-  res.json({ day, people });
+  res.json({ day, people, graceMinutes: SHIFT_GRACE_MIN, officeZone: ZONE });
 });
 
 // ===================================================================

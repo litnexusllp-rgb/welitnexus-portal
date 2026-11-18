@@ -355,6 +355,14 @@ select:focus-visible,
 .dash-notice {
   border-left: 4px solid var(--teal);
 }
+.dash-not-in {
+  margin-top: 18px;
+}
+.dash-subhead {
+  margin: 0 0 2px;
+  color: var(--navy);
+  font-size: 0.9rem;
+}
 .dash-notice p {
   overflow-wrap: anywhere;
 }

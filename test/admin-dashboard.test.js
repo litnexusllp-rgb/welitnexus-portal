@@ -171,3 +171,43 @@ test('shared admin work uses verified identities across projects and rejects emp
   assert.equal(response.status, 200);
   assert.equal((await response.json()).tasks.length, 2);
 });
+test('admin dashboard lists who is not in yet: late first, leave apart, partners left out', async () => {
+  const context = { window: {} };
+  vm.createContext(context);
+  vm.runInContext(dashboard, context);
+  const { notInYet, notInMarkup } = context.window.Dashboard;
+  const base = { role: 'EMPLOYEE', employed: true, scheduled: 1, leave: null, late: false, timezone: 'Asia/Kolkata' };
+  const today = {
+    officeZone: 'Asia/Kolkata',
+    people: [
+      { ...base, name: 'Asha', state: 'OFF', shiftStartTs: Date.UTC(2026, 10, 18, 10, 30) },
+      { ...base, name: 'Bilal', state: 'OFF', late: true, shiftStartTs: Date.UTC(2026, 10, 18, 3, 30) },
+      { ...base, name: 'Chen', state: 'IN', shiftStartTs: Date.UTC(2026, 10, 18, 3, 30) },
+      { ...base, name: 'Dev', state: 'OFF', leave: 'FULL', shiftStartTs: Date.UTC(2026, 10, 18, 3, 30) },
+      { ...base, name: 'Esha', state: 'OFF', leave: 'HALF', shiftStartTs: Date.UTC(2026, 10, 18, 3, 30) },
+      { ...base, name: 'Partner', role: 'ADMIN', state: 'OFF', shiftStartTs: Date.UTC(2026, 10, 18, 3, 30) },
+      { ...base, name: 'Former', employed: false, state: 'OFF', shiftStartTs: Date.UTC(2026, 10, 18, 3, 30) },
+    ],
+  };
+  const r = notInYet(today);
+  assert.deepEqual(
+    r.expected.map((p) => p.name),
+    ['Bilal', 'Asha'],
+  );
+  assert.deepEqual(
+    r.onLeave.map((p) => p.name),
+    ['Dev', 'Esha'],
+  );
+  const html = notInMarkup(today);
+  assert.match(html, /Not in yet/);
+  assert.match(html, /Bilal<\/span><span class="dash-due dash-overdue">Late · shift/);
+  assert.ok(html.indexOf('Bilal') < html.indexOf('Asha'));
+  assert.match(html, /On leave today: Dev, Esha \(half day\)/);
+  assert.doesNotMatch(html, /Chen|Partner|Former/);
+  // A weekend or full holiday: nobody is expected.
+  const off = { people: today.people.map((p) => ({ ...p, scheduled: 0 })) };
+  assert.match(notInMarkup(off), /No work is scheduled today/);
+  // Everyone in.
+  const allIn = { people: today.people.map((p) => ({ ...p, state: 'IN' })) };
+  assert.match(notInMarkup(allIn), /Everyone expected today has clocked in/);
+});

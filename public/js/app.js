@@ -872,8 +872,13 @@
         .closest('.dash-card')
         ?.querySelectorAll('[data-team-count]')
         .forEach((count) => {
-          count.textContent = today.people.filter((person) => person.state === count.dataset.teamCount).length;
+          count.textContent =
+            count.dataset.teamCount === 'NOT_IN'
+              ? window.Dashboard.notInYet(today).expected.length
+              : today.people.filter((person) => person.state === count.dataset.teamCount).length;
         });
+      const notIn = host.closest('.dash-card')?.querySelector('#dashNotIn');
+      if (notIn) notIn.innerHTML = window.Dashboard.notInMarkup(today);
       const working = today.people.filter((p) => p.state === 'IN');
       const onBreak = today.people.filter((p) => p.state === 'BREAK');
       const clockedOut = today.people.filter((p) => p.state === 'OUT');
