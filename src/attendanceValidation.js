@@ -27,7 +27,10 @@ function validateDay(userId, day) {
 function changeAttendance(userId, days, change) {
   return db.transaction(() => {
     const result = change();
-    for (const day of new Set(days)) validateDay(userId, day);
+    for (const day of new Set(days)) {
+      validateDay(userId, day);
+      require('./lateExplanationRequests').requestForDay(userId, day);
+    }
     return result;
   })();
 }

@@ -100,6 +100,24 @@ CREATE TABLE IF NOT EXISTS late_explanations (
 );
 CREATE INDEX IF NOT EXISTS idx_late_explanations_pending ON late_explanations(status, day);
 
+-- Separate requests from employee-authored explanations so generated prompts
+-- are never presented as an employee's comments or submitted for approval.
+CREATE TABLE IF NOT EXISTS late_explanation_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  day TEXT NOT NULL,
+  created_ts INTEGER NOT NULL,
+  first_in INTEGER NOT NULL,
+  expected_start INTEGER NOT NULL,
+  timezone TEXT NOT NULL,
+  minutes_late INTEGER NOT NULL,
+  processed_ts INTEGER,
+  processed_by INTEGER REFERENCES users(id),
+  resolution TEXT,
+  UNIQUE(user_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_late_request_day ON late_explanation_requests(day, user_id);
+
 CREATE TABLE IF NOT EXISTS leaves (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL,

@@ -20,6 +20,7 @@ const decide = db.prepare(`
 
 function resolveLateExplanation(userId, day, adminId, resolution, timestamp = now().toMillis()) {
   decide.run('RESOLVED', resolution, adminId, timestamp, userId, day);
+  require('./lateExplanationRequests').processRequest(userId, day, adminId, resolution, timestamp);
 }
 
 function markFullDay(userId, day, adminId) {
@@ -32,7 +33,10 @@ function markFullDay(userId, day, adminId) {
 function approveLateExplanation(userId, day, adminId) {
   const timestamp = now().toMillis();
   const result = decide.run('APPROVED', 'EXCUSED', adminId, timestamp, userId, day);
-  if (result.changes) setLateNormalOverride.run(userId, day, 1, adminId, timestamp);
+  if (result.changes) {
+    setLateNormalOverride.run(userId, day, 1, adminId, timestamp);
+    require('./lateExplanationRequests').processRequest(userId, day, adminId, 'EXCUSED', timestamp);
+  }
   return result.changes === 1;
 }
 

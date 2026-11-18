@@ -70,6 +70,7 @@ if (!isMainThread) {
     for (const [file, method] of [
       ['recurring', 'startRecurringScheduler'],
       ['autoAbsence', 'startAbsenceScheduler'],
+      ['lateExplanationRequests', 'startLateRequestScheduler'],
       ['backupMailer', 'startBackupScheduler'],
       ['birthdays', 'startBirthdayScheduler'],
       ['v2/scheduler', 'startV2Scheduler'],

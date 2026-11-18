@@ -826,7 +826,8 @@
       if (path === '/attendance/today') teamRead = { response, ts: Date.now() };
       return response;
     };
-    window.Dashboard.render($('#dashControlCenter'), {
+    const dashboardRoot = $('#dashControlCenter');
+    window.Dashboard.render(dashboardRoot, {
       read,
       admin: isAdmin(),
       openTeam: () =>
@@ -834,6 +835,8 @@
           if (path === '/attendance/today' && teamRead && Date.now() - teamRead.ts < 10000) return teamRead.response;
           return api.get(path);
         }),
+    }).then(() => {
+      if (!isAdmin()) loadLatePrompts(dashboardRoot.querySelector('#dashboardLateRequests'), () => VIEWS.dashboard());
     });
   };
 
@@ -1182,7 +1185,9 @@
       ${status.activeBreakType ? `<div class="meta">${esc(BREAK_LABEL[status.activeBreakType])}</div>` : ''}
       ${status.needsReview ? '<p style="color:var(--danger);">This session has been open over 24 hours. Review the punches before using its totals.</p>' : ''}
       <div class="meta">Total break this workday: <strong style="color:#9a6b00;">${fmtMins(status.breakMinutes)}</strong> · Worked: ${fmtMins(status.workedMinutes)}</div>
-      ${status.valid === false ? `<p style="color:var(--danger);">${esc(status.error)} Ask an administrator to correct today’s punches.</p>` : ''}<div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>`;
+      ${status.valid === false ? `<p style="color:var(--danger);">${esc(status.error)} Ask an administrator to correct today’s punches.</p>` : ''}<div class="clock-btns">${(status.allowed || []).map((a) => btns[a]).join('')}</div>
+      <div id="clockLateRequests" aria-live="polite"></div>`;
+    if (!isAdmin()) loadLatePrompts($('#clockLateRequests'), renderClock);
     card.querySelectorAll('[data-punch]').forEach((b) =>
       b.addEventListener('click', () => {
         if (b.dataset.punch === 'OUT') return confirmClockOut(status); // guard against accidental clock-out
@@ -4037,7 +4042,7 @@
         <strong>Late explanation · ${explanation.minutes_late} min</strong> ${badge(explanation.status)}
         <p>${esc(explanation.reason)}</p>
         ${explanation.status === 'RESOLVED' ? `<p>${lateResolutionLabel(explanation)}</p>` : ''}
-        ${explanation.status === 'PENDING' ? '<button class="btn btn-primary btn-sm" id="fixApproveLate">Approve explanation</button>' : ''}
+        ${explanation.status === 'PENDING' ? '<button class="btn btn-primary btn-sm" id="fixApproveLate">Mark as normal</button>' : ''}
       </section>`
           : performanceRow?.late
             ? `<p>Late by ${performanceRow.minutesLate} min</p>`
@@ -4084,7 +4089,7 @@
         event.currentTarget,
         `/reports/late-explanations/${explanation.id}/approve`,
         {},
-        'Explanation approved',
+        'Marked as normal',
       ),
     );
     $('#fixWorkedFull')?.addEventListener('click', (event) =>
@@ -4100,8 +4105,8 @@
       try {
         await api.post('/attendance/admin/late-normal', { user_id: userId, day, normal: !data.lateNormal });
         toast(data.lateNormal ? 'Automatic late status restored' : 'Marked as normal ✓');
+        closeModal();
         if (onDone) await onDone();
-        renderAttendanceEditor(userId, day, onDone, performanceRow, employee);
       } catch (e) {
         toast(e.message, true);
       }
@@ -4717,7 +4722,7 @@
       const { requests } = await api.get('/reports/late-explanations/pending');
       if (!host.isConnected) return;
       $('#employeeRequestsTab').textContent = requests.length ? `Requests (${requests.length})` : 'Requests';
-      host.innerHTML = `<h3>Late explanations</h3>${
+      host.innerHTML = `<div id="lateRequestHistory"></div><h3>Employee comments awaiting review</h3>${
         requests.length
           ? `
         <div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Late</th><th></th></tr></thead><tbody>
@@ -4730,26 +4735,127 @@
         </tbody></table></div>`
           : '<p class="page-sub">No late explanations waiting for review.</p>'
       }`;
+      loadLateHistory($('#lateRequestHistory'));
       host.querySelectorAll('[data-review-late]').forEach((button) =>
         button.addEventListener('click', async () => {
           const request = requests.find((r) => r.id === Number(button.dataset.reviewLate));
-          myPerfUserId = String(request.user_id);
-          myPerfMonth = request.day.slice(0, 7);
-          $('#perfUser').value = myPerfUserId;
-          $('#perfMonth').value = myPerfMonth;
-          showEmployeeTab('employeePerformance', false);
-          await loadEmployeeProfile();
-          if (
-            employeeSection === 'employeePerformance' &&
-            myPerfUserId === String(request.user_id) &&
-            myPerfMonth === request.day.slice(0, 7)
-          ) {
-            $('#myCal').querySelector(`[data-fixday="${request.day}"]`)?.click();
-          }
+          await reviewLateDate(request);
         }),
       );
     } catch (e) {
       if (host.isConnected) host.textContent = e.message;
+    }
+  }
+
+  async function reviewLateDate(request) {
+    myPerfUserId = String(request.user_id);
+    myPerfMonth = request.day.slice(0, 7);
+    $('#perfUser').value = myPerfUserId;
+    $('#perfMonth').value = myPerfMonth;
+    showEmployeeTab('employeePerformance', false);
+    await loadEmployeeProfile();
+    if (
+      employeeSection === 'employeePerformance' &&
+      myPerfUserId === String(request.user_id) &&
+      myPerfMonth === request.day.slice(0, 7)
+    ) {
+      $('#myCal').querySelector(`[data-fixday="${request.day}"]`)?.click();
+    }
+  }
+
+  async function loadLateHistory(host, range) {
+    if (!host?.isConnected) return;
+    const month = myPerfMonth || thisMonthISO();
+    const start = range?.start || month + '-01';
+    const end =
+      range?.end || month + '-' + String(new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate());
+    const userId = range?.userId || '';
+    try {
+      const data = await api.get(
+        `/reports/late-explanations/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&user_id=${encodeURIComponent(userId)}`,
+      );
+      if (!host.isConnected) return;
+      const t = data.totals;
+      const person = [...new Map(EMPLOYEE_RECORDS.map((u) => [String(u.id), u])).values()];
+      host.innerHTML = `<h3>Late request history</h3>
+        <p class="page-sub">Counts use the attendance dates below. Generated requests and employee comments are retained after processing.</p>
+        <div class="form-row">
+          <div class="field"><label for="lateHistoryStart">From</label><input type="date" id="lateHistoryStart" value="${esc(start)}"></div>
+          <div class="field"><label for="lateHistoryEnd">To</label><input type="date" id="lateHistoryEnd" value="${esc(end)}"></div>
+          <div class="field"><label for="lateHistoryUser">Employee</label><select id="lateHistoryUser"><option value="">All employees</option>${person.map((u) => `<option value="${u.id}" ${String(u.id) === userId ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
+        </div>
+        <div class="toolbar wrap"><button class="btn btn-primary btn-sm" id="lateHistoryRun">Run report</button> <button class="btn btn-ghost btn-sm" id="lateHistoryCsv">Export CSV</button></div>
+        <p><strong>${t.generated}</strong> generated · <strong>${t.submitted}</strong> comments submitted · <strong>${t.processed}</strong> processed</p>
+        <p>${t.awaitingEmployee} awaiting employee · ${t.awaitingReview} awaiting review · ${t.noLongerRequired} no longer required</p>
+        <p role="alert" id="lateHistoryError"></p>
+        ${
+          data.rows.length
+            ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Workday</th><th>Generated</th><th>Status</th><th>Employee comments</th><th>Processed by / date</th><th></th></tr></thead><tbody>
+          ${data.rows
+            .map(
+              (
+                r,
+                i,
+              ) => `<tr><td>${esc(r.name)}</td><td>${esc(fmtDate(r.day))}</td><td>${esc(new Date(r.created_ts).toLocaleString())}</td>
+          <td>${esc(r.state)}${r.resolution ? ' · ' + esc(r.resolution.replaceAll('_', ' ')) : ''}</td><td class="late-reason">${esc(r.reason || '—')}</td>
+          <td>${r.processed_ts == null ? '—' : esc((r.processed_by_name || 'Former admin') + ' · ' + new Date(r.processed_ts).toLocaleString())}</td>
+          <td><button class="btn btn-ghost btn-sm" data-late-history="${i}">View day</button></td></tr>`,
+            )
+            .join('')}
+        </tbody></table></div>`
+            : '<p>No generated requests in this range. Tracking starts with this feature; earlier dates are not backfilled.</p>'
+        }`;
+      host.querySelector('#lateHistoryRun').addEventListener('click', () =>
+        loadLateHistory(host, {
+          start: host.querySelector('#lateHistoryStart').value,
+          end: host.querySelector('#lateHistoryEnd').value,
+          userId: host.querySelector('#lateHistoryUser').value,
+        }),
+      );
+      host
+        .querySelectorAll('[data-late-history]')
+        .forEach((button) =>
+          button.addEventListener('click', () => reviewLateDate(data.rows[Number(button.dataset.lateHistory)])),
+        );
+      host.querySelector('#lateHistoryCsv').addEventListener('click', () => {
+        const lines = [
+          [
+            'Employee',
+            'Workday',
+            'Generated at (UTC)',
+            'Minutes after grace at generation',
+            'State',
+            'Employee comments',
+            'Submitted at (UTC)',
+            'Processed by',
+            'Processed at (UTC)',
+            'Resolution',
+          ]
+            .map(csvCell)
+            .join(','),
+          ...data.rows.map((r) =>
+            [
+              r.name,
+              r.day,
+              new Date(r.created_ts).toISOString(),
+              r.minutes_late,
+              r.state,
+              r.reason || '',
+              r.submitted_ts == null ? '' : new Date(r.submitted_ts).toISOString(),
+              r.processed_by_name || '',
+              r.processed_ts == null ? '' : new Date(r.processed_ts).toISOString(),
+              r.resolution || '',
+            ]
+              .map(csvCell)
+              .join(','),
+          ),
+        ];
+        downloadCsv(lines.join('\n'), `late-requests-${start}-to-${end}.csv`);
+      });
+    } catch (error) {
+      const errorHost = host.querySelector('#lateHistoryError');
+      if (errorHost) errorHost.textContent = error.message;
+      else if (host.isConnected) host.innerHTML = `<p role="alert">${esc(error.message)}</p>`;
     }
   }
 
@@ -5079,10 +5185,43 @@
     });
   }
 
+  async function loadLatePrompts(host, onSubmitted) {
+    if (!host) return;
+    try {
+      const { requests } = await api.get('/reports/late-explanations/requests');
+      if (!host.isConnected) return;
+      host.hidden = !requests.length;
+      host.innerHTML = requests.length
+        ? `<h3>Late clock-in explanations requested</h3>
+        <p>Please add your comments for admin review.</p>
+        <ul class="dash-task-list">${requests
+          .map(
+            (
+              row,
+              i,
+            ) => `<li><span>${esc(fmtDate(row.day))} · ${row.minutesLate > 0 ? row.minutesLate + ' min' : 'Less than 1 min'} after grace</span>
+          <button class="btn btn-primary btn-sm" data-late-prompt="${i}">Add explanation</button></li>`,
+          )
+          .join('')}</ul>`
+        : '';
+      host
+        .querySelectorAll('[data-late-prompt]')
+        .forEach((button) =>
+          button.addEventListener('click', () =>
+            openLateExplanation(requests[Number(button.dataset.latePrompt)], onSubmitted),
+          ),
+        );
+    } catch (error) {
+      if (host.isConnected)
+        host.innerHTML = `<p role="alert">Late explanation requests are unavailable. ${esc(error.message)}</p>`;
+    }
+  }
+
   function lateResolutionLabel(explanation) {
     if (explanation.status !== 'RESOLVED') return '';
     return (
       {
+        NORMAL: 'Marked as normal',
         FULL_DAY: 'Marked full day',
         HALF_DAY: 'Marked half day',
         SHORT_DAY: 'Marked Short Day',
@@ -5091,7 +5230,7 @@
     );
   }
 
-  function openLateExplanation(row) {
+  function openLateExplanation(row, onSubmitted = loadMyPerf) {
     const explanation = row.lateExplanation;
     modal(`<h3>${esc(fmtDate(row.day))}</h3>
       <p><strong>Late by ${explanation?.minutes_late ?? row.minutesLate} min</strong></p>
@@ -5127,7 +5266,7 @@
       }
       if (button.isConnected) closeModal();
       toast('Explanation sent for approval');
-      await loadMyPerf();
+      await onSubmitted();
     });
   }
 

@@ -229,6 +229,29 @@ function buildAttendanceReport(user, req) {
   };
 }
 
+// Employees can only read their own outstanding prompts. Admin history is
+// separate from the submitted-explanation approval queue.
+router.get('/late-explanations/requests', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ requests: require('../lateExplanationRequests').outstanding(req.user.id) });
+});
+
+router.get('/late-explanations/history', requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const start = String(req.query.start || now().startOf('month').toISODate());
+  const end = String(req.query.end || now().endOf('month').toISODate());
+  const userId = req.query.user_id == null || req.query.user_id === '' ? null : Number(req.query.user_id);
+  if (
+    !validDay(start) ||
+    !validDay(end) ||
+    start > end ||
+    DateTime.fromISO(end).diff(DateTime.fromISO(start), 'days').days > 366 ||
+    (userId !== null && (!Number.isSafeInteger(userId) || userId <= 0))
+  )
+    return res.status(400).json({ error: 'Choose a valid employee and an ordered date range of at most 367 days.' });
+  res.json(require('../lateExplanationRequests').requestReport(start, end, userId));
+});
+
 router.get('/late-explanations/pending', requireAdmin, (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const requests = db
@@ -253,9 +276,10 @@ router.post('/late-explanations', requireAuth, (req, res) => {
       const user = getUser.get(req.user.id);
       const row = buildAttendanceReport(user, { user: req.user, query: { start: day, end: day } }).rows[0];
       if (row.lateExplanation) return { status: 409, error: 'An explanation already exists for this date.' };
-      if (!row.late || row.leaveKind || row.approvedShortMinutes) {
+      if (!row.late || row.leaveKind || row.approvedShortDay) {
         return { status: 409, error: 'This date has no unresolved late arrival to explain.' };
       }
+      require('../lateExplanationRequests').requestForDay(user.id, day);
       db.prepare('INSERT INTO late_explanations (user_id,day,reason,minutes_late,created_ts) VALUES(?,?,?,?,?)').run(
         user.id,
         day,
@@ -420,3 +444,4 @@ router.get('/register', requireAdmin, (req, res) => {
 });
 
 module.exports = router;
+module.exports.buildAttendanceReport = buildAttendanceReport;

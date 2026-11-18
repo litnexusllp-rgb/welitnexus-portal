@@ -41,6 +41,7 @@
     const notice = announcements?.announcements.find((a) => Number(a.pinned) === 1) || announcements?.announcements[0];
     const state = status?.state === 'OUT' && status.firstIn == null ? 'OFF' : status?.state;
     return `
+      <section class="dash-card" id="dashboardLateRequests" aria-live="polite"></section>
       <div class="dash-overview-grid">
         <section class="dash-card dash-today">
           <div><h2>Today</h2><p class="dash-clock-state">${esc(clockState[state] || 'Clock status unavailable')}</p>

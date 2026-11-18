@@ -23,6 +23,8 @@ function harness(status) {
         return status;
       },
     },
+    isAdmin: () => false,
+    loadLatePrompts: () => {},
     fmtMins: (m) => String(m),
     esc: (s) => String(s),
     toast: () => {},
