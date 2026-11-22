@@ -5,6 +5,7 @@ const EFFECTIVE = '2026-10-01';
 const VERSION = 3;
 const ENTITLEMENT = Object.freeze({ regular: 18, flexi: 1, special: 1 });
 const MONTHLY_REGULAR = 1.5;
+const PAID_EXCEPTION = 'PAID_EXCEPTION';
 const bucketFor = (category) =>
   category === 'FLEXI' ? 'flexi' : ['BIRTHDAY', 'ANNIVERSARY'].includes(category) ? 'special' : 'regular';
 
@@ -85,6 +86,7 @@ function calculateLeaves(leaves, calendar) {
   );
   for (const leave of ordered) {
     const category = leave.category || 'REGULAR',
+      paidException = category === PAID_EXCEPTION,
       bucket = bucketFor(category),
       charges = new Map(),
       date_lines = [];
@@ -118,16 +120,17 @@ function calculateLeaves(leaves, calendar) {
       const iso = date.toISODate(),
         requested = leave.kind === 'QUARTER' ? 0.25 : leave.kind === 'HALF' ? 0.5 : 1,
         period = periodFor(iso).start;
-      const scheduled = iso < EFFECTIVE ? requested : Math.min(requested, scheduledDays(iso, calendar));
+      const scheduled =
+        iso < EFFECTIVE && !paidException ? requested : Math.min(requested, scheduledDays(iso, calendar));
       const month = iso.slice(0, 7),
         annualKey = `${leave.user_id}:${period}:${bucket}`,
         monthlyKey = `${leave.user_id}:${month}`;
       let paidDays = scheduled,
         reason = null;
-      if (iso >= EFFECTIVE && date.day <= 12) {
+      if (!paidException && iso >= EFFECTIVE && date.day <= 12) {
         paidDays = 0;
         reason = 'FIRST_TWELVE';
-      } else if (iso >= EFFECTIVE) {
+      } else if (!paidException && iso >= EFFECTIVE) {
         const yearlyAvailable = Math.max(0, ENTITLEMENT[bucket] - (annual.get(annualKey) || 0));
         const monthlyAvailable =
           bucket === 'regular' ? Math.max(0, MONTHLY_REGULAR - (monthly.get(monthlyKey) || 0)) : scheduled;
@@ -135,7 +138,7 @@ function calculateLeaves(leaves, calendar) {
         if (paidDays < scheduled) reason = monthlyAvailable < scheduled ? 'MONTHLY_LIMIT' : 'ANNUAL_LIMIT';
       }
       const unpaidDays = scheduled - paidDays;
-      if (paidDays) {
+      if (paidDays && !paidException) {
         const key = `${period}:${bucket}`;
         if (!charges.has(key)) charges.set(key, { period, bucket, days: 0 });
         charges.get(key).days += paidDays;
@@ -177,6 +180,7 @@ module.exports = {
   VERSION,
   ENTITLEMENT,
   MONTHLY_REGULAR,
+  PAID_EXCEPTION,
   bucketFor,
   periodFor,
   calendarFrom,

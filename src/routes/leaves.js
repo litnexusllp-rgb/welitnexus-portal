@@ -11,6 +11,7 @@ const { notify } = require('../notify');
 const { flagAbsences, lastCompletedAttendanceDay } = require('../autoAbsence');
 const {
   CATEGORIES,
+  PAID_EXCEPTION,
   describeLeave,
   describeLeaves,
   balances: leaveBalances,
@@ -107,15 +108,16 @@ function employeeLeaveHistory(userId, month) {
 // Server-authoritative payment preview; employees can preview only themselves.
 router.post('/preview', requireAuth, (req, res) => {
   const userId = Number(req.body.user_id || req.user.id);
-  if (userId !== req.user.id && !hasAdminAccess(req)) return res.status(403).json({ error: 'Admins only' });
+  const admin = hasAdminAccess(req);
+  if (userId !== req.user.id && !admin) return res.status(403).json({ error: 'Admins only' });
   const user = getUser.get(userId);
   if (!user) return res.status(404).json({ error: 'Employee not found' });
   if (user.role === 'ADMIN') return personalLeaveUnavailable(res);
   try {
     const leave = {
-      ...normalizeLeave(req.body, { allowPast: hasAdminAccess(req), requireReason: false }),
+      ...normalizeLeave(req.body, { allowPast: admin, requireReason: false, allowPaidException: admin }),
       user_id: userId,
-      status: hasAdminAccess(req) ? 'APPROVED' : 'PENDING',
+      status: admin ? 'APPROVED' : 'PENDING',
     };
     assertAvailable(userId, leave);
     res.json({
@@ -182,7 +184,7 @@ router.post('/:id/cancel', require('../requestValidation').validateParams, requi
 });
 
 // ADMIN: mark leave for an employee directly (phone-in sick days, etc.).
-// Recorded as already APPROVED — balance is deducted and the employee is told.
+// Recorded as already APPROVED and the employee is told.
 // Past dates are allowed here on purpose (recording what already happened).
 const insertApprovedLeave = db.prepare(
   `INSERT INTO leaves (user_id, start_date, end_date, kind, category, reason, status, days, decided_by, decided_ts, created_ts, emergency_type, deduction_quote_json)
@@ -196,10 +198,13 @@ router.post('/admin', requireAdmin, (req, res) => {
   let leave;
   try {
     leave = {
-      ...normalizeLeave(req.body, { allowPast: true, requireReason: false }),
+      ...normalizeLeave(req.body, { allowPast: true, requireReason: false, allowPaidException: true }),
       user_id: user.id,
       status: 'APPROVED',
     };
+    if (leave.category === PAID_EXCEPTION && !leave.reason) {
+      throw Object.assign(new Error('Enter a reason for the paid leave exception.'), { status: 400 });
+    }
     db.transaction(() => {
       const endpoints = [leave.start_date, leave.end_date].map((date) => employmentStatus(user, date));
       if (endpoints.includes('NOT_EMPLOYED') || (!user.active && endpoints.some(Boolean))) {

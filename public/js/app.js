@@ -1473,10 +1473,12 @@
     FLEXI: 'Flexi leave',
     BIRTHDAY: 'Birthday leave',
     ANNIVERSARY: 'Anniversary leave',
+    PAID_EXCEPTION: 'Paid leave exception',
   };
-  const leaveCategoryOptions = () =>
+  const leaveCategoryOptions = (admin = false) =>
     Object.entries(LEAVE_CATEGORIES)
-      .map(([value, label]) => `<option value="${value}">${value === 'REGULAR' ? 'Regular leave' : label}</option>`)
+      .filter(([value]) => admin || value !== 'PAID_EXCEPTION')
+      .map(([value, label]) => `<option value="${value}">${label}</option>`)
       .join('');
   const leaveTypeLabel = (l) =>
     `${LEAVE_CATEGORIES[l.category] || 'Regular paid leave'} · ${l.kind === 'HALF' ? 'Half day' : 'Full day(s)'}`;
@@ -1493,12 +1495,16 @@
     const available = estimate?.status === 'AVAILABLE';
     const money = (paise) => salaryMoney(paise).replace(/\.00$/, '');
     const days = (n) => `${n} ${n === 1 ? 'day' : 'days'}`;
+    if (leave.category === 'PAID_EXCEPTION') {
+      return `<div class="leave-preview-heading"><strong>${days(leave.paid_days)} of paid leave</strong><span>No salary deduction</span></div>
+        <p class="leave-preview-note">The employee keeps their full leave balance. Only scheduled working time is covered.</p>`;
+    }
     return `<div class="leave-preview-heading"><strong>${days(leave.days)} total</strong><span>${leave.paid_days} paid · ${leave.unpaid_days} unpaid${leave.non_working_days ? ` · ${leave.non_working_days} non-working` : ''}</span></div>
       <div class="leave-preview-deduction"><span>Estimated deduction</span><strong>${available ? money(estimate.total_paise) : 'Unavailable'}</strong></div>
       ${!available ? `<p class="leave-preview-note">${admin ? 'Add the employee’s salary' : 'Ask an admin to add your salary'} to see the amount. You can still ${admin ? 'save this leave' : 'apply'}.</p>` : ''}
       <details class="leave-preview-details"><summary>Calculation &amp; leave rules</summary><div>
         ${available ? estimate.items.map((item) => `<p>${esc(item.month)}: ${money(item.monthly_gross_paise)} ÷ ${item.divisor || estimate.divisor} × ${days(item.unpaid_days)} unpaid</p>`).join('') : '<p>No salary is recorded for some unpaid dates.</p>'}
-        <p>The 1st–12th is unpaid. Outside it, regular paid leave is limited to 1.5 scheduled days each month; excess is unpaid. Unused monthly allowance does not accumulate. Only paid working time uses leave balance.</p>
+        <p>Standard leave categories are unpaid on the 1st–12th. From the 13th, regular paid leave is limited to 1.5 scheduled days each month. Additional days are unpaid. Only paid working time uses the leave balance. The monthly allowance resets each month.</p>
         <p>Deductions use monthly gross salary effective on each leave date, divided by the actual calendar days in that month. Weekends and full holidays are excluded; a half holiday has only 0.5 working day. Half-day leave uses up to 0.5 scheduled day. The total is rounded once to the nearest paise and is an estimate for payroll review.</p>
         ${leave.policy_notes?.map((note) => `<p>${esc(note)}</p>`).join('') || ''}<p>Flexi leave is available after the 15th. Birthday and anniversary share one paid day. Balances reset every 1 October.</p>
       </div></details>`;
@@ -1549,7 +1555,8 @@
   function leavePolicyMarkup() {
     return `<details class="leave-preview-details"><summary>Staff leave policy and payroll rules</summary><div>
       <p><strong>Paid leave:</strong> annual limits are 18 regular, 1 Flexi and 1 shared birthday/anniversary day, reset on 1 October without annual carryover. Regular paid leave is capped at 1.5 scheduled days in each month with no monthly accumulation. Additional regular leave is unpaid. Flexi is available only after the 15th and needs no explanation.</p>
-      <p><strong>Unpaid leave:</strong> all scheduled leave on the 1st–12th is unpaid, including special categories. Only scheduled working time is deducted: weekends and full holidays are excluded; published working weekends count; half holidays have 0.5 working day. Daily rate = monthly gross ÷ actual calendar days in the salary month. The monthly limit replaces the former three-consecutive-day deduction rule.</p>
+      <p><strong>Unpaid leave</strong> Standard leave categories are unpaid on the 1st–12th. Deductions cover scheduled working time, including published working weekends. Half holidays have 0.5 working day. The daily rate is monthly gross divided by the calendar days in the salary month.</p>
+      <p><strong>Paid leave exceptions</strong> An admin can approve a paid exception with a reason. The employee is paid for the scheduled leave and keeps their leave balance.</p>
       <p><strong>Requests:</strong> apply at least three days ahead unless there is an emergency. For three or more planned scheduled leave days, inform management a month ahead or at least 20 days before; health emergencies are exempt. Management should respond within one business day. Leave adjoining a long weekend or public holiday needs specific approval and may be refused. Half-day leave counts up to 0.5 scheduled day.</p>
       <p><strong>Short Day:</strong> The first approved Short Day each month is free. Each additional approved date charges 0.25 day against regular leave. The 1st–12th and any amount beyond available paid leave are unpaid. Up to two hours can be recorded on each Short Day. Automatic low-hours flags are for review.</p>
       <p><strong>Before payroll:</strong> check dates, scheduled working time, approvals and paid/unpaid treatment. Management must check and explain deductions; ask for attendance or leave errors to be corrected before payroll is processed.</p>
@@ -1610,10 +1617,10 @@
       <p class="leave-form-intro">Saves as approved and notifies the employee.</p>
       <div class="form-row"><div class="field"><label>Employee</label><select id="mlUser" ${locked}>${choices.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Duration</label><select id="mlKind" ${locked}><option value="FULL">Full day(s)</option><option value="HALF">Half day</option></select></div></div>
-      <div class="form-row one"><div class="field"><label>Leave category</label><select id="mlCategory">${leaveCategoryOptions()}</select></div></div>
+      <div class="form-row one"><div class="field"><label for="mlCategory">Leave category</label><select id="mlCategory">${leaveCategoryOptions(true)}</select></div></div>
       <div class="form-row"><div class="field"><label>Start date</label><input type="date" id="mlStart" value="${esc(date)}" ${locked}></div>
         <div class="field"><label>End date</label><input type="date" id="mlEnd" value="${esc(date)}" ${locked}></div></div>
-      <div class="form-row one"><div class="field"><label>Reason (optional)</label><input id="mlReason" placeholder="e.g. Called in sick"></div></div>
+      <div class="form-row one"><div class="field"><label for="mlReason" id="mlReasonLabel">Reason (optional)</label><input id="mlReason" maxlength="500" placeholder="e.g. Called in sick"></div></div>
       <div class="form-row one"><div class="field"><label for="mlEmergency">Emergency exception</label><select id="mlEmergency"><option value="NONE">None — planned leave</option><option value="HEALTH">Health emergency</option><option value="OTHER">Other emergency</option></select></div></div>
       <div id="mlPreview" class="leave-payment-preview" role="status" aria-live="polite"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="mCancel">Cancel</button><button class="btn btn-primary" id="mSave">Mark leave</button></div>`);
@@ -1871,8 +1878,10 @@
       emergency_type: emergency.value,
       ...(admin ? { user_id: Number(user.value) } : {}),
     });
+    const paidException = () => admin && category.value === 'PAID_EXCEPTION';
+    const ready = () => valid && !busy && (!paidException() || Boolean(reason.value.trim()));
     const updateButton = () => {
-      button.disabled = !valid || busy;
+      button.disabled = !ready();
     };
     const refresh = async () => {
       const current = ++version;
@@ -1880,8 +1889,13 @@
       updateButton();
       end.disabled = fixedDate || kind.value === 'HALF';
       if (end.disabled || end.value < start.value) end.value = start.value;
-      const reasonLabel = $('#lReasonLabel');
-      if (!admin && reasonLabel) {
+      const reasonLabel = $('#' + prefix + 'ReasonLabel');
+      if (admin) {
+        const required = paidException();
+        reasonLabel.textContent = required ? 'Reason (required)' : 'Reason (optional)';
+        reason.required = required;
+        reason.placeholder = required ? 'e.g. Compensatory leave for Saturday overtime' : 'e.g. Called in sick';
+      } else if (reasonLabel) {
         const flexi = category.value === 'FLEXI';
         reasonLabel.textContent = flexi ? 'Reason (optional)' : 'Reason *';
         reason.required = !flexi;
@@ -1908,10 +1922,11 @@
     [start, end, kind, category, emergency, user]
       .filter(Boolean)
       .forEach((el) => el.addEventListener('change', refresh));
+    if (admin) reason.addEventListener('input', updateButton);
     refresh();
     return {
       payload,
-      ready: () => valid && !busy,
+      ready,
       connected: () => button.isConnected,
       saving: (value) => {
         busy = value;
