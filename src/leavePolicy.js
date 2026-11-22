@@ -7,6 +7,7 @@ const {
   EFFECTIVE,
   ENTITLEMENT,
   MONTHLY_REGULAR,
+  PAID_EXCEPTION,
   periodFor: leavePeriod,
   calendarFrom,
   scheduledDays,
@@ -18,6 +19,7 @@ const CATEGORIES = Object.freeze({
   FLEXI: 'Flexi leave',
   BIRTHDAY: 'Birthday leave',
   ANNIVERSARY: 'Anniversary leave',
+  [PAID_EXCEPTION]: 'Paid leave exception',
 });
 const getUser = db.prepare('SELECT id, leave_balance FROM users WHERE id=?');
 const getLeaves = db.prepare(
@@ -178,7 +180,7 @@ async function syncAllBalancesAsync() {
   }
 }
 
-function normalizeLeave(body, { allowPast = false, requireReason = true } = {}) {
+function normalizeLeave(body, { allowPast = false, requireReason = true, allowPaidException = false } = {}) {
   const start_date = String(body.start_date || ''),
     kind = String(body.kind || 'FULL').toUpperCase();
   const end_date = kind === 'HALF' ? start_date : String(body.end_date || start_date);
@@ -192,6 +194,8 @@ function normalizeLeave(body, { allowPast = false, requireReason = true } = {}) 
   };
   if (!['FULL', 'HALF'].includes(kind)) fail('Choose full day or half day.');
   if (!Object.hasOwn(CATEGORIES, category)) fail('Choose a valid leave category.');
+  if (category === PAID_EXCEPTION && !allowPaidException)
+    throw Object.assign(new Error('Only admins can record paid leave exceptions.'), { status: 403 });
   if (!['NONE', 'HEALTH', 'OTHER'].includes(emergency_type)) fail('Choose a valid emergency option.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start_date) || !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) fail('Invalid date range.');
   const span = inclusiveDays(start_date, end_date);
@@ -228,6 +232,9 @@ function assertAvailable(userId, leave, excludeRequestId = null) {
   // Regular leave exceeding the monthly allowance is accepted as unpaid.
   // Flexi/special categories retain their separate annual paid entitlement.
   const result = calculationFor(userId, leave, excludeRequestId).result;
+  if (leave.category === PAID_EXCEPTION && !result.paid_days) {
+    throw Object.assign(new Error('Choose at least one scheduled working day for paid leave.'), { status: 400 });
+  }
   if (leave.category !== 'REGULAR' && result.date_lines.some((line) => line.unpaid_reason === 'ANNUAL_LIMIT')) {
     throw Object.assign(
       new Error(
@@ -242,6 +249,7 @@ module.exports = {
   EFFECTIVE,
   ENTITLEMENT,
   CATEGORIES,
+  PAID_EXCEPTION,
   periodFor,
   describeLeave,
   describeLeaves,

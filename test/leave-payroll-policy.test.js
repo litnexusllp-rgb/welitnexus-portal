@@ -131,6 +131,53 @@ test('complete leave treatment agrees across payroll, balances, previews and Sho
     assert.equal(row(id).approved_short_day_minutes, 60);
   });
 
+  await t.test('admin paid leave exceptions replace automatic absences without using leave balance', async () => {
+    const id = add();
+    salary(id);
+    leave(id, '2026-10-13');
+    leave(id, '2026-10-14', 'HALF');
+    leave(id, '2026-10-16');
+    const flagged = leave(id, '2026-10-19', 'FULL', 'PENDING');
+    db.prepare('UPDATE leaves SET reason=? WHERE id=?').run('Auto-flagged: no clock-in on 2026-10-19', flagged);
+    const payload = {
+      user_id: id,
+      category: 'PAID_EXCEPTION',
+      start_date: '2026-10-19',
+      kind: 'FULL',
+      reason: 'Compensatory leave for approved Saturday overtime',
+      replace_auto_absence: true,
+    };
+    const before = policy.balances(id, '2026-10-19');
+    assert.equal(before.monthly_regular.available, 0);
+    assert.equal((await req(id, 'leaves/preview', 'POST', payload)).status, 403);
+    assert.equal((await req(id, 'leaves', 'POST', payload)).status, 403);
+    assert.equal((await req(admin, 'leaves/admin', 'POST', { ...payload, reason: ' ' })).status, 400);
+    assert.equal((await req(admin, 'leaves/admin', 'POST', { ...payload, start_date: '2026-10-18' })).status, 400);
+    const preview = await req(admin, 'leaves/preview', 'POST', payload);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.leave.paid_days, 1);
+    assert.equal(preview.body.leave.deduction_estimate.total_paise, 0);
+    const saved = await req(admin, 'leaves/admin', 'POST', payload);
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.leave.status, 'APPROVED');
+    assert.equal(saved.body.leave.decided_by, admin);
+    assert.equal(saved.body.leave.reason, payload.reason);
+    assert.equal(saved.body.leave.paid_days, 1);
+    assert.equal(saved.body.leave.unpaid_days, 0);
+    assert.equal(db.prepare('SELECT status FROM leaves WHERE id=?').get(flagged).status, 'CANCELLED');
+    assert.equal((await req(admin, 'leaves/admin', 'POST', payload)).status, 409);
+    const early = await req(admin, 'leaves/admin', 'POST', { ...payload, start_date: '2026-10-05' });
+    assert.equal(early.status, 200);
+    assert.equal(early.body.leave.paid_days, 1);
+    assert.deepEqual(policy.balances(id, '2026-10-19'), before);
+    const calendar = await req(id, 'reports/my-attendance?start=2026-10-19&end=2026-10-19');
+    assert.equal(calendar.body.rows[0].leavePay.paid_days, 1);
+    assert.equal(calendar.body.rows[0].leavePay.unpaid_days, 0);
+    assert.equal(row(id).paid_leave_days, 3.5);
+    assert.equal(row(id).unpaid_leave_days, 1);
+    assert.equal(row(id).deduction_paise, 100000);
+  });
+
   await t.test('admin can mark a date as Short Day without saving a time or changing punches', async () => {
     const id = add();
     salary(id);
